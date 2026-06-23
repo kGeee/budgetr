@@ -8,6 +8,20 @@
       "when": 1780037013359,
       "tag": "0000_numerous_jack_power",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1780283933207,
+      "tag": "0001_nice_ultimates",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780285975623,
+      "tag": "0002_steep_expediter",
+      "breakpoints": true
     }
   ]
 }

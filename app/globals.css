@@ -1,40 +1,149 @@
 @import "tailwindcss";
 
+/*
+  budgetr — "Private Ledger" editorial fintech theme.
+  Warm ivory ink on deep forest-black, brass hairlines, jade/coral semantics.
+*/
 :root {
-  --background: #0b0d10;
-  --surface: #14181d;
-  --surface-2: #1b2027;
-  --border: #262c34;
-  --foreground: #e7ebf0;
-  --muted: #8b95a3;
-  --accent: #4ade80;
-  --negative: #f87171;
-  --positive: #4ade80;
+  --ink: #090c0b; /* canvas */
+  --panel: #101413; /* card surface */
+  --panel-2: #161c1a; /* raised / hover */
+  --line: #212a27; /* hairline border */
+  --line-strong: #303b37;
+  --paper: #ece7da; /* primary text — warm ivory */
+  --muted: #8b948c; /* secondary text */
+  --faint: #5d655f; /* tertiary / axis */
+  --jade: #6fe3a6; /* positive / accent */
+  --jade-deep: #2f9d72;
+  --coral: #f0897b; /* negative */
+  --brass: #cbb07c; /* premium hairline accents */
+  --brass-dim: #8a7748;
+
+  --radius: 14px;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-border: var(--border);
-  --color-foreground: var(--foreground);
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-paper: var(--paper);
   --color-muted: var(--muted);
-  --color-accent: var(--accent);
-  --color-positive: var(--positive);
-  --color-negative: var(--negative);
+  --color-jade: var(--jade);
+  --color-coral: var(--coral);
+  --color-brass: var(--brass);
+
+  --font-display: var(--font-display), Georgia, serif;
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
 }
 
 * {
-  border-color: var(--border);
+  border-color: var(--line);
+}
+
+html {
+  background: var(--ink);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
+/* Atmospheric base: a soft jade aurora bleeding from the top-left,
+   plus a faint grain so the dark canvas reads like paper, not a void. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(1100px 600px at 12% -8%, rgba(111, 227, 166, 0.07), transparent 60%),
+    radial-gradient(900px 520px at 100% 0%, rgba(203, 176, 124, 0.05), transparent 55%);
+  pointer-events: none;
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.035;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+}
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Editorial uppercase micro-label used for section/eyebrow text. */
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+::selection {
+  background: rgba(111, 227, 166, 0.25);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: 3px solid var(--ink);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brass-dim);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise {
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

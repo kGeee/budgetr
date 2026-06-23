@@ -1,59 +1,52 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { Wallet, LayoutDashboard, ArrowLeftRight, LineChart, Landmark } from "lucide-react";
+import { Fraunces, Hanken_Grotesk, Spline_Sans_Mono } from "next/font/google";
+import { Sidebar, MobileNav } from "@/components/sidebar";
 import { SyncButton } from "@/components/sync-button";
+import { getAccounts } from "@/lib/queries";
 import "./globals.css";
 
+// Read live account balances at request time for the sidebar.
+export const dynamic = "force-dynamic";
+
+const display = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-display",
+  style: ["normal", "italic"],
+  axes: ["opsz"],
+});
+
+const sans = Hanken_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  weight: ["400", "500", "600", "700"],
+});
+
+const mono = Spline_Sans_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  weight: ["400", "500"],
+});
+
 export const metadata: Metadata = {
-  title: "budgetr",
-  description: "Personal net worth, spending & income tracker",
+  title: "budgetr — private ledger",
+  description: "Net worth, spending & income — read-only, on your machine.",
 };
 
-const nav = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/accounts", label: "Accounts", icon: Landmark },
-  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
-  { href: "/investments", label: "Investments", icon: LineChart },
-];
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const accounts = getAccounts();
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
       <body>
-        <div className="flex min-h-screen">
-          <aside className="hidden w-56 shrink-0 flex-col border-r bg-[var(--surface)] p-4 md:flex">
-            <div className="mb-8 flex items-center gap-2 px-2">
-              <Wallet className="text-[var(--accent)]" size={22} />
-              <span className="text-lg font-semibold">budgetr</span>
-            </div>
-            <nav className="flex flex-col gap-1">
-              {nav.map(({ href, label, icon: Icon }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
-                >
-                  <Icon size={18} />
-                  {label}
-                </Link>
-              ))}
-            </nav>
-          </aside>
-
+        <div className="mx-auto flex min-h-dvh max-w-[1500px]">
+          <Sidebar accounts={accounts} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex items-center justify-between border-b bg-[var(--surface)] px-6 py-3">
-              <nav className="flex gap-4 md:hidden">
-                {nav.map(({ href, label }) => (
-                  <Link key={href} href={href} className="text-sm text-[var(--muted)]">
-                    {label}
-                  </Link>
-                ))}
-              </nav>
+            <header className="sticky top-0 z-20 flex items-center gap-4 border-b border-line bg-[color-mix(in_srgb,var(--ink)_82%,transparent)] px-5 py-3 backdrop-blur-xl sm:px-8">
+              <MobileNav />
               <div className="ml-auto">
                 <SyncButton />
               </div>
             </header>
-            <main className="flex-1 p-6">{children}</main>
+            <main className="flex-1 px-5 py-8 sm:px-8 lg:py-10">{children}</main>
           </div>
         </div>
       </body>

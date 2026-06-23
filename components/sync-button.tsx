@@ -20,8 +20,8 @@ export function SyncButton() {
   }
 
   return (
-    <Button variant="secondary" onClick={sync} disabled={syncing}>
-      <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
+    <Button variant="secondary" size="sm" onClick={sync} disabled={syncing} aria-label="Sync accounts">
+      <RefreshCw size={15} className={syncing ? "animate-spin" : ""} />
       {syncing ? "Syncing…" : "Sync"}
     </Button>
   );

@@ -1,14 +1,25 @@
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHead } from "@/components/page-head";
 import { CashflowChart, CategoryChart, NetWorthChart } from "@/components/charts";
+import { CategoryIcon } from "@/components/category-pill";
+import { BudgetBar } from "@/components/budget-bar";
+import { ReviewInbox } from "@/components/review-inbox";
+import { UpcomingBills } from "@/components/upcoming-bills";
 import { PlaidLink } from "@/components/plaid-link";
+import Link from "next/link";
 import {
+  getBudgetsWithSpend,
+  getCategories,
   getItems,
+  getMonthlyBudgetSummary,
   getMonthlyCashflow,
   getNetWorth,
   getNetWorthSeries,
   getRecentTransactions,
   getSpendingByCategory,
-  prettyCategory,
+  getTransactionsToReview,
+  getUpcomingBills,
 } from "@/lib/queries";
 import { formatCurrency } from "@/lib/utils";
 
@@ -16,108 +27,274 @@ export const dynamic = "force-dynamic";
 
 export default function Dashboard() {
   const items = getItems();
+
+  if (items.length === 0) return <EmptyState />;
+
   const nw = getNetWorth();
   const series = getNetWorthSeries();
   const cashflow = getMonthlyCashflow();
   const categories = getSpendingByCategory(30);
-  const recent = getRecentTransactions(8);
+  const recent = getRecentTransactions(7);
+  const toReview = getTransactionsToReview(6);
+  const reviewTotal = getTransactionsToReview(999).length;
+  const allCategories = getCategories();
+  const budgetSummary = getMonthlyBudgetSummary();
+  const budgetRows = getBudgetsWithSpend();
+  const topBudgets = budgetRows.filter((b) => b.budget != null).slice(0, 5);
+  const overBudget = budgetSummary.left < 0;
+  const budgetMonthLabel = new Date(`${budgetSummary.month}-01T00:00:00`).toLocaleDateString(
+    "en-US",
+    { month: "long", year: "numeric" },
+  );
+  const upcoming = getUpcomingBills(14);
+
+  const first = series[0]?.netWorth ?? nw.net;
+  const change = nw.net - first;
+  const changePct = first !== 0 ? (change / Math.abs(first)) * 100 : 0;
 
   const thisMonth = cashflow[cashflow.length - 1];
-
-  if (items.length === 0) {
-    return (
-      <div className="mx-auto max-w-md py-20 text-center">
-        <h1 className="mb-2 text-2xl font-semibold">Welcome to budgetr</h1>
-        <p className="mb-6 text-sm text-[var(--muted)]">
-          Connect your accounts to start tracking net worth, spending, and income. In Plaid
-          Sandbox, search any bank and log in with <code>user_good</code> / <code>pass_good</code>.
-        </p>
-        <div className="flex justify-center">
-          <PlaidLink />
-        </div>
-      </div>
-    );
-  }
+  const netFlow = thisMonth ? thisMonth.income - thisMonth.expenses : 0;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
+    <div className="space-y-7">
+      <PageHead title="Overview" />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label="Net worth" value={nw.net} accent />
-        <Stat label="Assets" value={nw.assets} />
-        <Stat label="Liabilities" value={-nw.liabilities} />
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Net worth over time</CardTitle>
-        </CardHeader>
-        <NetWorthChart data={series} />
+      {/* Hero — the headline number, set like a private-bank statement. */}
+      <Card className="rise overflow-hidden">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="eyebrow">Total net worth</p>
+            <p className="mt-2 font-display text-5xl leading-none tracking-tight tabular sm:text-6xl">
+              {formatCurrency(nw.net)}
+            </p>
+            <div className="mt-4 flex items-center gap-4">
+              <Delta value={change} pct={changePct} />
+              <span className="text-sm text-[var(--muted)]">since first snapshot</span>
+            </div>
+          </div>
+          <div className="flex gap-8">
+            <MiniStat label="Assets" value={nw.assets} tone="paper" />
+            <span className="w-px self-stretch bg-line" />
+            <MiniStat label="Liabilities" value={nw.liabilities} tone="coral" />
+          </div>
+        </div>
+        <div className="mt-7">
+          <NetWorthChart data={series} />
+        </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
+      {/* Cashflow + category */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+        <Card className="lg:col-span-3">
           <CardHeader>
-            <CardTitle>Income vs spending (monthly)</CardTitle>
+            <CardTitle>Income vs spending</CardTitle>
             {thisMonth && (
-              <span className="text-xs text-[var(--muted)]">
-                This month: net {formatCurrency(thisMonth.income - thisMonth.expenses)}
+              <span
+                className={`mono text-sm ${netFlow >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
+              >
+                {netFlow >= 0 ? "+" : "−"}
+                {formatCurrency(Math.abs(netFlow))} this month
               </span>
             )}
           </CardHeader>
           <CashflowChart data={cashflow} />
         </Card>
 
-        <Card>
+        <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Spending by category (30d)</CardTitle>
+            <CardTitle>Spending · 30 days</CardTitle>
           </CardHeader>
           <CategoryChart data={categories} />
         </Card>
       </div>
 
-      <Card>
+      {/* Monthly spending budget + top categories */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Monthly spending · {budgetMonthLabel}</CardTitle>
+            <Link href="/budgets" className="text-xs text-[var(--brass)] hover:underline">
+              Budgets →
+            </Link>
+          </CardHeader>
+          {budgetSummary.totalBudget > 0 ? (
+            <>
+              <p
+                className={`font-display text-4xl tabular ${overBudget ? "text-[var(--coral)]" : ""}`}
+              >
+                {formatCurrency(Math.abs(budgetSummary.left))}
+              </p>
+              <p className="mt-2 text-sm text-[var(--muted)]">
+                {overBudget ? "over " : "left of "}
+                {formatCurrency(budgetSummary.totalBudget)} budgeted
+              </p>
+              <div className="mt-5 h-2 overflow-hidden rounded-full bg-[var(--panel-2)]">
+                <div
+                  className={`h-full rounded-full ${overBudget ? "bg-[var(--coral)]" : "bg-[var(--jade)]"}`}
+                  style={{
+                    width: `${Math.min(
+                      (budgetSummary.totalSpent / budgetSummary.totalBudget) * 100,
+                      100,
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="mono mt-2 text-xs text-[var(--muted)]">
+                {formatCurrency(budgetSummary.totalSpent)} spent
+              </p>
+            </>
+          ) : (
+            <div className="py-2">
+              <p className="text-sm text-[var(--muted)]">
+                No budgets yet. Set monthly limits to track spending against plan.
+              </p>
+              <Link
+                href="/budgets"
+                className="mt-4 inline-flex items-center rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[#06120c] hover:brightness-105"
+              >
+                Set budgets
+              </Link>
+            </div>
+          )}
+        </Card>
+
+        <Card className="lg:col-span-3">
+          <CardHeader>
+            <CardTitle>Top categories</CardTitle>
+          </CardHeader>
+          {topBudgets.length > 0 ? (
+            <div className="divide-y divide-line/60">
+              {topBudgets.map((row) => (
+                <BudgetBar key={row.categoryId} row={row} />
+              ))}
+            </div>
+          ) : (
+            <p className="py-2 text-sm text-[var(--muted)]">
+              Budgeted categories will appear here once you set limits.
+            </p>
+          )}
+        </Card>
+      </div>
+
+      {/* Review queue */}
+      {toReview.length > 0 && (
+        <ReviewInbox transactions={toReview} categories={allCategories} total={reviewTotal} />
+      )}
+
+      {/* Recent activity + upcoming bills */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+        <Card className="lg:col-span-3">
         <CardHeader>
           <CardTitle>Recent activity</CardTitle>
         </CardHeader>
-        <ul className="divide-y">
-          {recent.map((t) => (
-            <li key={t.id} className="flex items-center justify-between py-2.5 text-sm">
-              <div className="min-w-0">
-                <p className="truncate font-medium">{t.merchantName ?? t.name}</p>
-                <p className="text-xs text-[var(--muted)]">
-                  {t.date} · {prettyCategory(t.category)} · {t.accountName}
-                </p>
-              </div>
-              <span
-                className={`tabular shrink-0 ${t.amount < 0 ? "text-[var(--positive)]" : ""}`}
+        <ul className="-mx-2">
+          {recent.map((t) => {
+            const income = t.amount < 0;
+            return (
+              <li
+                key={t.id}
+                className="flex items-center gap-4 rounded-lg px-2 py-3 transition-colors hover:bg-[var(--panel-2)]"
               >
-                {t.amount < 0 ? "+" : "-"}
-                {formatCurrency(Math.abs(t.amount), t.currency ?? "USD")}
-              </span>
-            </li>
-          ))}
+                <span
+                  className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border ${
+                    income
+                      ? "border-[color-mix(in_srgb,var(--jade)_35%,transparent)] text-[var(--jade)]"
+                      : "border-line text-[var(--muted)]"
+                  }`}
+                >
+                  {income ? <ArrowDownRight size={16} /> : <ArrowUpRight size={16} />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{t.displayName}</p>
+                  <p className="flex items-center gap-1.5 truncate text-xs text-[var(--muted)]">
+                    <CategoryIcon icon={t.categoryIcon} size={12} className="text-[var(--brass)]" />
+                    {t.categoryName} · {t.accountName}
+                  </p>
+                </div>
+                <span className="hidden text-xs text-[var(--muted)] sm:block">{t.date}</span>
+                <span
+                  className={`mono w-28 shrink-0 text-right text-sm ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
+                >
+                  {income ? "+" : "−"}
+                  {formatCurrency(Math.abs(t.amount), t.currency ?? "USD")}
+                </span>
+              </li>
+            );
+          })}
           {recent.length === 0 && (
-            <li className="py-4 text-sm text-[var(--muted)]">No transactions yet — hit Sync.</li>
+            <li className="px-2 py-6 text-sm text-[var(--muted)]">No transactions yet — hit Sync.</li>
           )}
         </ul>
-      </Card>
+        </Card>
+
+        <div className="lg:col-span-2">
+          <UpcomingBills bills={upcoming} />
+        </div>
+      </div>
     </div>
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: number; accent?: boolean }) {
+function Delta({ value, pct }: { value: number; pct: number }) {
+  const up = value >= 0;
   return (
-    <Card>
-      <CardTitle>{label}</CardTitle>
+    <span
+      className={`mono inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm ${
+        up
+          ? "border-[color-mix(in_srgb,var(--jade)_35%,transparent)] bg-[color-mix(in_srgb,var(--jade)_10%,transparent)] text-[var(--jade)]"
+          : "border-[color-mix(in_srgb,var(--coral)_35%,transparent)] bg-[color-mix(in_srgb,var(--coral)_10%,transparent)] text-[var(--coral)]"
+      }`}
+    >
+      {up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+      {up ? "+" : "−"}
+      {formatCurrency(Math.abs(value))} ({Math.abs(pct).toFixed(1)}%)
+    </span>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "paper" | "coral";
+}) {
+  return (
+    <div>
+      <p className="eyebrow">{label}</p>
       <p
-        className={`tabular mt-1 text-2xl font-semibold ${
-          accent ? "text-[var(--accent)]" : value < 0 ? "text-[var(--negative)]" : ""
-        }`}
+        className={`mt-1.5 font-display text-2xl tabular ${tone === "coral" ? "text-[var(--coral)]" : ""}`}
       >
         {formatCurrency(value)}
       </p>
-    </Card>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="mx-auto flex min-h-[70vh] max-w-lg flex-col items-center justify-center text-center">
+      <span className="grid h-14 w-14 place-items-center rounded-2xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-2xl text-[var(--brass)]">
+        ₿
+      </span>
+      <h1 className="mt-6 font-display text-4xl tracking-tight">Open your ledger</h1>
+      <p className="mt-3 text-[var(--muted)]">
+        Connect your card, brokerage, and bank to track net worth, spending, and income — all
+        read-only and stored on this machine. In Plaid Sandbox, search any bank and log in with{" "}
+        <code className="mono rounded bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--paper)]">
+          user_good
+        </code>{" "}
+        /{" "}
+        <code className="mono rounded bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--paper)]">
+          pass_good
+        </code>
+        .
+      </p>
+      <div className="mt-8">
+        <PlaidLink />
+      </div>
+    </div>
   );
 }

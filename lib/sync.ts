@@ -1,10 +1,20 @@
 import { db } from "@/db";
-import { accounts, holdings, items, securities, transactions, balanceSnapshots } from "@/db/schema";
+import {
+  accounts,
+  holdings,
+  items,
+  securities,
+  transactions,
+  balanceSnapshots,
+  recurringStreams,
+} from "@/db/schema";
 import { plaid } from "@/lib/plaid";
 import { decrypt } from "@/lib/crypto";
+import { applyTagRules } from "@/lib/tag-rules";
 import { signedBalance } from "@/lib/utils";
 import { eq } from "drizzle-orm";
 import type { Item } from "@/db/schema";
+import type { TransactionStream } from "plaid";
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -128,6 +138,10 @@ async function syncTransactions(item: Item, accessToken: string) {
     .where(eq(items.id, item.id))
     .run();
 
+  // Auto-tag the rows we just touched.
+  const touched = [...added, ...modified].map((t) => t.transaction_id);
+  applyTagRules(touched);
+
   return { added: added.length, modified: modified.length, removed: removed.length };
 }
 
@@ -194,12 +208,60 @@ async function syncInvestments(accessToken: string) {
   }
 }
 
+/** Pull recurring transaction streams (subscriptions, paychecks, bills). */
+async function syncRecurring(accessToken: string) {
+  try {
+    const res = await plaid.transactionsRecurringGet({ access_token: accessToken });
+    const now = new Date();
+
+    // Only persist streams whose account we actually have (FK safety).
+    const knownAccounts = new Set(
+      db.select({ id: accounts.id }).from(accounts).all().map((a) => a.id),
+    );
+
+    const upsert = (s: TransactionStream, direction: "inflow" | "outflow") => {
+      if (!knownAccounts.has(s.account_id)) return;
+      const row = {
+        id: s.stream_id,
+        accountId: s.account_id,
+        direction,
+        description: s.description ?? null,
+        merchantName: s.merchant_name ?? null,
+        category: s.personal_finance_category?.primary ?? null,
+        frequency: s.frequency ? String(s.frequency) : null,
+        averageAmount: s.average_amount?.amount ?? null,
+        lastAmount: s.last_amount?.amount ?? null,
+        lastDate: s.last_date ?? null,
+        predictedNextDate: s.predicted_next_date ?? null,
+        isoCurrencyCode: s.average_amount?.iso_currency_code ?? null,
+        isActive: s.is_active,
+        status: s.status ? String(s.status) : null,
+        updatedAt: now,
+      };
+      db.insert(recurringStreams)
+        .values(row)
+        .onConflictDoUpdate({ target: recurringStreams.id, set: row })
+        .run();
+    };
+
+    for (const s of res.data.inflow_streams) upsert(s, "inflow");
+    for (const s of res.data.outflow_streams) upsert(s, "outflow");
+  } catch (err: unknown) {
+    const code = (err as { response?: { data?: { error_code?: string } } })?.response?.data
+      ?.error_code;
+    if (code && code !== "PRODUCTS_NOT_SUPPORTED" && code !== "NO_ACCOUNTS") {
+      console.warn(`recurring sync skipped (${code})`);
+    }
+  }
+}
+
 export async function syncItem(item: Item) {
   const accessToken = decrypt(item.accessToken);
   // Accounts first so FK targets exist for transactions/holdings.
   await refreshAccounts(item, accessToken);
   const tx = await syncTransactions(item, accessToken);
   await syncInvestments(accessToken);
+  await syncRecurring(accessToken);
 
   db.update(items)
     .set({ status: "active", error: null, updatedAt: new Date() })

@@ -1,4 +1,12 @@
-import { sqliteTable, text, integer, real, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  uniqueIndex,
+  index,
+  primaryKey,
+} from "drizzle-orm/sqlite-core";
 
 /**
  * A Plaid "Item" = one connection to one financial institution.
@@ -50,8 +58,130 @@ export const transactions = sqliteTable(
     categoryDetailed: text("category_detailed"), // personal_finance_category.detailed
     pending: integer("pending", { mode: "boolean" }).notNull().default(false),
     paymentChannel: text("payment_channel"),
+    // --- User overlay (never written by Plaid sync; see lib/sync.ts set: clauses) ---
+    reviewed: integer("reviewed", { mode: "boolean" }).notNull().default(false),
+    userCategoryId: text("user_category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    notes: text("notes"),
   },
-  (t) => [index("tx_date_idx").on(t.date), index("tx_account_idx").on(t.accountId)],
+  (t) => [
+    index("tx_date_idx").on(t.date),
+    index("tx_account_idx").on(t.accountId),
+    index("tx_reviewed_idx").on(t.reviewed),
+  ],
+);
+
+/**
+ * User-facing spending/income categories. Seeded one-per-Plaid-primary so every
+ * transaction maps somewhere; users can add, rename, and archive their own.
+ * `plaidPrimary` is the personal_finance_category.primary this category absorbs
+ * (null for purely user-created categories).
+ */
+export const categories = sqliteTable(
+  "categories",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    icon: text("icon"), // lucide icon name or emoji
+    color: text("color"), // hex / token, optional
+    group: text("group").notNull().default("spending"), // income | spending | transfer
+    plaidPrimary: text("plaid_primary"), // maps a Plaid primary category here
+    sortOrder: integer("sort_order").notNull().default(0),
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => [uniqueIndex("category_plaid_primary_idx").on(t.plaidPrimary)],
+);
+
+export const tags = sqliteTable("tags", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  color: text("color"),
+});
+
+export const transactionTags = sqliteTable(
+  "transaction_tags",
+  {
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.transactionId, t.tagId] }),
+    index("transaction_tags_tag_idx").on(t.tagId),
+  ],
+);
+
+/** Rolling monthly budget — one amount per category. */
+export const budgets = sqliteTable("budgets", {
+  id: text("id").primaryKey(),
+  categoryId: text("category_id")
+    .notNull()
+    .unique()
+    .references(() => categories.id, { onDelete: "cascade" }),
+  amount: real("amount").notNull(),
+});
+
+/** Rolling monthly budget scoped to a tag — overlaps category budgets intentionally. */
+export const tagBudgets = sqliteTable("tag_budgets", {
+  id: text("id").primaryKey(),
+  tagId: text("tag_id")
+    .notNull()
+    .unique()
+    .references(() => tags.id, { onDelete: "cascade" }),
+  amount: real("amount").notNull(),
+});
+
+/**
+ * Auto-tagging rule: when a transaction's merchant/name contains `pattern`
+ * (stored lowercased), apply `tagId`. Applied on sync and backfilled on create.
+ */
+export const tagRules = sqliteTable(
+  "tag_rules",
+  {
+    id: text("id").primaryKey(),
+    pattern: text("pattern").notNull(),
+    label: text("label"), // human-readable vendor the rule was created from
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("tag_rules_tag_idx").on(t.tagId)],
+);
+
+/**
+ * Recurring transaction streams from Plaid /transactions/recurring/get.
+ * Plaid-owned (re-synced), keyed by stream_id.
+ */
+export const recurringStreams = sqliteTable(
+  "recurring_streams",
+  {
+    id: text("id").primaryKey(), // Plaid stream_id
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    direction: text("direction").notNull(), // inflow | outflow
+    description: text("description"),
+    merchantName: text("merchant_name"),
+    category: text("category"), // personal_finance_category.primary
+    frequency: text("frequency"), // WEEKLY | MONTHLY | ...
+    averageAmount: real("average_amount"),
+    lastAmount: real("last_amount"),
+    lastDate: text("last_date"), // YYYY-MM-DD
+    predictedNextDate: text("predicted_next_date"), // YYYY-MM-DD
+    isoCurrencyCode: text("iso_currency_code"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    status: text("status"), // MATURE | EARLY_DETECTION | ...
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    index("recurring_account_idx").on(t.accountId),
+    index("recurring_next_idx").on(t.predictedNextDate),
+  ],
 );
 
 export const securities = sqliteTable("securities", {
@@ -108,3 +238,9 @@ export type Transaction = typeof transactions.$inferSelect;
 export type Security = typeof securities.$inferSelect;
 export type Holding = typeof holdings.$inferSelect;
 export type BalanceSnapshot = typeof balanceSnapshots.$inferSelect;
+export type Category = typeof categories.$inferSelect;
+export type Tag = typeof tags.$inferSelect;
+export type Budget = typeof budgets.$inferSelect;
+export type TagBudget = typeof tagBudgets.$inferSelect;
+export type TagRule = typeof tagRules.$inferSelect;
+export type RecurringStream = typeof recurringStreams.$inferSelect;

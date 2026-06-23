@@ -5,6 +5,7 @@ import {
   AreaChart,
   Bar,
   BarChart,
+  CartesianGrid,
   Cell,
   Pie,
   PieChart,
@@ -16,44 +17,69 @@ import {
 import { format, parseISO } from "date-fns";
 import { formatCompactCurrency, formatCurrency } from "@/lib/utils";
 
+// Editorial palette: jade + brass anchored, harmonious cool/warm spread.
 const PIE_COLORS = [
-  "#4ade80", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa",
-  "#34d399", "#f87171", "#22d3ee", "#fb923c", "#c084fc",
+  "#6fe3a6", "#cbb07c", "#7fb2e0", "#f0897b", "#b59ce0",
+  "#5fc9c0", "#e0c36f", "#9ad17f", "#e08fb8", "#8b948c",
 ];
 
-const axis = { stroke: "#8b95a3", fontSize: 12 };
+const GRID = "#212a27";
+const tick = { fill: "#8b948c", fontSize: 11, fontFamily: "var(--font-mono)" };
+
+const tooltipStyle = {
+  background: "#101413",
+  border: "1px solid #303b37",
+  borderRadius: 12,
+  fontSize: 12,
+  color: "#ece7da",
+  boxShadow: "0 20px 40px -24px rgba(0,0,0,0.9)",
+  fontFamily: "var(--font-mono)",
+};
+const labelStyle = { color: "#8b948c", marginBottom: 2 };
 
 export function NetWorthChart({ data }: { data: { date: string; netWorth: number }[] }) {
-  if (data.length === 0) return <Empty label="No snapshots yet — sync to start tracking." />;
+  if (data.length === 0)
+    return <Empty label="No snapshots yet" hint="Sync to begin charting your net worth." />;
   return (
-    <ResponsiveContainer width="100%" height={260}>
-      <AreaChart data={data} margin={{ left: 8, right: 8, top: 8 }}>
+    <ResponsiveContainer width="100%" height={280}>
+      <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
         <defs>
           <linearGradient id="nw" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#4ade80" stopOpacity={0.35} />
-            <stop offset="100%" stopColor="#4ade80" stopOpacity={0} />
+            <stop offset="0%" stopColor="#6fe3a6" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="#6fe3a6" stopOpacity={0} />
           </linearGradient>
         </defs>
+        <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis
           dataKey="date"
           tickFormatter={(d) => format(parseISO(d), "MMM d")}
-          tick={axis}
+          tick={tick}
           tickLine={false}
-          axisLine={false}
+          axisLine={{ stroke: GRID }}
+          minTickGap={28}
         />
         <YAxis
           tickFormatter={(v) => formatCompactCurrency(v)}
-          tick={axis}
+          tick={tick}
           tickLine={false}
           axisLine={false}
-          width={56}
+          width={58}
         />
         <Tooltip
           contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value) => [formatCurrency(Number(value)), "Net worth"]}
           labelFormatter={(d) => format(parseISO(d as string), "PP")}
         />
-        <Area type="monotone" dataKey="netWorth" stroke="#4ade80" strokeWidth={2} fill="url(#nw)" />
+        <Area
+          type="monotone"
+          dataKey="netWorth"
+          stroke="#6fe3a6"
+          strokeWidth={2.5}
+          fill="url(#nw)"
+          activeDot={{ r: 4, fill: "#6fe3a6", stroke: "#090c0b", strokeWidth: 2 }}
+        />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -64,68 +90,88 @@ export function CashflowChart({
 }: {
   data: { month: string; income: number; expenses: number }[];
 }) {
-  if (data.length === 0) return <Empty label="No transactions yet." />;
+  if (data.length === 0) return <Empty label="No activity yet" hint="Connect an account to see cashflow." />;
   return (
     <ResponsiveContainer width="100%" height={260}>
-      <BarChart data={data} margin={{ left: 8, right: 8, top: 8 }}>
+      <BarChart data={data} margin={{ left: 4, right: 8, top: 8 }} barGap={4}>
+        <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis
           dataKey="month"
           tickFormatter={(m) => format(parseISO(m + "-01"), "MMM")}
-          tick={axis}
+          tick={tick}
           tickLine={false}
-          axisLine={false}
+          axisLine={{ stroke: GRID }}
         />
         <YAxis
           tickFormatter={(v) => formatCompactCurrency(v)}
-          tick={axis}
+          tick={tick}
           tickLine={false}
           axisLine={false}
-          width={56}
+          width={58}
         />
         <Tooltip
           contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ fill: "rgba(255,255,255,0.04)" }}
           formatter={(value, name) => [
             formatCurrency(Number(value)),
             name === "income" ? "Income" : "Expenses",
           ]}
           labelFormatter={(m) => format(parseISO(m + "-01"), "MMMM yyyy")}
-          cursor={{ fill: "#ffffff10" }}
         />
-        <Bar dataKey="income" fill="#4ade80" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="expenses" fill="#f87171" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="income" fill="#6fe3a6" radius={[3, 3, 0, 0]} maxBarSize={26} />
+        <Bar dataKey="expenses" fill="#f0897b" radius={[3, 3, 0, 0]} maxBarSize={26} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
 export function CategoryChart({ data }: { data: { category: string; total: number }[] }) {
-  if (data.length === 0) return <Empty label="No spending in this period." />;
-  const top = data.slice(0, 10);
+  if (data.length === 0) return <Empty label="No spending" hint="Nothing recorded in this window." />;
+  const top = data.slice(0, 8);
+  const total = top.reduce((s, d) => s + d.total, 0);
   return (
-    <div className="flex flex-col items-center gap-4 sm:flex-row">
-      <div className="w-full max-w-[220px]">
-        <ResponsiveContainer width="100%" height={220}>
+    <div className="flex flex-col items-center gap-6 sm:flex-row">
+      <div className="relative w-full max-w-[200px] shrink-0">
+        <ResponsiveContainer width="100%" height={200}>
           <PieChart>
-            <Pie data={top} dataKey="total" nameKey="category" innerRadius={55} outerRadius={90} paddingAngle={2}>
+            <Pie
+              data={top}
+              dataKey="total"
+              nameKey="category"
+              innerRadius={62}
+              outerRadius={92}
+              paddingAngle={2.5}
+              stroke="none"
+            >
               {top.map((_, i) => (
-                <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} stroke="none" />
+                <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
               ))}
             </Pie>
-            <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
+            <Tooltip
+              contentStyle={tooltipStyle}
+              formatter={(value) => formatCurrency(Number(value))}
+            />
           </PieChart>
         </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="eyebrow">Total</span>
+          <span className="font-display text-lg text-[var(--paper)] tabular">
+            {formatCompactCurrency(total)}
+          </span>
+        </div>
       </div>
-      <ul className="w-full flex-1 space-y-1.5 text-sm">
+      <ul className="w-full flex-1 space-y-2 text-sm">
         {top.map((d, i) => (
-          <li key={d.category} className="flex items-center justify-between">
-            <span className="flex items-center gap-2 text-[var(--muted)]">
+          <li key={d.category} className="flex items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2.5 text-[var(--muted)]">
               <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
                 style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}
               />
-              {d.category}
+              <span className="truncate">{d.category}</span>
             </span>
-            <span className="tabular text-[var(--foreground)]">{formatCurrency(d.total)}</span>
+            <span className="mono shrink-0 text-[var(--paper)]">{formatCurrency(d.total)}</span>
           </li>
         ))}
       </ul>
@@ -133,18 +179,11 @@ export function CategoryChart({ data }: { data: { category: string; total: numbe
   );
 }
 
-const tooltipStyle = {
-  background: "#1b2027",
-  border: "1px solid #262c34",
-  borderRadius: 8,
-  fontSize: 12,
-  color: "#e7ebf0",
-};
-
-function Empty({ label }: { label: string }) {
+function Empty({ label, hint }: { label: string; hint: string }) {
   return (
-    <div className="flex h-[220px] items-center justify-center text-sm text-[var(--muted)]">
-      {label}
+    <div className="flex h-[220px] flex-col items-center justify-center gap-1 text-center">
+      <p className="font-display text-base text-[var(--paper)]">{label}</p>
+      <p className="text-sm text-[var(--muted)]">{hint}</p>
     </div>
   );
 }

@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePlaidLink, type PlaidLinkOnSuccessMetadata } from "react-plaid-link";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Button, type ButtonProps } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 
-export function PlaidLink() {
+export function PlaidLink({ variant = "primary" }: { variant?: ButtonProps["variant"] }) {
   const router = useRouter();
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -18,7 +18,7 @@ export function PlaidLink() {
       .then((r) => r.json())
       .then((d) => {
         if (d.link_token) setLinkToken(d.link_token);
-        else setError("Could not create link token. Check your Plaid keys in .env.local.");
+        else setError("Could not create a link token. Add your Plaid keys to .env.local.");
       })
       .catch(() => setError("Could not reach the server."));
   }, []);
@@ -43,13 +43,17 @@ export function PlaidLink() {
   const { open, ready } = usePlaidLink({ token: linkToken, onSuccess });
 
   if (error) {
-    return <p className="text-sm text-[var(--negative)]">{error}</p>;
+    return (
+      <p className="rounded-lg border border-[color-mix(in_srgb,var(--coral)_40%,transparent)] bg-[color-mix(in_srgb,var(--coral)_8%,transparent)] px-3 py-2 text-sm text-[var(--coral)]">
+        {error}
+      </p>
+    );
   }
 
   return (
-    <Button onClick={() => open()} disabled={!ready || !linkToken || loading}>
-      <Plus size={16} />
-      {loading ? "Connecting…" : "Connect an account"}
+    <Button variant={variant} onClick={() => open()} disabled={!ready || !linkToken || loading}>
+      <Plus size={16} strokeWidth={2.2} />
+      {loading ? "Connecting…" : "Connect account"}
     </Button>
   );
 }
