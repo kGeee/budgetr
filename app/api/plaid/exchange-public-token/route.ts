@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { plaid } from "@/lib/plaid";
+import { plaid, PLAID_ENV } from "@/lib/plaid";
 import { db } from "@/db";
 import { items } from "@/db/schema";
 import { encrypt } from "@/lib/crypto";
@@ -21,6 +21,7 @@ export async function POST(req: Request) {
       .values({
         id: itemId,
         accessToken: encrypt(accessToken),
+        plaidEnv: PLAID_ENV,
         institutionId: institution?.institution_id ?? null,
         institutionName: institution?.name ?? null,
         status: "active",
@@ -29,7 +30,13 @@ export async function POST(req: Request) {
       })
       .onConflictDoUpdate({
         target: items.id,
-        set: { accessToken: encrypt(accessToken), status: "active", error: null, updatedAt: now },
+        set: {
+          accessToken: encrypt(accessToken),
+          plaidEnv: PLAID_ENV,
+          status: "active",
+          error: null,
+          updatedAt: now,
+        },
       })
       .run();
 

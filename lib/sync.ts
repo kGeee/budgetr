@@ -8,7 +8,7 @@ import {
   balanceSnapshots,
   recurringStreams,
 } from "@/db/schema";
-import { plaid } from "@/lib/plaid";
+import { plaid, PLAID_ENV } from "@/lib/plaid";
 import { decrypt } from "@/lib/crypto";
 import { applyTagRules } from "@/lib/tag-rules";
 import { signedBalance } from "@/lib/utils";
@@ -256,6 +256,19 @@ async function syncRecurring(accessToken: string) {
 }
 
 export async function syncItem(item: Item) {
+  // Plaid access tokens are environment-scoped. If PLAID_ENV changed since this
+  // item was linked (e.g. sandbox -> production), the stored token is invalid
+  // and Plaid would return an opaque INVALID_ACCESS_TOKEN. Fail fast with a
+  // clear, actionable message instead.
+  if (item.plaidEnv && item.plaidEnv !== PLAID_ENV) {
+    throw new Error(
+      `Item "${item.institutionName ?? item.id}" was linked under PLAID_ENV=${item.plaidEnv} ` +
+        `but the app is now running PLAID_ENV=${PLAID_ENV}. Plaid access tokens do not carry ` +
+        `over between environments — re-link this account (run "npm run db:reset-items" to clear ` +
+        `stale links, then use Connect again).`,
+    );
+  }
+
   const accessToken = decrypt(item.accessToken);
   // Accounts first so FK targets exist for transactions/holdings.
   await refreshAccounts(item, accessToken);

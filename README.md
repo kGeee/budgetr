@@ -20,6 +20,33 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Switching to real data (production)
+
+The app ships pointed at Plaid **Sandbox** (fake institutions, `user_good` / `pass_good`).
+Plaid access tokens are **environment-scoped** — a sandbox token is not valid in
+production and vice versa — so moving to real accounts means re-linking, not just
+flipping a flag.
+
+1. **Get production access** in the [Plaid Dashboard](https://dashboard.plaid.com)
+   and copy your **production** secret from
+   [Developers → Keys](https://dashboard.plaid.com/developers/keys).
+2. **Update `.env.local`:**
+   ```bash
+   PLAID_ENV=production
+   PLAID_SECRET=<your production secret>   # the client ID stays the same
+   ```
+3. **Clear the stale sandbox links** (preserves your categories, budgets, tags,
+   and rules — only Plaid-owned data is removed):
+   ```bash
+   npm run db:reset-items
+   ```
+4. **Restart the dev server** and click **Connect** to link your real Amex,
+   brokerage, and bank accounts.
+
+If you forget step 3, the app is defensive: each item records the Plaid
+environment it was linked under, and **Sync will refuse a stale item with a clear
+"re-link" message** instead of failing with an opaque Plaid error.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

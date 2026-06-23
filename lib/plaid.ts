@@ -2,6 +2,9 @@ import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } fro
 
 const env = (process.env.PLAID_ENV ?? "sandbox") as keyof typeof PlaidEnvironments;
 
+/** The active Plaid environment (e.g. "sandbox" | "production"). */
+export const PLAID_ENV: string = String(env);
+
 const configuration = new Configuration({
   basePath: PlaidEnvironments[env],
   baseOptions: {

@@ -15,6 +15,10 @@ import {
 export const items = sqliteTable("items", {
   id: text("id").primaryKey(), // Plaid item_id
   accessToken: text("access_token").notNull(), // encrypted blob
+  // Plaid environment the access token was issued under (sandbox | production).
+  // Tokens are env-scoped: a sandbox token is invalid in production and vice
+  // versa, so sync uses this to detect stale links and prompt a re-link.
+  plaidEnv: text("plaid_env"),
   institutionId: text("institution_id"),
   institutionName: text("institution_name"),
   transactionsCursor: text("transactions_cursor"), // /transactions/sync cursor
