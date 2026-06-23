@@ -14,6 +14,25 @@ const configuration = new Configuration({
 
 export const plaid = new PlaidApi(configuration);
 
+/** True when both Plaid credentials are present in the environment. */
+export function hasPlaidCredentials(): boolean {
+  return Boolean(process.env.PLAID_CLIENT_ID?.trim() && process.env.PLAID_SECRET?.trim());
+}
+
+/**
+ * Throws a clear, actionable error when Plaid credentials are missing.
+ * Call this before any Plaid API request so users get a helpful message
+ * instead of an opaque Plaid 400/401 response.
+ */
+export function assertPlaidCredentials(): void {
+  if (!hasPlaidCredentials()) {
+    throw new Error(
+      "Missing Plaid credentials. Add PLAID_CLIENT_ID and PLAID_SECRET to .env.local " +
+        "(get them from https://dashboard.plaid.com/developers/keys), then restart the dev server.",
+    );
+  }
+}
+
 export const PLAID_PRODUCTS: Products[] = (process.env.PLAID_PRODUCTS ?? "transactions,investments")
   .split(",")
   .map((p) => p.trim() as Products);
