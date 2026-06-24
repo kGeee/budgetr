@@ -36,9 +36,31 @@ export function assertPlaidCredentials(): void {
   }
 }
 
-export const PLAID_PRODUCTS: Products[] = (process.env.PLAID_PRODUCTS ?? "transactions,investments")
+/**
+ * Required products. Plaid's Link flow filters to institutions/accounts that
+ * support ALL of these, so keep this to products every account has (e.g.
+ * `transactions`, which covers depository AND credit-card accounts). Putting
+ * `investments` here would block linking any account without a brokerage.
+ */
+export const PLAID_PRODUCTS: Products[] = (process.env.PLAID_PRODUCTS ?? "transactions")
   .split(",")
-  .map((p) => p.trim() as Products);
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .map((p) => p as Products);
+
+/**
+ * Optional products. Plaid pulls these when the linked institution/accounts
+ * support them but does NOT filter institutions or fail Link when they don't —
+ * so a credit-card-only Chase login still connects, and investment holdings are
+ * fetched automatically when a brokerage account is present.
+ */
+export const PLAID_OPTIONAL_PRODUCTS: Products[] = (
+  process.env.PLAID_OPTIONAL_PRODUCTS ?? "investments"
+)
+  .split(",")
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .map((p) => p as Products);
 
 export const PLAID_COUNTRY_CODES: CountryCode[] = (process.env.PLAID_COUNTRY_CODES ?? "US")
   .split(",")

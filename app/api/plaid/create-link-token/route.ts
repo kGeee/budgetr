@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { plaid, hasPlaidCredentials, PLAID_PRODUCTS, PLAID_COUNTRY_CODES } from "@/lib/plaid";
+import {
+  plaid,
+  hasPlaidCredentials,
+  PLAID_PRODUCTS,
+  PLAID_OPTIONAL_PRODUCTS,
+  PLAID_COUNTRY_CODES,
+} from "@/lib/plaid";
 
 export async function POST() {
   if (!hasPlaidCredentials()) {
@@ -18,6 +24,9 @@ export async function POST() {
       client_name: "budgetr",
       language: "en",
       products: PLAID_PRODUCTS,
+      ...(PLAID_OPTIONAL_PRODUCTS.length > 0
+        ? { optional_products: PLAID_OPTIONAL_PRODUCTS }
+        : {}),
       country_codes: PLAID_COUNTRY_CODES,
     });
     return NextResponse.json({ link_token: res.data.link_token });

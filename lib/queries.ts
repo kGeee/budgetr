@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { accounts, holdings, items, securities } from "@/db/schema";
+import { accounts, holdings, items, securities, vendorGroupMembers, vendorGroups } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 
@@ -355,49 +355,260 @@ export type VendorRow = {
   count: number;
   spent: number;
   lastDate: string;
+  groupId: string | null;
+  groupName: string | null;
+  /** Raw vendor keys merged into this group (only set when vendorKey IS a groupId) */
+  members: string[];
 };
 
-// Group transactions by vendor — merchant name when Plaid provides one, else raw descriptor.
+// Raw vendor key per transaction — merchant name when Plaid provides one, else raw descriptor.
 const vendorKeyExpr = sql`COALESCE(NULLIF(t.merchant_name, ''), t.name)`;
 
-/** All vendors, ranked by spend, with transaction count and last-seen date. */
+/**
+ * All vendors, ranked by spend.
+ * - Ungrouped vendors appear as individual rows keyed by their raw vendor key.
+ * - Grouped vendors are collapsed into a single row keyed by their group id.
+ */
 export function getVendors(): VendorRow[] {
+  // Fetch raw aggregates with group info in one pass.
+  const rows = db.all<{
+    vendorKey: string;
+    merchant: string | null;
+    sampleName: string;
+    count: number;
+    spent: number;
+    lastDate: string;
+    groupId: string | null;
+    groupName: string | null;
+  }>(
+    sql`SELECT ${vendorKeyExpr} AS vendorKey,
+           MAX(t.merchant_name) AS merchant, MAX(t.name) AS sampleName,
+           COUNT(*) AS count,
+           SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS spent,
+           MAX(t.date) AS lastDate,
+           vgm.group_id AS groupId,
+           vg.name AS groupName
+        FROM transactions t
+        LEFT JOIN vendor_group_members vgm ON vgm.vendor_key = ${vendorKeyExpr}
+        LEFT JOIN vendor_groups vg ON vg.id = vgm.group_id
+        WHERE t.pending = 0
+        GROUP BY vendorKey
+        ORDER BY spent DESC, count DESC`,
+  );
+
+  // Merge grouped vendors into single rows.
+  const grouped = new Map<string, VendorRow>();
+  const ungrouped: VendorRow[] = [];
+
+  for (const r of rows) {
+    if (r.groupId) {
+      const existing = grouped.get(r.groupId);
+      if (existing) {
+        existing.count += Number(r.count);
+        existing.spent += Number(r.spent);
+        if (r.lastDate > existing.lastDate) existing.lastDate = r.lastDate;
+        existing.members.push(r.vendorKey);
+      } else {
+        grouped.set(r.groupId, {
+          vendorKey: r.groupId,
+          displayName: r.groupName!,
+          count: Number(r.count),
+          spent: Number(r.spent),
+          lastDate: r.lastDate,
+          groupId: r.groupId,
+          groupName: r.groupName,
+          members: [r.vendorKey],
+        });
+      }
+    } else {
+      ungrouped.push({
+        vendorKey: r.vendorKey,
+        displayName: cleanTransactionName(r.sampleName, r.merchant),
+        count: Number(r.count),
+        spent: Number(r.spent),
+        lastDate: r.lastDate,
+        groupId: null,
+        groupName: null,
+        members: [],
+      });
+    }
+  }
+
+  return [...grouped.values(), ...ungrouped].sort((a, b) => b.spent - a.spent);
+}
+
+/**
+ * SQL matching every transaction for a vendor key — or, when the key is a group
+ * id, all member vendor keys. Shared by the vendor transaction + chart queries.
+ */
+function vendorMatch(vendorKey: string): ReturnType<typeof sql> {
+  const isGroup = db.get<{ n: number }>(
+    sql`SELECT COUNT(*) AS n FROM vendor_group_members WHERE group_id = ${vendorKey}`,
+  );
+  if (isGroup && isGroup.n > 0) {
+    return sql`${vendorKeyExpr} IN (SELECT vendor_key FROM vendor_group_members WHERE group_id = ${vendorKey})`;
+  }
+  return sql`${vendorKeyExpr} = ${vendorKey}`;
+}
+
+/** Every transaction for a given vendor key or group id, newest first. */
+export function getVendorTransactions(vendorKey: string): TransactionRow[] {
+  return selectTransactions(vendorMatch(vendorKey), 500);
+}
+
+export type VendorMonth = { month: string; spent: number; count: number };
+
+/** Month-by-month spend for a vendor (or group), oldest first for charting. */
+export function getVendorMonthlySpend(vendorKey: string, months = 12): VendorMonth[] {
+  const match = vendorMatch(vendorKey);
   return db
-    .all<{
-      vendorKey: string;
-      merchant: string | null;
-      sampleName: string;
-      count: number;
-      spent: number;
-      lastDate: string;
-    }>(
-      sql`SELECT ${vendorKeyExpr} AS vendorKey,
-             MAX(t.merchant_name) AS merchant, MAX(t.name) AS sampleName,
-             COUNT(*) AS count,
+    .all<{ month: string; spent: number; count: number }>(sql`
+      SELECT substr(t.date, 1, 7) AS month,
              SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS spent,
-             MAX(t.date) AS lastDate
-          FROM transactions t
-          WHERE t.pending = 0
-          GROUP BY vendorKey
-          ORDER BY spent DESC, count DESC`,
-    )
+             COUNT(*) AS count
+      FROM transactions t
+      WHERE t.pending = 0 AND ${match}
+      GROUP BY month
+      ORDER BY month DESC
+      LIMIT ${months}`)
+    .map((r) => ({ month: r.month, spent: Number(r.spent), count: Number(r.count) }))
+    .reverse();
+}
+
+/** How a vendor's (or group's) spend splits across effective categories. */
+export function getVendorCategoryBreakdown(vendorKey: string): CategorySpend[] {
+  const match = vendorMatch(vendorKey);
+  return db
+    .all<{ categoryId: string | null; name: string | null; icon: string | null; total: number }>(sql`
+      SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon, SUM(t.amount) AS total
+      FROM transactions t
+      LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+      WHERE t.pending = 0 AND t.amount > 0 AND ${match}
+      GROUP BY cat.id
+      ORDER BY total DESC`)
     .map((r) => ({
-      vendorKey: r.vendorKey,
-      displayName: cleanTransactionName(r.sampleName, r.merchant),
-      count: Number(r.count),
-      spent: Number(r.spent),
-      lastDate: r.lastDate,
+      categoryId: r.categoryId,
+      category: r.name ?? "Uncategorized",
+      icon: r.icon,
+      total: Number(r.total),
     }));
 }
 
-/** Every transaction for a given vendor key, newest first. */
-export function getVendorTransactions(vendorKey: string): TransactionRow[] {
-  return selectTransactions(sql`${vendorKeyExpr} = ${vendorKey}`, 500);
+export type VendorGroupRow = {
+  id: string;
+  name: string;
+  members: string[];
+};
+
+export function getVendorGroups(): VendorGroupRow[] {
+  const groups = db.select().from(vendorGroups).all();
+  const members = db.select().from(vendorGroupMembers).all();
+  const memberMap = new Map<string, string[]>();
+  for (const m of members) {
+    if (!memberMap.has(m.groupId)) memberMap.set(m.groupId, []);
+    memberMap.get(m.groupId)!.push(m.vendorKey);
+  }
+  return groups.map((g) => ({ id: g.id, name: g.name, members: memberMap.get(g.id) ?? [] }));
 }
 
 /** Unreviewed transactions, newest first — the review inbox. */
 export function getTransactionsToReview(limit = 100): TransactionRow[] {
   return selectTransactions(sql`t.reviewed = 0 AND t.pending = 0`, limit);
+}
+
+// ── Category drill-down ───────────────────────────────────────────────────────
+
+/** Archived categories (for the restore UI), grouped then alphabetical. */
+export function getArchivedCategories(): CategoryRow[] {
+  return db
+    .all<CategoryRow>(
+      sql`SELECT cat.id AS id, cat.name AS name, cat.icon AS icon, cat.color AS color,
+             cat."group" AS "group", cat.sort_order AS sortOrder, 0 AS spend30
+          FROM categories cat
+          WHERE cat.archived = 1
+          ORDER BY
+            CASE cat."group" WHEN 'income' THEN 0 WHEN 'spending' THEN 1 ELSE 2 END,
+            cat.sort_order ASC, cat.name ASC`,
+    )
+    .map((r) => ({ ...r, spend30: Number(r.spend30) }));
+}
+
+export type CategoryDetail = {
+  id: string;
+  name: string;
+  icon: string | null;
+  group: string;
+  archived: boolean;
+  /** All-time spend (outflow) in this category. */
+  spent: number;
+  /** All-time inflow (income/refunds) in this category. */
+  received: number;
+  count: number;
+};
+
+/** Category meta + all-time totals, or null if the id doesn't exist. */
+export function getCategoryById(id: string): CategoryDetail | null {
+  const r = db.get<{
+    id: string;
+    name: string;
+    icon: string | null;
+    group: string;
+    archived: number;
+    spent: number;
+    received: number;
+    count: number;
+  }>(sql`
+    SELECT cat.id AS id, cat.name AS name, cat.icon AS icon, cat."group" AS "group",
+           cat.archived AS archived,
+           COALESCE((SELECT SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END)
+                     FROM transactions t
+                     WHERE t.pending = 0 AND ${effectiveCatId("t")} = cat.id), 0) AS spent,
+           COALESCE((SELECT SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END)
+                     FROM transactions t
+                     WHERE t.pending = 0 AND ${effectiveCatId("t")} = cat.id), 0) AS received,
+           COALESCE((SELECT COUNT(*) FROM transactions t
+                     WHERE t.pending = 0 AND ${effectiveCatId("t")} = cat.id), 0) AS count
+    FROM categories cat
+    WHERE cat.id = ${id}`);
+  if (!r) return null;
+  return {
+    id: r.id,
+    name: r.name,
+    icon: r.icon,
+    group: r.group,
+    archived: !!r.archived,
+    spent: Number(r.spent),
+    received: Number(r.received),
+    count: Number(r.count),
+  };
+}
+
+/** Every (non-pending) transaction that rolls up to this category, newest first. */
+export function getCategoryTransactions(id: string, limit = 500): TransactionRow[] {
+  return selectTransactions(sql`t.pending = 0 AND ${effectiveCatId("t")} = ${id}`, limit);
+}
+
+export type CategoryMonth = { month: string; spent: number; received: number; count: number };
+
+/** Month-by-month breakdown of a category's spend, newest first. */
+export function getCategoryMonthlyBreakdown(id: string, months = 12): CategoryMonth[] {
+  return db
+    .all<{ month: string; spent: number; received: number; count: number }>(sql`
+      SELECT substr(t.date, 1, 7) AS month,
+             SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS spent,
+             SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END) AS received,
+             COUNT(*) AS count
+      FROM transactions t
+      WHERE t.pending = 0 AND ${effectiveCatId("t")} = ${id}
+      GROUP BY month
+      ORDER BY month DESC
+      LIMIT ${months}`)
+    .map((r) => ({
+      month: r.month,
+      spent: Number(r.spent),
+      received: Number(r.received),
+      count: Number(r.count),
+    }));
 }
 
 export function getTags(): TxTag[] {
@@ -502,6 +713,7 @@ export function getHoldings() {
       price: holdings.institutionPrice,
       value: holdings.institutionValue,
       currency: holdings.isoCurrencyCode,
+      closePrice: securities.closePrice,
       ticker: securities.tickerSymbol,
       securityName: securities.name,
       securityType: securities.type,

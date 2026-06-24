@@ -12,7 +12,7 @@ import { plaid, PLAID_ENV } from "@/lib/plaid";
 import { decrypt } from "@/lib/crypto";
 import { applyTagRules } from "@/lib/tag-rules";
 import { signedBalance } from "@/lib/utils";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Item } from "@/db/schema";
 import type { TransactionStream } from "plaid";
 
@@ -197,6 +197,26 @@ async function syncInvestments(accessToken: string) {
           },
         })
         .run();
+    }
+
+    // Prune positions Plaid no longer reports (sold out, transferred away).
+    // Scope the delete to this item's investment accounts so we never touch
+    // another item's holdings, and key off the present holding ids.
+    const presentIds = new Set(
+      res.data.holdings.map((h) => `${h.account_id}:${h.security_id}`),
+    );
+    const investmentAccountIds = res.data.accounts.map((a) => a.account_id);
+    if (investmentAccountIds.length > 0) {
+      const existing = db
+        .select({ id: holdings.id })
+        .from(holdings)
+        .where(inArray(holdings.accountId, investmentAccountIds))
+        .all();
+      for (const row of existing) {
+        if (!presentIds.has(row.id)) {
+          db.delete(holdings).where(eq(holdings.id, row.id)).run();
+        }
+      }
     }
   } catch (err: unknown) {
     // Item has no investment accounts / product not enabled — that's fine.

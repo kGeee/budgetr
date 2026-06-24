@@ -7,6 +7,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -126,6 +128,41 @@ export function CashflowChart({
   );
 }
 
+export function MonthlySpendChart({ data }: { data: { month: string; spent: number }[] }) {
+  if (data.length === 0)
+    return <Empty label="No spend in range" hint="Nothing recorded for this vendor yet." />;
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={data} margin={{ left: 4, right: 8, top: 8 }}>
+        <CartesianGrid stroke={GRID} vertical={false} />
+        <XAxis
+          dataKey="month"
+          tickFormatter={(m) => format(parseISO(m + "-01"), "MMM")}
+          tick={tick}
+          tickLine={false}
+          axisLine={{ stroke: GRID }}
+          minTickGap={6}
+        />
+        <YAxis
+          tickFormatter={(v) => formatCompactCurrency(v)}
+          tick={tick}
+          tickLine={false}
+          axisLine={false}
+          width={52}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ fill: "rgba(255,255,255,0.04)" }}
+          formatter={(value) => [formatCurrency(Number(value)), "Spent"]}
+          labelFormatter={(m) => format(parseISO(m + "-01"), "MMMM yyyy")}
+        />
+        <Bar dataKey="spent" fill="#cbb07c" radius={[3, 3, 0, 0]} maxBarSize={30} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 export function CategoryChart({ data }: { data: { category: string; total: number }[] }) {
   if (data.length === 0) return <Empty label="No spending" hint="Nothing recorded in this window." />;
   const top = data.slice(0, 8);
@@ -176,6 +213,88 @@ export function CategoryChart({ data }: { data: { category: string; total: numbe
         ))}
       </ul>
     </div>
+  );
+}
+
+export function PortfolioChart({ data }: { data: { date: string; value: number }[] }) {
+  if (data.length === 0)
+    return (
+      <Empty
+        label="No price history yet"
+        hint="Historical closes load from Yahoo Finance for your tickers."
+      />
+    );
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+        <defs>
+          <linearGradient id="pf" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#cbb07c" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="#cbb07c" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke={GRID} vertical={false} />
+        <XAxis
+          dataKey="date"
+          tickFormatter={(d) => format(parseISO(d), "MMM d")}
+          tick={tick}
+          tickLine={false}
+          axisLine={{ stroke: GRID }}
+          minTickGap={28}
+        />
+        <YAxis
+          tickFormatter={(v) => formatCompactCurrency(v)}
+          tick={tick}
+          tickLine={false}
+          axisLine={false}
+          width={58}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          formatter={(value) => [formatCurrency(Number(value)), "Value"]}
+          labelFormatter={(d) => format(parseISO(d as string), "PP")}
+        />
+        <Area
+          type="monotone"
+          dataKey="value"
+          stroke="#cbb07c"
+          strokeWidth={2.5}
+          fill="url(#pf)"
+          activeDot={{ r: 4, fill: "#cbb07c", stroke: "#090c0b", strokeWidth: 2 }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Tiny inline price trend; green when up over the window, coral when down. */
+export function Sparkline({
+  data,
+  width = 92,
+  height = 26,
+}: {
+  data: { date: string; close: number }[];
+  width?: number;
+  height?: number;
+}) {
+  if (data.length < 2) return null;
+  const up = data[data.length - 1].close >= data[0].close;
+  const color = up ? "#6fe3a6" : "#f0897b";
+  return (
+    <ResponsiveContainer width={width} height={height}>
+      <LineChart data={data} margin={{ top: 2, bottom: 2, left: 0, right: 0 }}>
+        <Line
+          type="monotone"
+          dataKey="close"
+          stroke={color}
+          strokeWidth={1.5}
+          dot={false}
+          isAnimationActive={false}
+        />
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
 
