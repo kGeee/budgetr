@@ -8,11 +8,11 @@ import {
   balanceSnapshots,
   recurringStreams,
 } from "@/db/schema";
-import { plaid } from "@/lib/plaid";
+import { plaid, PLAID_ENV } from "@/lib/plaid";
 import { decrypt } from "@/lib/crypto";
 import { applyTagRules } from "@/lib/tag-rules";
 import { signedBalance } from "@/lib/utils";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Item } from "@/db/schema";
 import type { TransactionStream } from "plaid";
 
@@ -198,6 +198,26 @@ async function syncInvestments(accessToken: string) {
         })
         .run();
     }
+
+    // Prune positions Plaid no longer reports (sold out, transferred away).
+    // Scope the delete to this item's investment accounts so we never touch
+    // another item's holdings, and key off the present holding ids.
+    const presentIds = new Set(
+      res.data.holdings.map((h) => `${h.account_id}:${h.security_id}`),
+    );
+    const investmentAccountIds = res.data.accounts.map((a) => a.account_id);
+    if (investmentAccountIds.length > 0) {
+      const existing = db
+        .select({ id: holdings.id })
+        .from(holdings)
+        .where(inArray(holdings.accountId, investmentAccountIds))
+        .all();
+      for (const row of existing) {
+        if (!presentIds.has(row.id)) {
+          db.delete(holdings).where(eq(holdings.id, row.id)).run();
+        }
+      }
+    }
   } catch (err: unknown) {
     // Item has no investment accounts / product not enabled — that's fine.
     const code = (err as { response?: { data?: { error_code?: string } } })?.response?.data
@@ -256,6 +276,19 @@ async function syncRecurring(accessToken: string) {
 }
 
 export async function syncItem(item: Item) {
+  // Plaid access tokens are environment-scoped. If PLAID_ENV changed since this
+  // item was linked (e.g. sandbox -> production), the stored token is invalid
+  // and Plaid would return an opaque INVALID_ACCESS_TOKEN. Fail fast with a
+  // clear, actionable message instead.
+  if (item.plaidEnv && item.plaidEnv !== PLAID_ENV) {
+    throw new Error(
+      `Item "${item.institutionName ?? item.id}" was linked under PLAID_ENV=${item.plaidEnv} ` +
+        `but the app is now running PLAID_ENV=${PLAID_ENV}. Plaid access tokens do not carry ` +
+        `over between environments — re-link this account (run "npm run db:reset-items" to clear ` +
+        `stale links, then use Connect again).`,
+    );
+  }
+
   const accessToken = decrypt(item.accessToken);
   // Accounts first so FK targets exist for transactions/holdings.
   await refreshAccounts(item, accessToken);

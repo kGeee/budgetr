@@ -10,6 +10,8 @@ import {
   tags,
   transactionTags,
   transactions,
+  vendorGroupMembers,
+  vendorGroups,
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { applyTagRules } from "@/lib/tag-rules";
@@ -89,6 +91,71 @@ export async function setTransactionCategory(txnId: string, categoryId: string |
     .where(eq(transactions.id, txnId))
     .run();
   revalidateAll();
+}
+
+export type VendorReclass = { vendorName: string; count: number };
+
+/**
+ * After categorizing one transaction, count OTHER transactions from the same
+ * vendor (group-aware) that currently resolve to a *different* category — i.e.
+ * candidates to bulk-apply the same category to. Returns null when there are
+ * none. The vendor is derived from the transaction itself, so this works on any
+ * page, not just Vendors.
+ */
+export async function getVendorReclassCount(
+  txnId: string,
+  categoryId: string,
+): Promise<VendorReclass | null> {
+  const tx = db.get<{ vendorKey: string; merchant: string | null; name: string }>(
+    sql`SELECT COALESCE(NULLIF(merchant_name, ''), name) AS vendorKey,
+               merchant_name AS merchant, name AS name
+        FROM transactions WHERE id = ${txnId}`,
+  );
+  if (!tx) return null;
+
+  const grp = db.get<{ groupId: string }>(
+    sql`SELECT group_id AS groupId FROM vendor_group_members WHERE vendor_key = ${tx.vendorKey}`,
+  );
+  const match = grp
+    ? sql`COALESCE(NULLIF(t.merchant_name, ''), t.name) IN
+          (SELECT vendor_key FROM vendor_group_members WHERE group_id = ${grp.groupId})`
+    : sql`COALESCE(NULLIF(t.merchant_name, ''), t.name) = ${tx.vendorKey}`;
+
+  const row = db.get<{ n: number }>(sql`
+    SELECT COUNT(*) AS n FROM transactions t
+    WHERE t.id != ${txnId} AND t.pending = 0 AND ${match}
+      AND COALESCE(t.user_category_id,
+            (SELECT c.id FROM categories c WHERE c.plaid_primary = t.category)) IS NOT ${categoryId}`);
+
+  const count = Number(row?.n ?? 0);
+  if (count === 0) return null;
+  return { vendorName: cleanTransactionName(tx.name, tx.merchant), count };
+}
+
+/**
+ * Apply a category override to every (non-pending) transaction from the same
+ * vendor (group-aware) as `txnId`. Returns the number of rows updated.
+ */
+export async function applyCategoryToVendor(txnId: string, categoryId: string): Promise<number> {
+  const tx = db.get<{ vendorKey: string }>(
+    sql`SELECT COALESCE(NULLIF(merchant_name, ''), name) AS vendorKey
+        FROM transactions WHERE id = ${txnId}`,
+  );
+  if (!tx) return 0;
+
+  const grp = db.get<{ groupId: string }>(
+    sql`SELECT group_id AS groupId FROM vendor_group_members WHERE vendor_key = ${tx.vendorKey}`,
+  );
+  const match = grp
+    ? sql`COALESCE(NULLIF(merchant_name, ''), name) IN
+          (SELECT vendor_key FROM vendor_group_members WHERE group_id = ${grp.groupId})`
+    : sql`COALESCE(NULLIF(merchant_name, ''), name) = ${tx.vendorKey}`;
+
+  const res = db.run(
+    sql`UPDATE transactions SET user_category_id = ${categoryId} WHERE pending = 0 AND ${match}`,
+  );
+  revalidateAll();
+  return (res as { changes: number }).changes;
 }
 
 export async function setTransactionNotes(txnId: string, notes: string) {
@@ -212,5 +279,51 @@ export async function setTagBudget(tagId: string, amount: number) {
 
 export async function clearTagBudget(tagId: string) {
   db.delete(tagBudgets).where(eq(tagBudgets.tagId, tagId)).run();
+  revalidateAll();
+}
+
+// ── Vendor groups ─────────────────────────────────────────────────────────────
+
+/** Create a new vendor group with an optional initial member. Returns the group id. */
+export async function createVendorGroup(name: string, initialVendorKey?: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const id = `vg_${crypto.randomUUID().slice(0, 8)}`;
+  db.insert(vendorGroups).values({ id, name: trimmed, createdAt: new Date() }).run();
+  if (initialVendorKey) {
+    db.insert(vendorGroupMembers)
+      .values({ vendorKey: initialVendorKey, groupId: id })
+      .onConflictDoUpdate({ target: vendorGroupMembers.vendorKey, set: { groupId: id } })
+      .run();
+  }
+  revalidateAll();
+  return id;
+}
+
+export async function renameVendorGroup(groupId: string, name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  db.update(vendorGroups).set({ name: trimmed }).where(eq(vendorGroups.id, groupId)).run();
+  revalidateAll();
+}
+
+export async function deleteVendorGroup(groupId: string) {
+  // Members cascade-delete via FK.
+  db.delete(vendorGroups).where(eq(vendorGroups.id, groupId)).run();
+  revalidateAll();
+}
+
+/** Add a raw vendor key to an existing group (or move it from another group). */
+export async function addVendorToGroup(vendorKey: string, groupId: string) {
+  db.insert(vendorGroupMembers)
+    .values({ vendorKey, groupId })
+    .onConflictDoUpdate({ target: vendorGroupMembers.vendorKey, set: { groupId } })
+    .run();
+  revalidateAll();
+}
+
+/** Remove a raw vendor key from its group (returns it to standalone). */
+export async function removeVendorFromGroup(vendorKey: string) {
+  db.delete(vendorGroupMembers).where(eq(vendorGroupMembers.vendorKey, vendorKey)).run();
   revalidateAll();
 }

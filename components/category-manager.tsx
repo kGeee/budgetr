@@ -1,14 +1,16 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, Check, Pencil, Plus, X } from "lucide-react";
+import { Archive, ArrowUpRight, Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
 import { CategoryIcon } from "@/components/category-pill";
 import { Button } from "@/components/ui/button";
 import {
   archiveCategory,
   createCategory,
   renameCategory,
+  unarchiveCategory,
 } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 import type { CategoryRow } from "@/lib/queries";
@@ -20,7 +22,13 @@ const GROUP_LABEL: Record<string, string> = {
   transfer: "Transfers",
 };
 
-export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
+export function CategoryManager({
+  categories,
+  archived = [],
+}: {
+  categories: CategoryRow[];
+  archived?: CategoryRow[];
+}) {
   const grouped = GROUP_ORDER.map((g) => ({
     group: g,
     rows: categories.filter((c) => c.group === g),
@@ -44,7 +52,52 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
           </div>
         </section>
       ))}
+
+      {archived.length > 0 && <ArchivedSection rows={archived} />}
     </div>
+  );
+}
+
+function ArchivedSection({ rows }: { rows: CategoryRow[] }) {
+  return (
+    <section>
+      <p className="eyebrow mb-3 text-[var(--faint)]">Archived</p>
+      <div className="overflow-hidden rounded-[var(--radius)] border border-dashed border-line bg-[var(--panel)]">
+        <ul>
+          {rows.map((c) => (
+            <ArchivedRow key={c.id} category={c} />
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+function ArchivedRow({ category }: { category: CategoryRow }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+
+  function restore() {
+    start(async () => {
+      await unarchiveCategory(category.id);
+      router.refresh();
+    });
+  }
+
+  return (
+    <li
+      className={`group flex items-center gap-3 border-b border-line/60 px-5 py-3.5 last:border-0 ${
+        pending ? "opacity-50" : ""
+      }`}
+    >
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--faint)]">
+        <CategoryIcon icon={category.icon} size={15} />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm text-[var(--muted)]">{category.name}</span>
+      <Button size="sm" variant="ghost" onClick={restore} disabled={pending}>
+        <RotateCcw size={13} /> Restore
+      </Button>
+    </li>
   );
 }
 
@@ -68,6 +121,9 @@ function Row({ category }: { category: CategoryRow }) {
   }
 
   function archive() {
+    if (!confirm(`Archive "${category.name}"? Its transactions stay put — you can restore it anytime from the Archived section.`)) {
+      return;
+    }
     start(async () => {
       await archiveCategory(category.id);
       router.refresh();
@@ -118,6 +174,14 @@ function Row({ category }: { category: CategoryRow }) {
           <span className="ml-1 text-[var(--faint)]">· 30d</span>
         </span>
       )}
+
+      <Link
+        href={`/categories/${category.id}`}
+        aria-label={`View ${category.name} transactions`}
+        className="shrink-0 rounded-md p-1.5 text-[var(--faint)] opacity-0 transition hover:text-[var(--brass)] group-hover:opacity-100"
+      >
+        <ArrowUpRight size={15} />
+      </Link>
 
       <button
         onClick={archive}

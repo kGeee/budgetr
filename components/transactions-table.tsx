@@ -62,8 +62,8 @@ export function TransactionsTable({
         </div>
       )}
 
-      <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-[var(--radius)] border border-line bg-[var(--panel)]">
+        <table className="w-full min-w-[680px] text-sm">
           <thead>
             <tr className="border-b border-line text-left">
               <th className="w-10 px-4 py-3.5" />
@@ -128,7 +128,9 @@ export function TransactionsTable({
                   <td className="px-6 py-3.5">
                     <CategoryPill name={t.categoryName} icon={t.categoryIcon} />
                   </td>
-                  <td className="px-6 py-3.5 text-[var(--muted)]">{t.accountName}</td>
+                  <td className="whitespace-nowrap px-6 py-3.5 text-[var(--muted)]">
+                    {t.accountName}
+                  </td>
                   <td
                     className={`mono whitespace-nowrap px-6 py-3.5 text-right ${
                       income ? "text-[var(--jade)]" : "text-[var(--paper)]"

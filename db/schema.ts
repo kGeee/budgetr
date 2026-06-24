@@ -15,6 +15,10 @@ import {
 export const items = sqliteTable("items", {
   id: text("id").primaryKey(), // Plaid item_id
   accessToken: text("access_token").notNull(), // encrypted blob
+  // Plaid environment the access token was issued under (sandbox | production).
+  // Tokens are env-scoped: a sandbox token is invalid in production and vice
+  // versa, so sync uses this to detect stale links and prompt a re-link.
+  plaidEnv: text("plaid_env"),
   institutionId: text("institution_id"),
   institutionName: text("institution_name"),
   transactionsCursor: text("transactions_cursor"), // /transactions/sync cursor
@@ -232,6 +236,31 @@ export const balanceSnapshots = sqliteTable(
   (t) => [uniqueIndex("snapshot_account_date_idx").on(t.accountId, t.date)],
 );
 
+/**
+ * A user-defined canonical vendor name that multiple raw vendor keys can be
+ * merged into (e.g. "Amazon" absorbs "AMZN Mktp US", "Amazon Prime", etc.).
+ */
+export const vendorGroups = sqliteTable("vendor_groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * Maps a raw vendor key (COALESCE(merchant_name, name)) to a vendor group.
+ * One raw key can belong to at most one group.
+ */
+export const vendorGroupMembers = sqliteTable(
+  "vendor_group_members",
+  {
+    vendorKey: text("vendor_key").primaryKey(),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => vendorGroups.id, { onDelete: "cascade" }),
+  },
+  (t) => [index("vgm_group_idx").on(t.groupId)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -244,3 +273,5 @@ export type Budget = typeof budgets.$inferSelect;
 export type TagBudget = typeof tagBudgets.$inferSelect;
 export type TagRule = typeof tagRules.$inferSelect;
 export type RecurringStream = typeof recurringStreams.$inferSelect;
+export type VendorGroup = typeof vendorGroups.$inferSelect;
+export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
