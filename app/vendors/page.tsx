@@ -81,6 +81,7 @@ export default async function VendorsPage({
                           vendorName={vendor.displayName}
                           groups={groups}
                           currentGroupId={vendor.groupId}
+                          candidates={vendors.filter((x) => x.vendorKey !== vendor.vendorKey)}
                         />
                       )}
 

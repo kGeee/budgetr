@@ -57,6 +57,66 @@ export function cleanTransactionName(name: string, merchantName?: string | null)
   return s || name.trim();
 }
 
+// ── Vendor name similarity ────────────────────────────────────────────────────
+// Lightweight, dependency-free fuzzy matching used to auto-suggest vendors that
+// look like the same merchant ("Amazon" / "AMZN Mktp" / "Amazon Prime") so they
+// can be merged in one click. Combines trigram overlap (catches typos / codes)
+// with token overlap (catches word reordering) plus a substring containment
+// boost. Returns a score in [0, 1].
+
+function normalizeVendor(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function trigrams(s: string): Set<string> {
+  const padded = `  ${s.replace(/\s+/g, "")} `;
+  const out = new Set<string>();
+  for (let i = 0; i < padded.length - 2; i++) out.add(padded.slice(i, i + 3));
+  return out;
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+/** Similarity between two vendor display names, in [0, 1] (1 = identical). */
+export function vendorSimilarity(a: string, b: string): number {
+  const na = normalizeVendor(a);
+  const nb = normalizeVendor(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+
+  const tri = jaccard(trigrams(na), trigrams(nb));
+  const tok = jaccard(new Set(na.split(" ")), new Set(nb.split(" ")));
+  // One name containing the other is a strong same-merchant signal.
+  const contained = na.includes(nb) || nb.includes(na) ? 0.3 : 0;
+
+  return Math.min(1, 0.6 * tri + 0.4 * tok + contained);
+}
+
+export type VendorSuggestion<T> = { item: T; score: number };
+
+/**
+ * Rank `candidates` by name similarity to `target`, keeping only matches at or
+ * above `threshold` (default 0.45) and returning the top `limit` (default 3).
+ */
+export function rankSimilarVendors<T>(
+  target: string,
+  candidates: T[],
+  nameOf: (c: T) => string,
+  opts: { threshold?: number; limit?: number } = {},
+): VendorSuggestion<T>[] {
+  const { threshold = 0.45, limit = 3 } = opts;
+  return candidates
+    .map((item) => ({ item, score: vendorSimilarity(target, nameOf(item)) }))
+    .filter((s) => s.score >= threshold)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
 /** Net worth treats credit & loan balances as liabilities (subtracted). */
 export function isLiability(accountType: string): boolean {
   return accountType === "credit" || accountType === "loan";

@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
-import { GitMerge, Plus, X, Pencil, Trash2 } from "lucide-react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { GitMerge, Plus, Sparkles, X, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   addVendorToGroup,
@@ -10,7 +10,8 @@ import {
   removeVendorFromGroup,
   renameVendorGroup,
 } from "@/lib/actions";
-import type { VendorGroupRow } from "@/lib/queries";
+import type { VendorGroupRow, VendorRow } from "@/lib/queries";
+import { rankSimilarVendors } from "@/lib/utils";
 
 // ── Small inline modal ───────────────────────────────────────────────────────
 
@@ -34,16 +35,27 @@ export function MergeVendorButton({
   vendorName,
   groups,
   currentGroupId,
+  candidates = [],
 }: {
   vendorKey: string;
   vendorName: string;
   groups: VendorGroupRow[];
   currentGroupId: string | null;
+  /** Other vendors (standalone + groups) used to auto-suggest similar merges. */
+  candidates?: VendorRow[];
 }) {
   const [open, setOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [isPending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Fuzzy name matches — the lightweight token/trigram ranker, no dependency.
+  const suggestions = useMemo(
+    () =>
+      rankSimilarVendors(vendorName, candidates, (c) => c.displayName)
+        .filter((s) => s.item.groupId !== currentGroupId),
+    [vendorName, candidates, currentGroupId],
+  );
 
   function close() {
     setOpen(false);
@@ -53,6 +65,22 @@ export function MergeVendorButton({
   function mergeInto(groupId: string) {
     startTransition(async () => {
       await addVendorToGroup(vendorKey, groupId);
+      close();
+    });
+  }
+
+  /**
+   * Accept a fuzzy suggestion: merge into the candidate's existing group, or —
+   * if the candidate is standalone — spin up a new group holding both vendors.
+   */
+  function mergeWithSuggestion(candidate: VendorRow) {
+    startTransition(async () => {
+      if (candidate.groupId) {
+        await addVendorToGroup(vendorKey, candidate.groupId);
+      } else {
+        const groupId = await createVendorGroup(vendorName, vendorKey);
+        if (groupId) await addVendorToGroup(candidate.vendorKey, groupId);
+      }
       close();
     });
   }
@@ -94,6 +122,31 @@ export function MergeVendorButton({
           </div>
 
           <div className="space-y-1 p-3">
+            {suggestions.length > 0 && (
+              <>
+                <p className="flex items-center gap-1.5 px-2 py-1 text-xs text-[var(--brass)]">
+                  <Sparkles size={11} className="shrink-0" /> Similar vendors
+                </p>
+                {suggestions.map(({ item }) => (
+                  <button
+                    key={item.vendorKey}
+                    disabled={isPending}
+                    onClick={() => mergeWithSuggestion(item)}
+                    className="flex w-full items-center gap-2.5 rounded-md border border-[var(--brass-dim)]/40 bg-[var(--brass)]/5 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--brass)]/10 disabled:opacity-40"
+                  >
+                    <GitMerge size={13} className="shrink-0 text-[var(--brass)]" />
+                    <span className="flex-1 truncate">{item.displayName}</span>
+                    <span className="text-xs text-[var(--faint)]">
+                      {item.groupId
+                        ? `${item.members.length} vendors`
+                        : `${item.count} ${item.count === 1 ? "txn" : "txns"}`}
+                    </span>
+                  </button>
+                ))}
+                <div className="my-2 border-t border-line/60" />
+              </>
+            )}
+
             {groups.length > 0 && (
               <>
                 <p className="px-2 py-1 text-xs text-[var(--faint)]">Existing groups</p>
