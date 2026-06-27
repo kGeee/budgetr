@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { CategoryIcon } from "@/components/category-pill";
+import { MonthlySpendChart } from "@/components/charts";
 import { TransactionsTable } from "@/components/transactions-table";
 import { Card } from "@/components/ui/card";
 import {
@@ -32,7 +33,12 @@ export default async function CategoryDetailPage({
   const inflowLed = category.group !== "spending" && category.received > category.spent;
   const headlineLabel = inflowLed ? "Received" : "Spent";
   const headlineValue = inflowLed ? category.received : category.spent;
-  const maxMonth = Math.max(1, ...months.map((m) => Math.max(m.spent, m.received)));
+
+  // Charts read oldest-first; the query returns newest-first. Chart the side
+  // (received vs spent) that leads this category so the trend is meaningful.
+  const chartData = months
+    .map((m) => ({ month: m.month, spent: inflowLed ? m.received : m.spent }))
+    .reverse();
 
   return (
     <div className="space-y-7">
@@ -72,34 +78,11 @@ export default async function CategoryDetailPage({
       {months.length > 0 && (
         <Card className="p-0">
           <div className="border-b border-line px-6 py-4">
-            <span className="eyebrow">Monthly breakdown</span>
+            <span className="eyebrow">Monthly {headlineLabel.toLowerCase()} · 12 mo</span>
           </div>
-          <ul>
-            {months.map((m) => {
-              const amount = inflowLed ? m.received : m.spent;
-              const pct = Math.round((amount / maxMonth) * 100);
-              return (
-                <li
-                  key={m.month}
-                  className="flex items-center gap-4 border-b border-line/60 px-6 py-3 last:border-0"
-                >
-                  <span className="mono w-16 shrink-0 text-sm text-[var(--muted)]">{m.month}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--panel-2)]">
-                    <div
-                      className="h-full rounded-full bg-[var(--brass)]"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <span className="shrink-0 text-xs text-[var(--faint)]">
-                    {m.count} {m.count === 1 ? "txn" : "txns"}
-                  </span>
-                  <span className="mono w-24 shrink-0 text-right text-sm">
-                    {formatCurrency(amount)}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="px-2 py-4 sm:px-4">
+            <MonthlySpendChart data={chartData} />
+          </div>
         </Card>
       )}
 
