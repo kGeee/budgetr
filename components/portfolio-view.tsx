@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { PortfolioChart, Sparkline } from "@/components/charts";
+import { Sparkline, TickerPriceChart } from "@/components/charts";
+import { ValueHistory } from "@/components/value-history";
+import {
+  AddManualHoldingButton,
+  DeleteManualHoldingButton,
+  EditManualHoldingButton,
+} from "@/components/manual-holding-dialog";
 import { formatCurrency } from "@/lib/utils";
+import type { InvestmentTxnRow } from "@/lib/queries";
 import {
   LivePricesProvider,
   useLivePrices,
@@ -23,6 +31,8 @@ export type HoldingRow = {
   securityName: string | null;
   securityType: string | null;
   accountName: string | null;
+  /** True for user-entered off-Plaid holdings (crypto, fixed-value assets). */
+  manual?: boolean;
 };
 
 type PricePoint = { date: string; close: number };
@@ -31,10 +41,12 @@ export function PortfolioView({
   holdings,
   histories = {},
   portfolioSeries = [],
+  transactions = [],
 }: {
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
   portfolioSeries?: { date: string; value: number }[];
+  transactions?: InvestmentTxnRow[];
 }) {
   const symbols = useMemo(
     () => holdings.map((h) => h.ticker).filter((t): t is string => Boolean(t)),
@@ -47,6 +59,7 @@ export function PortfolioView({
         holdings={holdings}
         histories={histories}
         portfolioSeries={portfolioSeries}
+        transactions={transactions}
       />
     </LivePricesProvider>
   );
@@ -80,16 +93,66 @@ function effectiveValue(h: HoldingRow, quotes: Record<string, LiveQuote>): numbe
   return h.value ?? 0;
 }
 
+/** Unrealized P&L = current value − total cost basis, or null with no basis. */
+function effectivePnl(h: HoldingRow, quotes: Record<string, LiveQuote>): number | null {
+  if (h.costBasis == null) return null;
+  return effectiveValue(h, quotes) - h.costBasis;
+}
+
+type SortKey = "value" | "pnl";
+
 function PortfolioInner({
   holdings,
   histories,
   portfolioSeries,
+  transactions,
 }: {
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
   portfolioSeries: { date: string; value: number }[];
+  transactions: InvestmentTxnRow[];
 }) {
   const { quotes, status } = useLivePrices();
+  const [sortKey, setSortKey] = useState<SortKey>("value");
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+
+  // Group investment transactions by ticker for each holding's expanded panel.
+  const txnsByTicker = useMemo(() => {
+    const map: Record<string, InvestmentTxnRow[]> = {};
+    for (const t of transactions) {
+      if (!t.ticker) continue;
+      const sym = t.ticker.toUpperCase();
+      (map[sym] ??= []).push(t);
+    }
+    return map;
+  }, [transactions]);
+
+  // Sort by the chosen metric. Holdings without P&L (no cost basis) sink to the
+  // bottom regardless of direction.
+  const sorted = useMemo(() => {
+    const metric = (h: HoldingRow): number => {
+      if (sortKey === "pnl") return effectivePnl(h, quotes) ?? Number.NEGATIVE_INFINITY;
+      return effectiveValue(h, quotes);
+    };
+    const dir = sortDir === "desc" ? -1 : 1;
+    return [...holdings].sort((a, b) => {
+      const av = metric(a);
+      const bv = metric(b);
+      if (av === bv) return 0;
+      // Keep no-P&L rows last in both directions.
+      if (av === Number.NEGATIVE_INFINITY) return 1;
+      if (bv === Number.NEGATIVE_INFINITY) return -1;
+      return (av - bv) * dir;
+    });
+  }, [holdings, quotes, sortKey, sortDir]);
+
+  function toggleSort(key: SortKey) {
+    if (key === sortKey) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
 
   const total = holdings.reduce((s, h) => s + effectiveValue(h, quotes), 0);
   const totalCost = holdings.reduce((s, h) => s + (h.costBasis ?? 0), 0);
@@ -106,13 +169,11 @@ function PortfolioInner({
 
       <Card className="p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <span className="eyebrow">Portfolio value · 12 mo</span>
-          <span className="text-xs text-[var(--faint)]">
-            today&apos;s holdings at historical closes
-          </span>
+          <span className="eyebrow">Portfolio value</span>
+          <span className="text-xs text-[var(--faint)]">reconstructed from your trades</span>
         </div>
         <div className="px-3 py-5 sm:px-5">
-          <PortfolioChart data={portfolioSeries} />
+          <ValueHistory data={portfolioSeries} kind="portfolio" />
         </div>
       </Card>
 
@@ -122,68 +183,244 @@ function PortfolioInner({
             <span className="eyebrow">Holdings</span>
             <StatusBadge status={status} />
           </div>
-          <span className="text-xs text-[var(--muted)]">
-            {holdings.length} {holdings.length === 1 ? "position" : "positions"}
-          </span>
+          <div className="flex items-center gap-4">
+            <span className="text-xs text-[var(--muted)]">
+              {holdings.length} {holdings.length === 1 ? "position" : "positions"}
+            </span>
+            <AddManualHoldingButton />
+          </div>
         </div>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
           <thead>
             <tr className="border-b border-line text-left">
-              {["Security", "Account", "Trend", "Qty", "Price", "Day", "Value"].map((h, i) => (
+              <th className="w-8" aria-hidden />
+              {["Security", "Account", "Trend", "Qty", "Price", "Day"].map((h, i) => (
                 <th
                   key={h}
-                  className={`px-6 py-3.5 eyebrow font-medium ${i >= 3 ? "text-right" : ""}`}
+                  className={`py-3.5 eyebrow font-medium ${i === 0 ? "pr-3" : "px-3"} ${i >= 3 ? "text-right" : ""}`}
                 >
                   {h}
                 </th>
               ))}
+              <SortHeader
+                label="Value"
+                active={sortKey === "value"}
+                dir={sortDir}
+                onClick={() => toggleSort("value")}
+              />
+              <SortHeader
+                label="P&L"
+                active={sortKey === "pnl"}
+                dir={sortDir}
+                onClick={() => toggleSort("pnl")}
+              />
             </tr>
           </thead>
           <tbody>
-            {holdings.map((h) => {
-              const price = effectivePrice(h, quotes);
-              const value = effectiveValue(h, quotes);
-              const dayPct = dayChangePct(h, quotes);
-              const currency = h.currency ?? "USD";
-              const history = h.ticker ? histories[h.ticker.toUpperCase()] : undefined;
+            {sorted.map((h) => {
+              const sym = h.ticker?.toUpperCase();
               return (
-                <tr
+                <HoldingRowView
                   key={h.id}
-                  className="border-b border-line/60 last:border-0 transition-colors hover:bg-[var(--panel-2)]"
-                >
-                  <td className="px-6 py-3.5">
-                    <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-                    <span className="ml-2 text-[var(--muted)]">{h.securityName}</span>
-                  </td>
-                  <td className="px-6 py-3.5 text-[var(--muted)]">{h.accountName}</td>
-                  <td className="px-6 py-2">
-                    {history && history.length > 1 ? (
-                      <Sparkline data={history} />
-                    ) : (
-                      <span className="text-[var(--faint)]">—</span>
-                    )}
-                  </td>
-                  <td className="mono px-6 py-3.5 text-right text-[var(--muted)]">
-                    {h.quantity?.toLocaleString()}
-                  </td>
-                  <PriceCell price={price ?? 0} currency={currency} />
-                  <DayCell pct={dayPct} />
-                  <td className="mono px-6 py-3.5 text-right">
-                    {formatCurrency(value, currency)}
-                  </td>
-                </tr>
+                  h={h}
+                  quotes={quotes}
+                  history={sym ? histories[sym] : undefined}
+                  txns={sym ? txnsByTicker[sym] ?? [] : []}
+                />
               );
             })}
             {holdings.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-6 py-10 text-center text-[var(--muted)]">
+                <td colSpan={9} className="px-6 py-10 text-center text-[var(--muted)]">
                   No holdings yet. Connect a brokerage account and hit Sync.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+        </div>
       </Card>
+    </div>
+  );
+}
+
+/** A holding row plus, when expanded, its full price-history + trades panel. */
+function HoldingRowView({
+  h,
+  quotes,
+  history,
+  txns,
+}: {
+  h: HoldingRow;
+  quotes: Record<string, LiveQuote>;
+  history?: PricePoint[];
+  txns: InvestmentTxnRow[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const price = effectivePrice(h, quotes);
+  const value = effectiveValue(h, quotes);
+  const dayPct = dayChangePct(h, quotes);
+  const pnl = effectivePnl(h, quotes);
+  const pnlPct = pnl != null && h.costBasis ? (pnl / h.costBasis) * 100 : null;
+  const currency = h.currency ?? "USD";
+  const canExpand = Boolean(h.ticker);
+
+  return (
+    <>
+      <tr className="group border-b border-line/60 last:border-0 transition-colors hover:bg-[var(--panel-2)]">
+        <td className="w-8 pl-2">
+          {canExpand && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              aria-label={expanded ? `Collapse ${h.ticker}` : `Expand ${h.ticker}`}
+              className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
+            >
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+              />
+            </button>
+          )}
+        </td>
+        <td className="py-3.5 pr-3 pl-1">
+          <span className="inline-flex items-center gap-2">
+            <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+            <span className="text-[var(--muted)]">{h.securityName}</span>
+            {h.manual && (
+              <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+                {h.securityType ?? "manual"}
+              </span>
+            )}
+            {h.manual && (
+              <span className="inline-flex items-center">
+                <EditManualHoldingButton
+                  id={h.id}
+                  name={h.securityName ?? h.ticker ?? "holding"}
+                  isTickered={Boolean(h.ticker)}
+                  quantity={h.quantity}
+                  costBasis={h.costBasis}
+                  value={h.value}
+                />
+                <DeleteManualHoldingButton
+                  id={h.id}
+                  name={h.securityName ?? h.ticker ?? "holding"}
+                />
+              </span>
+            )}
+          </span>
+        </td>
+        <td className="px-3 py-3.5 text-[var(--muted)]">{h.accountName}</td>
+        <td className="px-3 py-2">
+          {history && history.length > 1 ? (
+            <Sparkline data={history} />
+          ) : (
+            <span className="text-[var(--faint)]">—</span>
+          )}
+        </td>
+        <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">
+          {h.quantity?.toLocaleString()}
+        </td>
+        <PriceCell price={price ?? 0} currency={currency} />
+        <DayCell pct={dayPct} />
+        <td className="mono px-3 py-3.5 text-right">{formatCurrency(value, currency)}</td>
+        <PnlCell pnl={pnl} pct={pnlPct} currency={currency} />
+      </tr>
+      {expanded && canExpand && (
+        <tr className="border-b border-line/60 bg-[var(--panel-2)]/40">
+          <td colSpan={9} className="px-4 py-5 sm:px-6">
+            <TickerHistoryPanel
+              ticker={h.ticker as string}
+              history={history ?? []}
+              txns={txns}
+              currency={currency}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Per-ticker price chart (with trade markers) + its investment-transaction log. */
+function TickerHistoryPanel({
+  ticker,
+  history,
+  txns,
+  currency,
+}: {
+  ticker: string;
+  history: PricePoint[];
+  txns: InvestmentTxnRow[];
+  currency: string;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
+        <div className="flex items-center justify-between border-b border-line px-5 py-3">
+          <span className="eyebrow">{ticker} · price history · 12 mo</span>
+          <span className="flex items-center gap-3 text-xs text-[var(--muted)]">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-[var(--jade)]" /> Buy
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-[var(--coral)]" /> Sell
+            </span>
+          </span>
+        </div>
+        <div className="px-2 py-4 sm:px-4">
+          <TickerPriceChart
+            data={history}
+            trades={txns.map((t) => ({
+              date: t.date,
+              quantity: t.quantity,
+              price: t.price,
+              type: t.type,
+            }))}
+          />
+        </div>
+      </div>
+
+      {txns.length > 0 ? (
+        <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line text-left">
+                {["Date", "Activity", "Qty", "Price", "Amount"].map((h, i) => (
+                  <th
+                    key={h}
+                    className={`px-5 py-2.5 eyebrow font-medium ${i >= 2 ? "text-right" : ""}`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {txns.map((t) => (
+                <tr key={t.id} className="border-b border-line/60 last:border-0">
+                  <td className="mono px-5 py-2.5 text-[var(--muted)]">{t.date}</td>
+                  <td className="px-5 py-2.5 capitalize">{t.subtype ?? t.type ?? t.name}</td>
+                  <td className="mono px-5 py-2.5 text-right text-[var(--muted)]">
+                    {t.quantity != null ? t.quantity.toLocaleString() : "—"}
+                  </td>
+                  <td className="mono px-5 py-2.5 text-right">
+                    {t.price != null ? formatCurrency(t.price, t.currency ?? currency) : "—"}
+                  </td>
+                  <td className="mono px-5 py-2.5 text-right">
+                    {t.amount != null ? formatCurrency(t.amount, t.currency ?? currency) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-1 text-sm text-[var(--muted)]">
+          No recorded transactions for {ticker} in the last 2 years.
+        </p>
+      )}
     </div>
   );
 }
@@ -213,9 +450,69 @@ function PriceCell({ price, currency }: { price: number; currency: string }) {
 
   return (
     <td
-      className={`mono px-6 py-3.5 text-right transition-colors duration-200 ${color}`}
+      className={`mono px-3 py-3.5 text-right transition-colors duration-200 ${color}`}
     >
       {formatCurrency(price, currency)}
+    </td>
+  );
+}
+
+/** Clickable, right-aligned column header that drives the holdings sort. */
+function SortHeader({
+  label,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  dir: "asc" | "desc";
+  onClick: () => void;
+}) {
+  return (
+    <th className="px-3 py-3.5 text-right eyebrow font-medium">
+      <button
+        onClick={onClick}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-[var(--paper)] ${
+          active ? "text-[var(--paper)]" : ""
+        }`}
+      >
+        {label}
+        <span className={active ? "text-[var(--brass)]" : "text-[var(--faint)]"}>
+          {active ? (dir === "desc" ? "↓" : "↑") : "↕"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+/** Unrealized P&L cell: signed value + percent, dash when there's no cost basis. */
+function PnlCell({
+  pnl,
+  pct,
+  currency,
+}: {
+  pnl: number | null;
+  pct: number | null;
+  currency: string;
+}) {
+  if (pnl == null) {
+    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
+  }
+  const positive = pnl >= 0;
+  const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";
+  return (
+    <td className={`mono px-3 py-3.5 text-right ${color}`}>
+      <div>
+        {positive ? "+" : "−"}
+        {formatCurrency(Math.abs(pnl), currency)}
+      </div>
+      {pct != null && (
+        <div className="text-xs opacity-80">
+          {positive ? "+" : "−"}
+          {Math.abs(pct).toFixed(2)}%
+        </div>
+      )}
     </td>
   );
 }
@@ -223,12 +520,12 @@ function PriceCell({ price, currency }: { price: number; currency: string }) {
 /** Day-change cell: green/red signed percent, or a dash when we have no quote. */
 function DayCell({ pct }: { pct: number | null }) {
   if (pct == null) {
-    return <td className="mono px-6 py-3.5 text-right text-[var(--faint)]">—</td>;
+    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
   }
   const positive = pct >= 0;
   const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";
   return (
-    <td className={`mono px-6 py-3.5 text-right ${color}`}>
+    <td className={`mono px-3 py-3.5 text-right ${color}`}>
       {positive ? "+" : "−"}
       {Math.abs(pct).toFixed(2)}%
     </td>

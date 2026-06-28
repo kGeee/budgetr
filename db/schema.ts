@@ -261,11 +261,72 @@ export const vendorGroupMembers = sqliteTable(
   (t) => [index("vgm_group_idx").on(t.groupId)],
 );
 
+/**
+ * Investment activity from Plaid (buys, sells, dividends, fees, transfers).
+ * Unlike `holdings` (current snapshot), this is the historical ledger used to
+ * reconstruct what was held on any past date and to mark trades on the
+ * per-ticker price charts. `quantity` is positive for buys, negative for sells.
+ */
+export const investmentTransactions = sqliteTable(
+  "investment_transactions",
+  {
+    id: text("id").primaryKey(), // Plaid investment_transaction_id
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    // Null for cash-only activity (e.g. account fees) with no associated security.
+    securityId: text("security_id").references(() => securities.id),
+    date: text("date").notNull(), // YYYY-MM-DD
+    name: text("name").notNull(),
+    type: text("type"), // buy | sell | cash | fee | transfer | cancel
+    subtype: text("subtype"),
+    quantity: real("quantity"), // + buy, - sell
+    amount: real("amount"), // + cash debited (buy), - cash credited (sell)
+    price: real("price"),
+    fees: real("fees"),
+    isoCurrencyCode: text("iso_currency_code"),
+  },
+  (t) => [
+    index("invtx_account_idx").on(t.accountId),
+    index("invtx_security_idx").on(t.securityId),
+    index("invtx_date_idx").on(t.date),
+  ],
+);
+
+/**
+ * User-entered holdings that live outside Plaid — crypto, assets at
+ * un-linkable institutions, or fixed-value items (e.g. cash, a gold bar).
+ *
+ * Two flavours, distinguished by `symbol`:
+ *  - Tickered  (symbol set, e.g. "BTC-USD"): valued as quantity × market price,
+ *    auto-priced from Yahoo with a full history chart.
+ *  - Fixed-value (symbol null): valued at the user-set `manualValue`, no chart.
+ *
+ * Kept in its own table so the Plaid holdings prune in lib/sync.ts can never
+ * touch them.
+ */
+export const manualHoldings = sqliteTable("manual_holdings", {
+  id: text("id").primaryKey(),
+  // Market symbol Yahoo understands (BTC-USD, ETH-USD, a stock ticker). Null
+  // marks a fixed-value asset valued by `manualValue`.
+  symbol: text("symbol"),
+  name: text("name").notNull(),
+  type: text("type"), // crypto | stock | cash | other
+  quantity: real("quantity"), // tickered assets
+  costBasis: real("cost_basis"),
+  manualValue: real("manual_value"), // fixed-value assets
+  isoCurrencyCode: text("iso_currency_code"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type Security = typeof securities.$inferSelect;
 export type Holding = typeof holdings.$inferSelect;
+export type InvestmentTransaction = typeof investmentTransactions.$inferSelect;
+export type ManualHolding = typeof manualHoldings.$inferSelect;
 export type BalanceSnapshot = typeof balanceSnapshots.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Tag = typeof tags.$inferSelect;

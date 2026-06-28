@@ -1,5 +1,14 @@
 import { db } from "@/db";
-import { accounts, holdings, items, securities, vendorGroupMembers, vendorGroups } from "@/db/schema";
+import {
+  accounts,
+  holdings,
+  investmentTransactions,
+  items,
+  manualHoldings,
+  securities,
+  vendorGroupMembers,
+  vendorGroups,
+} from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 
@@ -723,6 +732,76 @@ export function getHoldings() {
     .leftJoin(securities, eq(holdings.securityId, securities.id))
     .leftJoin(accounts, eq(holdings.accountId, accounts.id))
     .orderBy(desc(holdings.institutionValue))
+    .all();
+}
+
+export type ManualHoldingRow = {
+  id: string;
+  symbol: string | null;
+  name: string;
+  type: string | null;
+  quantity: number | null;
+  costBasis: number | null;
+  manualValue: number | null;
+  currency: string | null;
+};
+
+/** User-entered off-Plaid holdings (crypto, fixed-value assets), newest first. */
+export function getManualHoldings(): ManualHoldingRow[] {
+  return db
+    .select({
+      id: manualHoldings.id,
+      symbol: manualHoldings.symbol,
+      name: manualHoldings.name,
+      type: manualHoldings.type,
+      quantity: manualHoldings.quantity,
+      costBasis: manualHoldings.costBasis,
+      manualValue: manualHoldings.manualValue,
+      currency: manualHoldings.isoCurrencyCode,
+    })
+    .from(manualHoldings)
+    .orderBy(desc(manualHoldings.createdAt))
+    .all();
+}
+
+export type InvestmentTxnRow = {
+  id: string;
+  date: string;
+  name: string;
+  type: string | null;
+  subtype: string | null;
+  quantity: number | null;
+  amount: number | null;
+  price: number | null;
+  fees: number | null;
+  currency: string | null;
+  ticker: string | null;
+  securityName: string | null;
+  accountName: string | null;
+};
+
+/** All investment transactions (buys/sells/dividends), newest first, with ticker. */
+export function getInvestmentTransactions(): InvestmentTxnRow[] {
+  return db
+    .select({
+      id: investmentTransactions.id,
+      date: investmentTransactions.date,
+      name: investmentTransactions.name,
+      type: investmentTransactions.type,
+      subtype: investmentTransactions.subtype,
+      quantity: investmentTransactions.quantity,
+      amount: investmentTransactions.amount,
+      price: investmentTransactions.price,
+      fees: investmentTransactions.fees,
+      currency: investmentTransactions.isoCurrencyCode,
+      ticker: securities.tickerSymbol,
+      securityName: securities.name,
+      accountName: accounts.name,
+    })
+    .from(investmentTransactions)
+    .leftJoin(securities, eq(investmentTransactions.securityId, securities.id))
+    .leftJoin(accounts, eq(investmentTransactions.accountId, accounts.id))
+    .orderBy(desc(investmentTransactions.date))
     .all();
 }
 

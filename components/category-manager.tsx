@@ -3,8 +3,9 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, ArrowUpRight, Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
+import { Archive, ArrowUpRight, Check, ChevronDown, Pencil, Plus, RotateCcw, X } from "lucide-react";
 import { CategoryIcon } from "@/components/category-pill";
+import { CategoryDetailPanel } from "@/components/category-detail-panel";
 import { Button } from "@/components/ui/button";
 import {
   archiveCategory,
@@ -42,7 +43,7 @@ export function CategoryManager({
           <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
             <ul>
               {rows.map((c) => (
-                <Row key={c.id} category={c} />
+                <Row key={c.id} category={c} categories={categories} />
               ))}
               {rows.length === 0 && (
                 <li className="px-5 py-4 text-sm text-[var(--muted)]">No categories yet.</li>
@@ -101,9 +102,10 @@ function ArchivedRow({ category }: { category: CategoryRow }) {
   );
 }
 
-function Row({ category }: { category: CategoryRow }) {
+function Row({ category, categories }: { category: CategoryRow; categories: CategoryRow[] }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState(category.name);
   const [pending, start] = useTransition();
 
@@ -131,11 +133,24 @@ function Row({ category }: { category: CategoryRow }) {
   }
 
   return (
-    <li
-      className={`group flex items-center gap-3 border-b border-line/60 px-5 py-3.5 last:border-0 transition-colors hover:bg-[var(--panel-2)] ${
+    <li className="border-b border-line/60 last:border-0">
+    <div
+      className={`group flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-[var(--panel-2)] ${
         pending ? "opacity-50" : ""
       }`}
     >
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        aria-label={expanded ? `Collapse ${category.name}` : `Expand ${category.name}`}
+        aria-expanded={expanded}
+        className="shrink-0 rounded-md p-0.5 text-[var(--faint)] transition hover:text-[var(--paper)]"
+      >
+        <ChevronDown
+          size={15}
+          className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
+
       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--brass)]">
         <CategoryIcon icon={category.icon} size={15} />
       </span>
@@ -190,6 +205,14 @@ function Row({ category }: { category: CategoryRow }) {
       >
         <Archive size={14} />
       </button>
+    </div>
+      {expanded && (
+        <CategoryDetailPanel
+          categoryId={category.id}
+          categories={categories}
+          group={category.group}
+        />
+      )}
     </li>
   );
 }

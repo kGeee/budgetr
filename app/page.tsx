@@ -1,7 +1,9 @@
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHead } from "@/components/page-head";
-import { CashflowChart, CategoryChart, NetWorthChart } from "@/components/charts";
+import { CashflowChart, CategoryChart } from "@/components/charts";
+import { ValueHistory } from "@/components/value-history";
+import { buildReconstructedSeries, getTickerHistories, overlayNetWorth } from "@/lib/portfolio-history";
 import { CategoryIcon } from "@/components/category-pill";
 import { BudgetBar } from "@/components/budget-bar";
 import { ReviewInbox } from "@/components/review-inbox";
@@ -12,6 +14,7 @@ import {
   getBudgetsWithSpend,
   getCategories,
   getItems,
+  getManualHoldings,
   getMonthlyBudgetSummary,
   getMonthlyCashflow,
   getNetWorth,
@@ -24,14 +27,47 @@ import {
 import { formatCurrency } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+// Allow the manual-holding Yahoo history fetches to hit the Data Cache rather
+// than being forced no-store by `force-dynamic`.
+export const fetchCache = "default-cache";
 
-export default function Dashboard() {
+export default async function Dashboard() {
   const items = getItems();
 
   if (items.length === 0) return <EmptyState />;
 
-  const nw = getNetWorth();
-  const series = getNetWorthSeries();
+  const baseNw = getNetWorth();
+  const baseSeries = getNetWorthSeries();
+
+  // Fold off-Plaid holdings (crypto, fixed-value assets) into net worth so the
+  // dashboard reflects everything, with a live "today" point.
+  const manual = getManualHoldings();
+  const manualSymbols = manual.map((m) => m.symbol).filter((s): s is string => Boolean(s));
+  const manualHistories = await getTickerHistories(manualSymbols);
+  const manualTickeredSeries = buildReconstructedSeries(
+    manual.filter((m) => m.symbol).map((m) => ({ ticker: m.symbol, quantity: m.quantity })),
+    [],
+    manualHistories,
+  );
+  const fixedValueTotal = manual
+    .filter((m) => !m.symbol)
+    .reduce((s, m) => s + (m.manualValue ?? 0), 0);
+  const manualTickeredToday =
+    manualTickeredSeries.length > 0
+      ? manualTickeredSeries[manualTickeredSeries.length - 1].value
+      : 0;
+  const manualToday = manualTickeredToday + fixedValueTotal;
+
+  const nw = {
+    assets: baseNw.assets + manualToday,
+    liabilities: baseNw.liabilities,
+    net: baseNw.net + manualToday,
+  };
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const series = overlayNetWorth(baseSeries, manualTickeredSeries, fixedValueTotal, {
+    date: todayStr,
+    net: nw.net,
+  });
   const cashflow = getMonthlyCashflow();
   const categories = getSpendingByCategory(30);
   const recent = getRecentTransactions(7);
@@ -79,7 +115,10 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="mt-7">
-          <NetWorthChart data={series} />
+          <ValueHistory
+            data={series.map((s) => ({ date: s.date, value: s.netWorth }))}
+            kind="networth"
+          />
         </div>
       </Card>
 

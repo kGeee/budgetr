@@ -2,6 +2,7 @@ import { db } from "@/db";
 import {
   accounts,
   holdings,
+  investmentTransactions,
   items,
   securities,
   transactions,
@@ -228,6 +229,105 @@ async function syncInvestments(accessToken: string) {
   }
 }
 
+/**
+ * Pull investment transactions (buys/sells/dividends/fees) over a trailing
+ * 2-year window. This is the historical ledger powering accurate portfolio
+ * reconstruction and per-ticker trade markers. Paginates via offset/count.
+ */
+async function syncInvestmentTransactions(accessToken: string) {
+  try {
+    const end = todayStr();
+    const startDate = new Date();
+    startDate.setFullYear(startDate.getFullYear() - 2);
+    const start = startDate.toISOString().slice(0, 10);
+
+    // FK safety: only persist transactions for accounts we already have.
+    const knownAccounts = new Set(
+      db.select({ id: accounts.id }).from(accounts).all().map((a) => a.id),
+    );
+
+    let offset = 0;
+    let total = Infinity;
+    while (offset < total) {
+      const res = await plaid.investmentsTransactionsGet({
+        access_token: accessToken,
+        start_date: start,
+        end_date: end,
+        options: { count: 500, offset },
+      });
+      total = res.data.total_investment_transactions;
+
+      // Upsert securities referenced here first (may include sold-out positions
+      // absent from current holdings) so the security_id FK targets exist.
+      for (const s of res.data.securities) {
+        db.insert(securities)
+          .values({
+            id: s.security_id,
+            name: s.name ?? null,
+            tickerSymbol: s.ticker_symbol ?? null,
+            type: s.type ? String(s.type) : null,
+            closePrice: s.close_price ?? null,
+            isoCurrencyCode: s.iso_currency_code ?? null,
+          })
+          .onConflictDoUpdate({
+            target: securities.id,
+            set: {
+              name: s.name ?? null,
+              tickerSymbol: s.ticker_symbol ?? null,
+              closePrice: s.close_price ?? null,
+            },
+          })
+          .run();
+      }
+
+      for (const it of res.data.investment_transactions) {
+        if (!knownAccounts.has(it.account_id)) continue;
+        const row = {
+          id: it.investment_transaction_id,
+          accountId: it.account_id,
+          securityId: it.security_id ?? null,
+          date: it.date,
+          name: it.name,
+          type: it.type ? String(it.type) : null,
+          subtype: it.subtype ? String(it.subtype) : null,
+          quantity: it.quantity ?? null,
+          amount: it.amount ?? null,
+          price: it.price ?? null,
+          fees: it.fees ?? null,
+          isoCurrencyCode: it.iso_currency_code ?? null,
+        };
+        db.insert(investmentTransactions)
+          .values(row)
+          .onConflictDoUpdate({
+            target: investmentTransactions.id,
+            set: {
+              securityId: row.securityId,
+              date: row.date,
+              name: row.name,
+              type: row.type,
+              subtype: row.subtype,
+              quantity: row.quantity,
+              amount: row.amount,
+              price: row.price,
+              fees: row.fees,
+            },
+          })
+          .run();
+      }
+
+      const fetched = res.data.investment_transactions.length;
+      if (fetched === 0) break;
+      offset += fetched;
+    }
+  } catch (err: unknown) {
+    const code = (err as { response?: { data?: { error_code?: string } } })?.response?.data
+      ?.error_code;
+    if (code && code !== "PRODUCTS_NOT_SUPPORTED" && code !== "NO_INVESTMENT_ACCOUNTS") {
+      console.warn(`investment transactions sync skipped (${code})`);
+    }
+  }
+}
+
 /** Pull recurring transaction streams (subscriptions, paychecks, bills). */
 async function syncRecurring(accessToken: string) {
   try {
@@ -294,6 +394,7 @@ export async function syncItem(item: Item) {
   await refreshAccounts(item, accessToken);
   const tx = await syncTransactions(item, accessToken);
   await syncInvestments(accessToken);
+  await syncInvestmentTransactions(accessToken);
   await syncRecurring(accessToken);
 
   db.update(items)

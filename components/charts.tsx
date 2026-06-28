@@ -128,9 +128,20 @@ export function CashflowChart({
   );
 }
 
-export function MonthlySpendChart({ data }: { data: { month: string; spent: number }[] }) {
+export function MonthlySpendChart({
+  data,
+  selectedMonth = null,
+  onSelectMonth,
+}: {
+  data: { month: string; spent: number }[];
+  /** Highlighted month ('YYYY-MM'), when the chart drives a filter. */
+  selectedMonth?: string | null;
+  /** Called with the clicked month, or null when the active bar is clicked again. */
+  onSelectMonth?: (month: string | null) => void;
+}) {
   if (data.length === 0)
     return <Empty label="No spend in range" hint="Nothing recorded for this vendor yet." />;
+  const clickable = Boolean(onSelectMonth);
   return (
     <ResponsiveContainer width="100%" height={200}>
       <BarChart data={data} margin={{ left: 4, right: 8, top: 8 }}>
@@ -157,7 +168,27 @@ export function MonthlySpendChart({ data }: { data: { month: string; spent: numb
           formatter={(value) => [formatCurrency(Number(value)), "Spent"]}
           labelFormatter={(m) => format(parseISO(m + "-01"), "MMMM yyyy")}
         />
-        <Bar dataKey="spent" fill="#cbb07c" radius={[3, 3, 0, 0]} maxBarSize={30} />
+        <Bar
+          dataKey="spent"
+          radius={[3, 3, 0, 0]}
+          maxBarSize={30}
+          cursor={clickable ? "pointer" : undefined}
+          onClick={
+            onSelectMonth
+              ? (entry) => {
+                  const month = (entry as { payload?: { month?: string } })?.payload?.month;
+                  if (month) onSelectMonth(month === selectedMonth ? null : month);
+                }
+              : undefined
+          }
+        >
+          {data.map((d) => (
+            <Cell
+              key={d.month}
+              fill={selectedMonth && d.month !== selectedMonth ? "#cbb07c66" : "#cbb07c"}
+            />
+          ))}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
@@ -269,6 +300,70 @@ export function PortfolioChart({ data }: { data: { date: string; value: number }
   );
 }
 
+/**
+ * Generic value-over-time area chart over `{ date, value }`. Backs both the
+ * net-worth and portfolio history trackers (via ValueHistory's window tabs).
+ */
+export function ValueAreaChart({
+  data,
+  color = "#cbb07c",
+  gradientId = "val",
+  valueLabel = "Value",
+  height = 280,
+}: {
+  data: { date: string; value: number }[];
+  color?: string;
+  gradientId?: string;
+  valueLabel?: string;
+  height?: number;
+}) {
+  if (data.length === 0)
+    return <Empty label="No history yet" hint="Sync to begin charting this over time." />;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.28} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke={GRID} vertical={false} />
+        <XAxis
+          dataKey="date"
+          tickFormatter={(d) => format(parseISO(d), "MMM d")}
+          tick={tick}
+          tickLine={false}
+          axisLine={{ stroke: GRID }}
+          minTickGap={28}
+        />
+        <YAxis
+          tickFormatter={(v) => formatCompactCurrency(v)}
+          tick={tick}
+          tickLine={false}
+          axisLine={false}
+          width={58}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ stroke: color, strokeWidth: 1, strokeDasharray: "3 3" }}
+          formatter={(value) => [formatCurrency(Number(value)), valueLabel]}
+          labelFormatter={(d) => format(parseISO(d as string), "PP")}
+        />
+        <Area
+          type="monotone"
+          dataKey="value"
+          stroke={color}
+          strokeWidth={2.5}
+          fill={`url(#${gradientId})`}
+          activeDot={{ r: 4, fill: color, stroke: "#090c0b", strokeWidth: 2 }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
 /** Tiny inline price trend; green when up over the window, coral when down. */
 export function Sparkline({
   data,
@@ -292,6 +387,119 @@ export function Sparkline({
           strokeWidth={1.5}
           dot={false}
           isAnimationActive={false}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+type TickerTrade = {
+  date: string;
+  quantity: number | null;
+  price: number | null;
+  type: string | null;
+};
+
+/**
+ * Full price history for one ticker with the user's buy/sell trades marked.
+ * Trades are snapped to the nearest trading day at/under their date so the
+ * markers always align to a point on the (category) x-axis. Markers are drawn
+ * as zero-width lines so only their dots show.
+ */
+export function TickerPriceChart({
+  data,
+  trades = [],
+}: {
+  data: { date: string; close: number }[];
+  trades?: TickerTrade[];
+}) {
+  if (data.length < 2)
+    return <Empty label="No price history" hint="Yahoo Finance had no closes for this ticker." />;
+
+  const dates = data.map((d) => d.date);
+  // Snap a trade date to the latest trading day on or before it (else the first).
+  const snap = (date: string): string => {
+    let chosen = dates[0];
+    for (const d of dates) {
+      if (d <= date) chosen = d;
+      else break;
+    }
+    return chosen;
+  };
+
+  const closeByDate = new Map(data.map((d) => [d.date, d.close]));
+  const buyAt = new Map<string, number>();
+  const sellAt = new Map<string, number>();
+  for (const t of trades) {
+    if (!t.quantity) continue;
+    const key = snap(t.date);
+    const y = t.price && t.price > 0 ? t.price : (closeByDate.get(key) ?? 0);
+    const isBuy = t.type === "buy" || t.quantity > 0;
+    (isBuy ? buyAt : sellAt).set(key, y);
+  }
+
+  const merged = data.map((d) => ({
+    date: d.date,
+    close: d.close,
+    buy: buyAt.get(d.date) ?? null,
+    sell: sellAt.get(d.date) ?? null,
+  }));
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={merged} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+        <CartesianGrid stroke={GRID} vertical={false} />
+        <XAxis
+          dataKey="date"
+          tickFormatter={(d) => format(parseISO(d), "MMM d")}
+          tick={tick}
+          tickLine={false}
+          axisLine={{ stroke: GRID }}
+          minTickGap={28}
+        />
+        <YAxis
+          tickFormatter={(v) => formatCompactCurrency(v)}
+          tick={tick}
+          tickLine={false}
+          axisLine={false}
+          width={56}
+          domain={["auto", "auto"]}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          formatter={(value, name) => [
+            formatCurrency(Number(value)),
+            name === "buy" ? "Buy" : name === "sell" ? "Sell" : "Close",
+          ]}
+          labelFormatter={(d) => format(parseISO(d as string), "PP")}
+        />
+        <Line
+          type="monotone"
+          dataKey="close"
+          stroke="#cbb07c"
+          strokeWidth={2}
+          dot={false}
+          isAnimationActive={false}
+        />
+        <Line
+          dataKey="buy"
+          stroke="transparent"
+          strokeWidth={0}
+          legendType="none"
+          dot={{ r: 4, fill: "#6fe3a6", stroke: "#090c0b", strokeWidth: 1.5 }}
+          isAnimationActive={false}
+          connectNulls={false}
+        />
+        <Line
+          dataKey="sell"
+          stroke="transparent"
+          strokeWidth={0}
+          legendType="none"
+          dot={{ r: 4, fill: "#f0897b", stroke: "#090c0b", strokeWidth: 1.5 }}
+          isAnimationActive={false}
+          connectNulls={false}
         />
       </LineChart>
     </ResponsiveContainer>

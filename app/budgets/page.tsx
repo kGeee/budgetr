@@ -2,6 +2,7 @@ import { PageHead } from "@/components/page-head";
 import { BudgetEditor } from "@/components/budget-editor";
 import {
   getBudgetsWithSpend,
+  getCategories,
   getMonthlyBudgetSummary,
   getTagBudgetsWithSpend,
 } from "@/lib/queries";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 export default function BudgetsPage() {
   const rows = getBudgetsWithSpend();
   const tagRows = getTagBudgetsWithSpend();
+  const categories = getCategories();
   const { totalBudget, totalSpent, left, month } = getMonthlyBudgetSummary();
   const over = left < 0;
   const monthLabel = new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", {
@@ -40,7 +42,7 @@ export default function BudgetsPage() {
 
       <div>
         <p className="eyebrow mb-3">Spending categories</p>
-        <BudgetEditor rows={rows} />
+        <BudgetEditor rows={rows} categories={categories} />
       </div>
 
       {tagRows.length > 0 && (

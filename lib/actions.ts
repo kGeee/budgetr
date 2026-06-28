@@ -5,6 +5,7 @@ import { db } from "@/db";
 import {
   budgets,
   categories,
+  manualHoldings,
   tagBudgets,
   tagRules,
   tags,
@@ -16,6 +17,12 @@ import {
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { applyTagRules } from "@/lib/tag-rules";
 import { cleanTransactionName } from "@/lib/utils";
+import {
+  getCategoryMonthlyBreakdown,
+  getCategoryTransactions,
+  type CategoryMonth,
+  type TransactionRow,
+} from "@/lib/queries";
 
 /**
  * Server Actions for budgetr's user overlay (categories, review status, tags,
@@ -35,6 +42,20 @@ function revalidateAll() {
 // ── Categories ──────────────────────────────────────────────────────────────
 
 type CategoryGroup = "income" | "spending" | "transfer";
+
+/**
+ * Lazily load a category's monthly breakdown + transactions for the inline
+ * expandable panels on the Categories and Budgets pages. Read-only — it just
+ * wraps the queries so client components can fetch on demand when a row opens.
+ */
+export async function getCategoryDetail(
+  categoryId: string,
+): Promise<{ months: CategoryMonth[]; txns: TransactionRow[] }> {
+  return {
+    months: getCategoryMonthlyBreakdown(categoryId),
+    txns: getCategoryTransactions(categoryId),
+  };
+}
 
 /** Create a user category (no Plaid mapping). Returns the new id. */
 export async function createCategory(name: string, group: CategoryGroup = "spending") {
@@ -325,5 +346,64 @@ export async function addVendorToGroup(vendorKey: string, groupId: string) {
 /** Remove a raw vendor key from its group (returns it to standalone). */
 export async function removeVendorFromGroup(vendorKey: string) {
   db.delete(vendorGroupMembers).where(eq(vendorGroupMembers.vendorKey, vendorKey)).run();
+  revalidateAll();
+}
+
+// ── Manual (off-Plaid) holdings ──────────────────────────────────────────────
+
+export type ManualHoldingInput = {
+  name: string;
+  symbol?: string | null;
+  type?: string | null;
+  quantity?: number | null;
+  costBasis?: number | null;
+  manualValue?: number | null;
+};
+
+/**
+ * Add an off-account holding. A `symbol` makes it tickered (valued by quantity ×
+ * market price); without one it's a fixed-value asset valued by `manualValue`.
+ */
+export async function addManualHolding(input: ManualHoldingInput) {
+  const name = input.name?.trim();
+  if (!name) return;
+  const symbol = input.symbol?.trim().toUpperCase() || null;
+  const now = new Date();
+  const id = `mh_${crypto.randomUUID().slice(0, 8)}`;
+  db.insert(manualHoldings)
+    .values({
+      id,
+      symbol,
+      name,
+      type: input.type?.trim() || (symbol ? "crypto" : "other"),
+      quantity: symbol ? input.quantity ?? null : null,
+      costBasis: input.costBasis ?? null,
+      manualValue: symbol ? null : input.manualValue ?? null,
+      isoCurrencyCode: "USD",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  revalidateAll();
+  return id;
+}
+
+/** Edit an off-account holding's quantity / cost basis / fixed value / name. */
+export async function updateManualHolding(
+  id: string,
+  patch: { name?: string; quantity?: number | null; costBasis?: number | null; manualValue?: number | null },
+) {
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  if (patch.name !== undefined) set.name = patch.name.trim();
+  if (patch.quantity !== undefined) set.quantity = patch.quantity;
+  if (patch.costBasis !== undefined) set.costBasis = patch.costBasis;
+  if (patch.manualValue !== undefined) set.manualValue = patch.manualValue;
+  db.update(manualHoldings).set(set).where(eq(manualHoldings.id, id)).run();
+  revalidateAll();
+}
+
+/** Remove an off-account holding. */
+export async function deleteManualHolding(id: string) {
+  db.delete(manualHoldings).where(eq(manualHoldings.id, id)).run();
   revalidateAll();
 }
