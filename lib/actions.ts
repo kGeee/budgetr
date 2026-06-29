@@ -5,6 +5,7 @@ import { db } from "@/db";
 import {
   budgets,
   categories,
+  holdingCostBasisOverrides,
   manualHoldings,
   tagBudgets,
   tagRules,
@@ -405,5 +406,56 @@ export async function updateManualHolding(
 /** Remove an off-account holding. */
 export async function deleteManualHolding(id: string) {
   db.delete(manualHoldings).where(eq(manualHoldings.id, id)).run();
+  revalidateAll();
+}
+
+// ── Plaid holding cost-basis overrides ───────────────────────────────────────
+
+export type HoldingCostBasisInput = {
+  /** Total dollars paid for the whole position. */
+  totalCost?: number | null;
+  /** Average cost per share (preferred — survives quantity changes). */
+  unitCost?: number | null;
+  /** Optional informational date, e.g. a brokerage transfer date (YYYY-MM-DD). */
+  asOfDate?: string | null;
+  note?: string | null;
+};
+
+/**
+ * Set (or replace) a user cost-basis correction for a Plaid holding. Stored in
+ * its own table so the next sync can't overwrite it. Passing neither figure
+ * clears any existing override (falls back to the brokerage-reported basis).
+ */
+export async function setHoldingCostBasisOverride(
+  holdingId: string,
+  input: HoldingCostBasisInput,
+) {
+  const id = holdingId?.trim();
+  if (!id) return;
+  const totalCost = input.totalCost ?? null;
+  const unitCost = input.unitCost ?? null;
+  if (totalCost == null && unitCost == null) {
+    return clearHoldingCostBasisOverride(id);
+  }
+  const asOfDate = input.asOfDate?.trim() || null;
+  const note = input.note?.trim() || null;
+  const now = new Date();
+  db.insert(holdingCostBasisOverrides)
+    .values({ holdingId: id, totalCost, unitCost, asOfDate, note, updatedAt: now })
+    .onConflictDoUpdate({
+      target: holdingCostBasisOverrides.holdingId,
+      set: { totalCost, unitCost, asOfDate, note, updatedAt: now },
+    })
+    .run();
+  revalidateAll();
+}
+
+/** Drop a cost-basis correction; the holding reverts to the brokerage figure. */
+export async function clearHoldingCostBasisOverride(holdingId: string) {
+  const id = holdingId?.trim();
+  if (!id) return;
+  db.delete(holdingCostBasisOverrides)
+    .where(eq(holdingCostBasisOverrides.holdingId, id))
+    .run();
   revalidateAll();
 }

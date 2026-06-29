@@ -320,6 +320,25 @@ export const manualHoldings = sqliteTable("manual_holdings", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * User corrections to a Plaid holding's cost basis. Kept in its own table so the
+ * `holdings` sync (which overwrites cost_basis from Plaid on every run) can never
+ * clobber a manual correction — e.g. after a brokerage transfer/merger (TD
+ * Ameritrade → Schwab) that re-dates lots and resets the reported basis.
+ *
+ * Either figure may be set; `unit_cost` (avg cost/share) is preferred when
+ * present since it stays correct as quantity changes, otherwise `total_cost` is
+ * used as-is. `as_of_date` is informational (e.g. the transfer date).
+ */
+export const holdingCostBasisOverrides = sqliteTable("holding_cost_basis_overrides", {
+  holdingId: text("holding_id").primaryKey(), // matches holdings.id (`${accountId}:${securityId}`)
+  totalCost: real("total_cost"), // user-entered total $ basis for the whole position
+  unitCost: real("unit_cost"), // user-entered average cost per share
+  asOfDate: text("as_of_date"), // YYYY-MM-DD, optional (e.g. transfer date)
+  note: text("note"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;

@@ -8,6 +8,7 @@ import { ValueHistory } from "@/components/value-history";
 import {
   AddManualHoldingButton,
   DeleteManualHoldingButton,
+  EditCostBasisButton,
   EditManualHoldingButton,
 } from "@/components/manual-holding-dialog";
 import { formatCurrency } from "@/lib/utils";
@@ -33,6 +34,14 @@ export type HoldingRow = {
   accountName: string | null;
   /** True for user-entered off-Plaid holdings (crypto, fixed-value assets). */
   manual?: boolean;
+  /** Brokerage-reported basis before any user correction (Plaid holdings). */
+  plaidCostBasis?: number | null;
+  /** Raw cost-basis override inputs, for the correction dialog (Plaid holdings). */
+  overrideTotal?: number | null;
+  overrideUnit?: number | null;
+  overrideAsOf?: string | null;
+  /** True when `costBasis` reflects a user correction rather than the brokerage figure. */
+  hasOverride?: boolean;
 };
 
 type PricePoint = { date: string; close: number };
@@ -331,6 +340,28 @@ function HoldingRowView({
                 <DeleteManualHoldingButton
                   id={h.id}
                   name={h.securityName ?? h.ticker ?? "holding"}
+                />
+              </span>
+            )}
+            {!h.manual && (
+              <span className="inline-flex items-center gap-1.5">
+                {h.hasOverride && (
+                  <span
+                    title="Cost basis manually corrected"
+                    className="rounded border border-[var(--brass-dim)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]"
+                  >
+                    adj
+                  </span>
+                )}
+                <EditCostBasisButton
+                  holdingId={h.id}
+                  name={h.securityName ?? h.ticker ?? "holding"}
+                  quantity={h.quantity}
+                  plaidCostBasis={h.plaidCostBasis ?? null}
+                  overrideTotal={h.overrideTotal ?? null}
+                  overrideUnit={h.overrideUnit ?? null}
+                  overrideAsOf={h.overrideAsOf ?? null}
+                  hasOverride={Boolean(h.hasOverride)}
                 />
               </span>
             )}
