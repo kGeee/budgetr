@@ -9,7 +9,7 @@ export function Card({ className, interactive, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        "rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6 shadow-[var(--elev-2)]",
+        "rounded-[var(--radius)] border border-line bg-gradient-to-b from-[var(--panel-2)] to-[var(--panel)] p-6 shadow-[var(--elev-2)]",
         interactive && "lift cursor-pointer",
         className,
       )}

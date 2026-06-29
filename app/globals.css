@@ -5,11 +5,11 @@
   Warm ivory ink on deep forest-black, brass hairlines, jade/coral semantics.
 */
 :root {
-  --ink: #090c0b; /* canvas */
-  --panel: #101413; /* card surface */
-  --panel-2: #161c1a; /* raised / hover */
-  --line: #212a27; /* hairline border */
-  --line-strong: #303b37;
+  --ink: #080b0a; /* canvas — a touch deeper so surfaces lift off it */
+  --panel: #131a18; /* card surface — brighter, visibly separated from canvas */
+  --panel-2: #1c2421; /* raised / hover */
+  --line: #2b3531; /* hairline border — more present */
+  --line-strong: #3a4742;
   --paper: #ece7da; /* primary text — warm ivory */
   --muted: #8b948c; /* secondary text */
   --faint: #5d655f; /* tertiary / axis */
@@ -19,7 +19,7 @@
   --brass: #cbb07c; /* premium hairline accents */
   --brass-dim: #8a7748;
 
-  --radius: 14px;
+  --radius: 18px;
 
   /* Motion — one easing + duration vocabulary so every transition shares a rhythm. */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -28,14 +28,14 @@
   /* Elevation scale — a single, consistent depth language for surfaces.
      Each step pairs a hairline top highlight with a soft, low ambient drop. */
   --elev-1:
-    0 1px 0 0 rgba(255, 255, 255, 0.02) inset,
-    0 12px 28px -22px rgba(0, 0, 0, 0.85);
-  --elev-2:
-    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
-    0 20px 40px -30px rgba(0, 0, 0, 0.85);
-  --elev-3:
     0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
-    0 30px 60px -32px rgba(0, 0, 0, 0.9);
+    0 6px 16px -10px rgba(0, 0, 0, 0.9);
+  --elev-2:
+    0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
+    0 16px 34px -18px rgba(0, 0, 0, 0.85);
+  --elev-3:
+    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+    0 34px 64px -24px rgba(0, 0, 0, 0.92);
 }
 
 @theme inline {
@@ -107,10 +107,10 @@ body::after {
 /* Editorial uppercase micro-label used for section/eyebrow text. */
 .eyebrow {
   font-size: 11px;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 500;
+  color: var(--brass);
+  font-weight: 600;
 }
 
 /* Interactive surface affordance — a restrained lift for cards/rows that are
