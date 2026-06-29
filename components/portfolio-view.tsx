@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Sparkline, TickerPriceChart } from "@/components/charts";
 import { ValueHistory } from "@/components/value-history";
@@ -115,6 +115,7 @@ function PortfolioInner({
   const { quotes, status } = useLivePrices();
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   // Group investment transactions by ticker for each holding's expanded panel.
   const txnsByTicker = useMemo(() => {
@@ -155,17 +156,41 @@ function PortfolioInner({
   }
 
   const total = holdings.reduce((s, h) => s + effectiveValue(h, quotes), 0);
-  const totalCost = holdings.reduce((s, h) => s + (h.costBasis ?? 0), 0);
-  const gain = total - totalCost;
+  // Unrealized gain only spans holdings with a known cost basis — otherwise a
+  // position's whole value would masquerade as gain. This keeps the headline in
+  // lockstep with the sum of the per-row P&L (which is "—" for no-basis rows).
+  const costed = holdings.filter((h) => h.costBasis != null);
+  const totalCost = costed.reduce((s, h) => s + (h.costBasis ?? 0), 0);
+  const costedValue = costed.reduce((s, h) => s + effectiveValue(h, quotes), 0);
+  const gain = costedValue - totalCost;
   const gainPct = totalCost !== 0 ? (gain / totalCost) * 100 : 0;
+  const uncostedValue = total - costedValue;
 
   return (
     <div className="space-y-7">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Stat label="Market value" value={total} big />
         <Stat label="Cost basis" value={totalCost} />
-        <Stat label="Unrealized gain" value={gain} signed pct={gainPct} />
+        <Stat
+          label="Unrealized gain"
+          value={gain}
+          signed
+          pct={gainPct}
+          hint="View breakdown"
+          onClick={() => setShowBreakdown(true)}
+        />
       </div>
+
+      {showBreakdown && (
+        <GainBreakdownModal
+          holdings={holdings}
+          quotes={quotes}
+          gain={gain}
+          totalCost={totalCost}
+          uncostedValue={uncostedValue}
+          onClose={() => setShowBreakdown(false)}
+        />
+      )}
 
       <Card className="p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
@@ -457,6 +482,130 @@ function PriceCell({ price, currency }: { price: number; currency: string }) {
   );
 }
 
+/**
+ * Per-holding reconciliation of the headline unrealized gain. Lists each
+ * position's value, cost basis, and P&L so the total is auditable, and calls out
+ * holdings with no cost basis (in market value but excluded from gain).
+ */
+function GainBreakdownModal({
+  holdings,
+  quotes,
+  gain,
+  totalCost,
+  uncostedValue,
+  onClose,
+}: {
+  holdings: HoldingRow[];
+  quotes: Record<string, LiveQuote>;
+  gain: number;
+  totalCost: number;
+  uncostedValue: number;
+  onClose: () => void;
+}) {
+  const rows = [...holdings]
+    .map((h) => ({
+      h,
+      value: effectiveValue(h, quotes),
+      cost: h.costBasis,
+      pnl: effectivePnl(h, quotes),
+    }))
+    .sort((a, b) => (b.pnl ?? Number.NEGATIVE_INFINITY) - (a.pnl ?? Number.NEGATIVE_INFINITY));
+
+  const gainPositive = gain >= 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <div>
+            <p className="text-sm font-medium">Unrealized gain breakdown</p>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              Per-holding P&amp;L (current value − cost basis)
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--paper)]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-[var(--panel)]">
+              <tr className="border-b border-line text-left">
+                {["Holding", "Value", "Cost basis", "P&L", "%"].map((h, i) => (
+                  <th
+                    key={h}
+                    className={`px-5 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ h, value, cost, pnl }) => {
+                const pct = pnl != null && cost ? (pnl / cost) * 100 : null;
+                const pos = (pnl ?? 0) >= 0;
+                const color = pos ? "text-[var(--jade)]" : "text-[var(--coral)]";
+                return (
+                  <tr key={h.id} className="border-b border-line/60 last:border-0">
+                    <td className="px-5 py-2.5">
+                      <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+                      <span className="ml-2 text-[var(--muted)]">{h.securityName}</span>
+                    </td>
+                    <td className="mono px-5 py-2.5 text-right">
+                      {formatCurrency(value, h.currency ?? "USD")}
+                    </td>
+                    <td className="mono px-5 py-2.5 text-right text-[var(--muted)]">
+                      {cost != null ? formatCurrency(cost, h.currency ?? "USD") : "—"}
+                    </td>
+                    <td className={`mono px-5 py-2.5 text-right ${pnl != null ? color : "text-[var(--faint)]"}`}>
+                      {pnl != null
+                        ? `${pos ? "+" : "−"}${formatCurrency(Math.abs(pnl), h.currency ?? "USD")}`
+                        : "—"}
+                    </td>
+                    <td className={`mono px-5 py-2.5 text-right ${pct != null ? color : "text-[var(--faint)]"}`}>
+                      {pct != null ? `${pos ? "+" : "−"}${Math.abs(pct).toFixed(1)}%` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="border-t border-line px-5 py-4 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[var(--muted)]">Total cost basis</span>
+            <span className="mono">{formatCurrency(totalCost)}</span>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between">
+            <span className="text-[var(--muted)]">Unrealized gain</span>
+            <span className={`mono ${gainPositive ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
+              {gainPositive ? "+" : "−"}
+              {formatCurrency(Math.abs(gain))}
+            </span>
+          </div>
+          {uncostedValue > 0.005 && (
+            <p className="mt-3 border-t border-line/60 pt-3 text-xs text-[var(--muted)]">
+              {formatCurrency(uncostedValue)} sits in holdings without a cost basis — counted in
+              market value but excluded from unrealized gain (no basis to compare against). Add a
+              cost basis to include them.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Clickable, right-aligned column header that drives the holdings sort. */
 function SortHeader({
   label,
@@ -574,18 +723,29 @@ function Stat({
   big,
   signed,
   pct,
+  hint,
+  onClick,
 }: {
   label: string;
   value: number;
   big?: boolean;
   signed?: boolean;
   pct?: number;
+  hint?: string;
+  onClick?: () => void;
 }) {
   const positive = value >= 0;
   const color = signed ? (positive ? "text-[var(--jade)]" : "text-[var(--coral)]") : "";
-  return (
-    <Card>
-      <p className="eyebrow">{label}</p>
+  const body = (
+    <>
+      <div className="flex items-center justify-between">
+        <p className="eyebrow">{label}</p>
+        {hint && onClick && (
+          <span className="text-[10px] text-[var(--faint)] transition-colors group-hover:text-[var(--brass)]">
+            {hint} →
+          </span>
+        )}
+      </div>
       <p className={`mt-2 font-display tabular ${big ? "text-4xl" : "text-3xl"} ${color}`}>
         {signed && positive ? "+" : ""}
         {formatCurrency(value)}
@@ -596,6 +756,26 @@ function Stat({
           {Math.abs(pct).toFixed(2)}%
         </p>
       )}
-    </Card>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <Card
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        }}
+        className="group cursor-pointer text-left transition-colors hover:bg-[var(--panel-2)] focus:outline-none focus:ring-1 focus:ring-[var(--brass-dim)]"
+      >
+        {body}
+      </Card>
+    );
+  }
+  return <Card>{body}</Card>;
 }
