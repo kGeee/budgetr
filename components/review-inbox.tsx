@@ -36,7 +36,7 @@ export function ReviewInbox({
   }
 
   return (
-    <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6 shadow-[0_1px_0_0_rgba(255,255,255,0.02)_inset,0_20px_40px_-30px_rgba(0,0,0,0.8)]">
+    <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6 shadow-[var(--elev-2)]">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="eyebrow">Transactions to review</p>

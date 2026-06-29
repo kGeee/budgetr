@@ -34,7 +34,8 @@ const tooltipStyle = {
   borderRadius: 12,
   fontSize: 12,
   color: "#ece7da",
-  boxShadow: "0 20px 40px -24px rgba(0,0,0,0.9)",
+  padding: "8px 12px",
+  boxShadow: "0 30px 60px -32px rgba(0,0,0,0.9)",
   fontFamily: "var(--font-mono)",
 };
 const labelStyle = { color: "#8b948c", marginBottom: 2 };
@@ -51,7 +52,7 @@ export function NetWorthChart({ data }: { data: { date: string; netWorth: number
             <stop offset="100%" stopColor="#6fe3a6" stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke={GRID} vertical={false} />
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="date"
           tickFormatter={(d) => format(parseISO(d), "MMM d")}
@@ -96,7 +97,7 @@ export function CashflowChart({
   return (
     <ResponsiveContainer width="100%" height={260}>
       <BarChart data={data} margin={{ left: 4, right: 8, top: 8 }} barGap={4}>
-        <CartesianGrid stroke={GRID} vertical={false} />
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="month"
           tickFormatter={(m) => format(parseISO(m + "-01"), "MMM")}
@@ -145,7 +146,7 @@ export function MonthlySpendChart({
   return (
     <ResponsiveContainer width="100%" height={200}>
       <BarChart data={data} margin={{ left: 4, right: 8, top: 8 }}>
-        <CartesianGrid stroke={GRID} vertical={false} />
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="month"
           tickFormatter={(m) => format(parseISO(m + "-01"), "MMM")}
@@ -264,7 +265,7 @@ export function PortfolioChart({ data }: { data: { date: string; value: number }
             <stop offset="100%" stopColor="#cbb07c" stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke={GRID} vertical={false} />
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="date"
           tickFormatter={(d) => format(parseISO(d), "MMM d")}
@@ -328,7 +329,7 @@ export function ValueAreaChart({
             <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke={GRID} vertical={false} />
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="date"
           tickFormatter={(d) => format(parseISO(d), "MMM d")}
@@ -360,6 +361,72 @@ export function ValueAreaChart({
           activeDot={{ r: 4, fill: color, stroke: "#090c0b", strokeWidth: 2 }}
         />
       </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+/**
+ * Cumulative spend for the month against a straight budget-pace line (0 → total
+ * budget). Spend line is jade when on/under pace, coral when ahead of it.
+ */
+export function BudgetPaceChart({
+  data,
+  over,
+}: {
+  data: { date: string; spent: number | null; pace: number }[];
+  over: boolean;
+}) {
+  if (data.length === 0)
+    return <Empty label="No budget set" hint="Set category budgets to track pace." />;
+  const spendColor = over ? "#f0897b" : "#6fe3a6";
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+        <XAxis
+          dataKey="date"
+          tickFormatter={(d) => format(parseISO(d), "d")}
+          tick={tick}
+          tickLine={false}
+          axisLine={{ stroke: GRID }}
+          minTickGap={16}
+        />
+        <YAxis
+          tickFormatter={(v) => formatCompactCurrency(v)}
+          tick={tick}
+          tickLine={false}
+          axisLine={false}
+          width={52}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          formatter={(value, name) => [
+            value == null ? "—" : formatCurrency(Number(value)),
+            name === "pace" ? "Budget pace" : "Spent",
+          ]}
+          labelFormatter={(d) => format(parseISO(d as string), "PP")}
+        />
+        <Line
+          type="monotone"
+          dataKey="pace"
+          stroke="#8b948c"
+          strokeWidth={1.5}
+          strokeDasharray="4 4"
+          dot={false}
+          isAnimationActive={false}
+        />
+        <Line
+          type="monotone"
+          dataKey="spent"
+          stroke={spendColor}
+          strokeWidth={2.5}
+          dot={false}
+          connectNulls={false}
+          isAnimationActive={false}
+        />
+      </LineChart>
     </ResponsiveContainer>
   );
 }
@@ -448,7 +515,7 @@ export function TickerPriceChart({
   return (
     <ResponsiveContainer width="100%" height={220}>
       <LineChart data={merged} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
-        <CartesianGrid stroke={GRID} vertical={false} />
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="date"
           tickFormatter={(d) => format(parseISO(d), "MMM d")}

@@ -20,6 +20,22 @@
   --brass-dim: #8a7748;
 
   --radius: 14px;
+
+  /* Motion — one easing + duration vocabulary so every transition shares a rhythm. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur: 200ms;
+
+  /* Elevation scale — a single, consistent depth language for surfaces.
+     Each step pairs a hairline top highlight with a soft, low ambient drop. */
+  --elev-1:
+    0 1px 0 0 rgba(255, 255, 255, 0.02) inset,
+    0 12px 28px -22px rgba(0, 0, 0, 0.85);
+  --elev-2:
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+    0 20px 40px -30px rgba(0, 0, 0, 0.85);
+  --elev-3:
+    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 30px 60px -32px rgba(0, 0, 0, 0.9);
 }
 
 @theme inline {
@@ -95,6 +111,25 @@ body::after {
   text-transform: uppercase;
   color: var(--muted);
   font-weight: 500;
+}
+
+/* Interactive surface affordance — a restrained lift for cards/rows that are
+   actually clickable. Transform-only so it never reflows neighbours (no CLS). */
+.lift {
+  transition:
+    transform var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    background-color var(--dur) var(--ease);
+  will-change: transform;
+}
+.lift:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: var(--elev-3);
+}
+.lift:active {
+  transform: translateY(0);
 }
 
 ::selection {

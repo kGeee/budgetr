@@ -72,8 +72,11 @@ export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
   return (
     <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-line md:flex">
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-7">
-        <Link href="/" className="mb-9 flex items-center gap-3 px-2">
-          <span className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-lg text-[var(--brass)]">
+        <Link
+          href="/"
+          className="group mb-9 flex items-center gap-3 px-2 transition-opacity hover:opacity-90"
+        >
+          <span className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-lg text-[var(--brass)] shadow-[var(--elev-1)] transition-colors duration-200 group-hover:border-[var(--brass)]">
             ₿
           </span>
           <span className="font-display text-2xl tracking-tight">budgetr</span>
@@ -88,9 +91,9 @@ export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
                 key={href}
                 href={href}
                 aria-current={active ? "page" : undefined}
-                className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-200 ${
                   active
-                    ? "bg-[var(--panel-2)] text-[var(--paper)]"
+                    ? "bg-[var(--panel-2)] text-[var(--paper)] shadow-[var(--elev-1)]"
                     : "text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--paper)]"
                 }`}
               >
