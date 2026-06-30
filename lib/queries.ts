@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import {
   accounts,
+  holdingCostBasisOverrides,
   holdings,
   investmentSectors,
   investmentTransactions,
@@ -794,11 +795,11 @@ export function getItems() {
 }
 
 export function getHoldings() {
-  return db
+  const rows = db
     .select({
       id: holdings.id,
       quantity: holdings.quantity,
-      costBasis: holdings.costBasis,
+      plaidCostBasis: holdings.costBasis,
       price: holdings.institutionPrice,
       value: holdings.institutionValue,
       currency: holdings.isoCurrencyCode,
@@ -807,12 +808,51 @@ export function getHoldings() {
       securityName: securities.name,
       securityType: securities.type,
       accountName: accounts.name,
+      overrideTotal: holdingCostBasisOverrides.totalCost,
+      overrideUnit: holdingCostBasisOverrides.unitCost,
+      overrideAsOf: holdingCostBasisOverrides.asOfDate,
     })
     .from(holdings)
     .leftJoin(securities, eq(holdings.securityId, securities.id))
     .leftJoin(accounts, eq(holdings.accountId, accounts.id))
+    .leftJoin(
+      holdingCostBasisOverrides,
+      eq(holdingCostBasisOverrides.holdingId, holdings.id),
+    )
     .orderBy(desc(holdings.institutionValue))
     .all();
+
+  // Resolve the effective cost basis: a per-share override (preferred — stays
+  // correct as quantity changes) wins, else a total-dollar override, else
+  // Plaid's reported basis. `costBasis` carries the resolved figure so all
+  // downstream P&L math is automatically correction-aware.
+  return rows.map((r) => {
+    const hasOverride = r.overrideTotal != null || r.overrideUnit != null;
+    const costBasis =
+      r.overrideUnit != null && r.quantity != null
+        ? r.overrideUnit * r.quantity
+        : r.overrideTotal != null
+          ? r.overrideTotal
+          : r.plaidCostBasis;
+    return {
+      id: r.id,
+      quantity: r.quantity,
+      costBasis,
+      price: r.price,
+      value: r.value,
+      currency: r.currency,
+      closePrice: r.closePrice,
+      ticker: r.ticker,
+      securityName: r.securityName,
+      securityType: r.securityType,
+      accountName: r.accountName,
+      plaidCostBasis: r.plaidCostBasis,
+      overrideTotal: r.overrideTotal,
+      overrideUnit: r.overrideUnit,
+      overrideAsOf: r.overrideAsOf,
+      hasOverride,
+    };
+  });
 }
 
 /**
