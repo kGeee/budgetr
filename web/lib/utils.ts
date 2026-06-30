@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { scaleForDisplay } from "./scale";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -15,7 +16,7 @@ export function formatCurrency(
     currency,
     maximumFractionDigits: 2,
     ...opts,
-  }).format(amount);
+  }).format(scaleForDisplay(amount));
 }
 
 export function formatCompactCurrency(amount: number, currency = "USD"): string {
@@ -24,7 +25,7 @@ export function formatCompactCurrency(amount: number, currency = "USD"): string 
     currency,
     notation: "compact",
     maximumFractionDigits: 1,
-  }).format(amount);
+  }).format(scaleForDisplay(amount));
 }
 
 /**
