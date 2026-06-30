@@ -20,7 +20,7 @@ import { format, parseISO } from "date-fns";
 import { formatCompactCurrency, formatCurrency } from "@/lib/utils";
 
 // Editorial palette: jade + brass anchored, harmonious cool/warm spread.
-const PIE_COLORS = [
+export const PIE_COLORS = [
   "#6fe3a6", "#cbb07c", "#7fb2e0", "#f0897b", "#b59ce0",
   "#5fc9c0", "#e0c36f", "#9ad17f", "#e08fb8", "#8b948c",
 ];
@@ -502,6 +502,192 @@ export function TickerPriceChart({
           connectNulls={false}
         />
       </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+export type SectorSlice = {
+  sector: string;
+  value: number;
+  count: number;
+  /** Stable color shared across the donut, bar chart, and breakdown panel. */
+  color: string;
+};
+
+/**
+ * Allocation donut: one slice per sector, each labelled with its name and % of
+ * the portfolio. Clicking a slice drives the drill-down filter; the active
+ * sector is emphasized while the rest dim. Colors are supplied by the caller so
+ * they stay in lockstep with the ranking bars and the breakdown list.
+ */
+export function AllocationDonut({
+  data,
+  total,
+  activeSector = null,
+  onSelect,
+}: {
+  data: SectorSlice[];
+  total: number;
+  activeSector?: string | null;
+  onSelect?: (sector: string | null) => void;
+}) {
+  if (data.length === 0)
+    return <Empty label="No sectors yet" hint="Tag a holding's sector to chart your allocation." />;
+
+  const renderLabel = (props: {
+    cx: number;
+    cy: number;
+    midAngle: number;
+    outerRadius: number;
+    percent: number;
+    payload: SectorSlice;
+  }) => {
+    const { cx, cy, midAngle, outerRadius, percent, payload } = props;
+    if (percent < 0.04) return null; // skip slivers — they'd overlap
+    const RAD = Math.PI / 180;
+    const r = outerRadius + 14;
+    const x = cx + r * Math.cos(-midAngle * RAD);
+    const y = cy + r * Math.sin(-midAngle * RAD);
+    const anchor = x >= cx ? "start" : "end";
+    return (
+      <text
+        x={x}
+        y={y}
+        textAnchor={anchor}
+        dominantBaseline="central"
+        fontSize={11}
+        fontFamily="var(--font-mono)"
+        fill="#8b948c"
+      >
+        {payload.sector} · {(percent * 100).toFixed(0)}%
+      </text>
+    );
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-6 sm:flex-row">
+      <div className="relative mx-auto w-full max-w-[280px] shrink-0">
+        <ResponsiveContainer width="100%" height={240}>
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey="value"
+              nameKey="sector"
+              innerRadius={62}
+              outerRadius={92}
+              paddingAngle={2.5}
+              stroke="none"
+              labelLine={false}
+              label={renderLabel}
+              onClick={
+                onSelect
+                  ? (entry) => {
+                      const s = (entry as { payload?: SectorSlice })?.payload?.sector;
+                      if (s) onSelect(s === activeSector ? null : s);
+                    }
+                  : undefined
+              }
+            >
+              {data.map((d) => (
+                <Cell
+                  key={d.sector}
+                  fill={d.color}
+                  fillOpacity={activeSector && d.sector !== activeSector ? 0.32 : 1}
+                  cursor={onSelect ? "pointer" : undefined}
+                />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={tooltipStyle}
+              formatter={(value) => [
+                `${formatCurrency(Number(value))} · ${total ? ((Number(value) / total) * 100).toFixed(1) : "0"}%`,
+                "",
+              ]}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="eyebrow">{activeSector ?? "Total"}</span>
+          <span className="font-display text-lg text-[var(--paper)] tabular">
+            {formatCompactCurrency(
+              activeSector
+                ? data.find((d) => d.sector === activeSector)?.value ?? 0
+                : total,
+            )}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Sectors ranked by dollar value, largest at top. Horizontal bars so long
+ * sector names read cleanly; clicking a bar drives the same drill-down filter
+ * as the donut.
+ */
+export function SectorBarChart({
+  data,
+  activeSector = null,
+  onSelect,
+}: {
+  data: SectorSlice[];
+  activeSector?: string | null;
+  onSelect?: (sector: string | null) => void;
+}) {
+  if (data.length === 0) return null;
+  const ranked = [...data].sort((a, b) => b.value - a.value);
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(120, ranked.length * 38)}>
+      <BarChart
+        data={ranked}
+        layout="vertical"
+        margin={{ left: 4, right: 16, top: 4, bottom: 4 }}
+      >
+        <CartesianGrid stroke={GRID} horizontal={false} />
+        <XAxis
+          type="number"
+          tickFormatter={(v) => formatCompactCurrency(v)}
+          tick={tick}
+          tickLine={false}
+          axisLine={{ stroke: GRID }}
+        />
+        <YAxis
+          type="category"
+          dataKey="sector"
+          tick={tick}
+          tickLine={false}
+          axisLine={false}
+          width={96}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          cursor={{ fill: "rgba(255,255,255,0.04)" }}
+          formatter={(value) => [formatCurrency(Number(value)), "Value"]}
+        />
+        <Bar
+          dataKey="value"
+          radius={[0, 3, 3, 0]}
+          maxBarSize={22}
+          cursor={onSelect ? "pointer" : undefined}
+          onClick={
+            onSelect
+              ? (entry) => {
+                  const s = (entry as { payload?: SectorSlice })?.payload?.sector;
+                  if (s) onSelect(s === activeSector ? null : s);
+                }
+              : undefined
+          }
+        >
+          {ranked.map((d) => (
+            <Cell
+              key={d.sector}
+              fill={d.color}
+              fillOpacity={activeSector && d.sector !== activeSector ? 0.32 : 1}
+            />
+          ))}
+        </Bar>
+      </BarChart>
     </ResponsiveContainer>
   );
 }

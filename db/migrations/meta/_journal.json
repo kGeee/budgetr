@@ -50,6 +50,13 @@
       "when": 1782623821411,
       "tag": "0006_sparkling_lucky_pierre",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1782773779236,
+      "tag": "0007_majestic_doctor_octopus",
+      "breakpoints": true
     }
   ]
 }

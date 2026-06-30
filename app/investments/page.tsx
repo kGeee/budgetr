@@ -1,6 +1,13 @@
 import { PageHead } from "@/components/page-head";
 import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
-import { getHoldings, getInvestmentTransactions, getManualHoldings } from "@/lib/queries";
+import {
+  getHoldings,
+  getInvestmentSectors,
+  getInvestmentTransactions,
+  getKnownSectors,
+  getManualHoldings,
+  sectorKeyFor,
+} from "@/lib/queries";
 import { buildReconstructedSeries, getTickerHistories } from "@/lib/portfolio-history";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +16,18 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "default-cache";
 
 export default async function InvestmentsPage() {
-  const plaidHoldings = getHoldings();
+  const plaidHoldingsRaw = getHoldings();
   const transactions = getInvestmentTransactions();
   const manual = getManualHoldings();
+  const sectors = getInvestmentSectors();
+  const knownSectors = getKnownSectors();
+
+  // Attach the symbol-scoped sector key + its current sector to every Plaid
+  // holding so the row carries what the sector editor and allocation need.
+  const plaidHoldings: HoldingRow[] = plaidHoldingsRaw.map((h) => {
+    const sectorKey = sectorKeyFor(h.ticker, h.id);
+    return { ...h, sectorKey, sector: sectors[sectorKey] ?? null };
+  });
 
   // Fetch price history for every tickered symbol — Plaid holdings + the
   // symbol-priced manual holdings (e.g. BTC-USD).
@@ -31,6 +47,7 @@ export default async function InvestmentsPage() {
     const sym = m.symbol?.toUpperCase();
     const hist = sym ? histories[sym] : undefined;
     const lastClose = hist && hist.length > 0 ? hist[hist.length - 1].close : null;
+    const sectorKey = sectorKeyFor(m.symbol, m.id);
     return {
       id: m.id,
       quantity: m.quantity,
@@ -44,6 +61,8 @@ export default async function InvestmentsPage() {
       securityType: m.type,
       accountName: "Manual",
       manual: true,
+      sectorKey,
+      sector: sectors[sectorKey] ?? null,
     };
   });
 
@@ -84,6 +103,7 @@ export default async function InvestmentsPage() {
         histories={histories}
         portfolioSeries={portfolioSeries}
         transactions={transactions}
+        knownSectors={knownSectors}
       />
     </div>
   );
