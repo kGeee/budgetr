@@ -311,12 +311,19 @@ export function ValueAreaChart({
   gradientId = "val",
   valueLabel = "Value",
   height = 280,
+  baseline = "zero",
 }: {
   data: { date: string; value: number }[];
   color?: string;
   gradientId?: string;
   valueLabel?: string;
   height?: number;
+  /**
+   * Y-axis floor. "zero" anchors the axis at 0 (good when absolute scale
+   * matters); "auto" frames the axis to the data's range so day-to-day
+   * movement is legible instead of being flattened against a 0 baseline.
+   */
+  baseline?: "zero" | "auto";
 }) {
   if (data.length === 0)
     return <Empty label="No history yet" hint="Sync to begin charting this over time." />;
@@ -344,6 +351,8 @@ export function ValueAreaChart({
           tickLine={false}
           axisLine={false}
           width={58}
+          domain={baseline === "auto" ? ["auto", "auto"] : undefined}
+          allowDataOverflow={false}
         />
         <Tooltip
           contentStyle={tooltipStyle}
