@@ -57,6 +57,13 @@
       "when": 1782773779236,
       "tag": "0007_majestic_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1782786797406,
+      "tag": "0008_groovy_doomsday",
+      "breakpoints": true
     }
   ]
 }
