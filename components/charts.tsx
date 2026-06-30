@@ -16,6 +16,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { PieLabelRenderProps } from "recharts";
 import { format, parseISO } from "date-fns";
 import { formatCompactCurrency, formatCurrency } from "@/lib/utils";
 
@@ -610,16 +611,15 @@ export function AllocationDonut({
   if (data.length === 0)
     return <Empty label="No sectors yet" hint="Tag a holding's sector to chart your allocation." />;
 
-  const renderLabel = (props: {
-    cx: number;
-    cy: number;
-    midAngle: number;
-    outerRadius: number;
-    percent: number;
-    payload: SectorSlice;
-  }) => {
-    const { cx, cy, midAngle, outerRadius, percent, payload } = props;
-    if (percent < 0.04) return null; // skip slivers — they'd overlap
+  const renderLabel = (props: PieLabelRenderProps) => {
+    // recharts types these loosely (number | string | undefined); coerce.
+    const cx = Number(props.cx ?? 0);
+    const cy = Number(props.cy ?? 0);
+    const midAngle = Number(props.midAngle ?? 0);
+    const outerRadius = Number(props.outerRadius ?? 0);
+    const percent = Number(props.percent ?? 0);
+    const payload = (props as { payload?: SectorSlice }).payload;
+    if (!payload || percent < 0.04) return null; // skip slivers — they'd overlap
     const RAD = Math.PI / 180;
     const r = outerRadius + 14;
     const x = cx + r * Math.cos(-midAngle * RAD);
