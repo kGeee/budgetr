@@ -294,6 +294,8 @@ export function getBudgetSpendByDay(): { date: string; spent: number }[] {
           ORDER BY t.date ASC`,
     )
     .map((r) => ({ date: r.date, spent: Number(r.spent) }));
+}
+
 export type CategoryTrend = {
   category: string;
   icon: string | null;
