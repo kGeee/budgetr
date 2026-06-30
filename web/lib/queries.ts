@@ -680,6 +680,45 @@ export function getCategoryTransactions(id: string, limit = 500): TransactionRow
   return selectTransactions(sql`t.pending = 0 AND ${effectiveCatId("t")} = ${id}`, limit);
 }
 
+export function getTransactionsByDate(date: string): TransactionRow[] {
+  return selectTransactions(sql`t.pending = 0 AND t.date = ${date}`, 500);
+}
+
+export type CategoryDay = { date: string; spent: number; received: number };
+
+/** Day-by-day total spending across all spending categories, last N days, oldest first. */
+export function getDailySpend(days = 30): { date: string; spent: number }[] {
+  return db
+    .all<{ date: string; spent: number }>(sql`
+      SELECT t.date AS date,
+             SUM(t.amount) AS spent
+      FROM transactions t
+      JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+      WHERE t.pending = 0
+        AND t.amount > 0
+        AND cat."group" = 'spending'
+        AND t.date >= date('now', ${`-${days} days`})
+      GROUP BY t.date
+      ORDER BY t.date ASC`)
+    .map((r) => ({ date: r.date, spent: Number(r.spent) }));
+}
+
+/** Day-by-day breakdown for a category over the last N days, oldest first. */
+export function getCategoryDailySpend(id: string, days = 30): CategoryDay[] {
+  return db
+    .all<{ date: string; spent: number; received: number }>(sql`
+      SELECT t.date AS date,
+             SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS spent,
+             SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END) AS received
+      FROM transactions t
+      WHERE t.pending = 0
+        AND ${effectiveCatId("t")} = ${id}
+        AND t.date >= date('now', ${`-${days} days`})
+      GROUP BY t.date
+      ORDER BY t.date ASC`)
+    .map((r) => ({ date: r.date, spent: Number(r.spent), received: Number(r.received) }));
+}
+
 export type CategoryMonth = { month: string; spent: number; received: number; count: number };
 
 /** Month-by-month breakdown of a category's spend, newest first. */

@@ -2,19 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- CloudKit private database sync for the Core Data store. -->
-	<key>com.apple.developer.icloud-container-identifiers</key>
-	<array>
-		<string>iCloud.com.budgetr.app</string>
-	</array>
-	<key>com.apple.developer.icloud-services</key>
-	<array>
-		<string>CloudKit</string>
-	</array>
-	<!-- Remote-change push so devices learn about each other's edits promptly. -->
-	<key>aps-environment</key>
-	<string>development</string>
-	<!-- macOS sandbox: required for App Store; lets the app reach iCloud + network. -->
+	<!-- CloudKit entitlements removed: free personal teams don't support iCloud/Push.
+	     Re-add with a paid Apple Developer account:
+	       com.apple.developer.icloud-container-identifiers → iCloud.com.budgetr.app
+	       com.apple.developer.icloud-services → CloudKit
+	       aps-environment → development
+	     Also restore NSPersistentCloudKitContainer in PersistenceController.swift. -->
+
+	<!-- macOS sandbox: required for App Store; lets the app reach the network. -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
