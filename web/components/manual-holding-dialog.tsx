@@ -2,11 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   addManualHolding,
+  clearHoldingCostBasisOverride,
   deleteManualHolding,
+  setHoldingCostBasisOverride,
   updateManualHolding,
 } from "@/lib/actions";
 
@@ -282,6 +284,165 @@ export function DeleteManualHoldingButton({ id, name }: { id: string; name: stri
       <Trash2 size={13} />
     </button>
   );
+}
+
+/**
+ * Cost-basis corrector for a *Plaid* holding. Lets the user override the
+ * brokerage-reported basis (broken after a transfer/merger) by entering either a
+ * total dollar basis or an average cost/share, plus an optional as-of date. The
+ * override lives in its own table so syncs don't wipe it; "Reset" clears it.
+ */
+export function EditCostBasisButton({
+  holdingId,
+  name,
+  quantity,
+  plaidCostBasis,
+  overrideTotal,
+  overrideUnit,
+  overrideAsOf,
+  hasOverride,
+}: {
+  holdingId: string;
+  name: string;
+  quantity: number | null;
+  plaidCostBasis: number | null;
+  overrideTotal: number | null;
+  overrideUnit: number | null;
+  overrideAsOf: string | null;
+  hasOverride: boolean;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"total" | "unit">(overrideUnit != null ? "unit" : "total");
+  const [total, setTotal] = useState(overrideTotal != null ? String(overrideTotal) : "");
+  const [unit, setUnit] = useState(overrideUnit != null ? String(overrideUnit) : "");
+  const [asOf, setAsOf] = useState(overrideAsOf ?? "");
+  const [pending, start] = useTransition();
+
+  // Live preview of the derived figure (total ↔ avg/share) using current qty.
+  const qty = quantity ?? null;
+  const derived =
+    mode === "unit"
+      ? qty != null && num(unit) != null
+        ? `≈ ${fmtUsd(num(unit)! * qty)} total`
+        : null
+      : qty != null && qty !== 0 && num(total) != null
+        ? `≈ ${fmtUsd(num(total)! / qty)} / share`
+        : null;
+
+  function save() {
+    start(async () => {
+      await setHoldingCostBasisOverride(
+        holdingId,
+        mode === "unit"
+          ? { unitCost: num(unit), asOfDate: asOf || null }
+          : { totalCost: num(total), asOfDate: asOf || null },
+      );
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  function reset() {
+    start(async () => {
+      await clearHoldingCostBasisOverride(holdingId);
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  const canSave = mode === "unit" ? num(unit) != null : num(total) != null;
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        aria-label={`Edit cost basis for ${name}`}
+        title="Correct cost basis"
+        className="rounded-md p-1 text-[var(--faint)] opacity-0 transition hover:text-[var(--brass)] group-hover:opacity-100"
+      >
+        <SlidersHorizontal size={13} />
+      </button>
+
+      {open && (
+        <Modal onClose={() => setOpen(false)}>
+          <div className="border-b border-line px-5 py-4">
+            <p className="text-sm font-medium">Correct cost basis</p>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              {name} · brokerage reports{" "}
+              <span className="mono text-[var(--paper)]">
+                {plaidCostBasis != null ? fmtUsd(plaidCostBasis) : "no basis"}
+              </span>
+            </p>
+          </div>
+
+          <div className="space-y-3 p-5">
+            {/* Total vs per-share toggle */}
+            <div className="flex gap-1 rounded-lg border border-line bg-[var(--panel-2)] p-1">
+              {(["total", "unit"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-xs transition-colors ${
+                    mode === m
+                      ? "bg-[var(--panel)] text-[var(--paper)]"
+                      : "text-[var(--muted)] hover:text-[var(--paper)]"
+                  }`}
+                >
+                  {m === "total" ? "Total cost" : "Avg / share"}
+                </button>
+              ))}
+            </div>
+
+            {mode === "total" ? (
+              <Field label="Total cost basis" hint="What you paid for the whole position">
+                <Input value={total} onChange={setTotal} placeholder="12400" mono />
+              </Field>
+            ) : (
+              <Field label="Average cost / share" hint={qty != null ? `× ${qty.toLocaleString()} shares` : undefined}>
+                <Input value={unit} onChange={setUnit} placeholder="124.00" mono />
+              </Field>
+            )}
+
+            <Field label="As-of date (optional)" hint="e.g. your Schwab transfer date">
+              <Input value={asOf} onChange={setAsOf} placeholder="2023-09-05" mono />
+            </Field>
+
+            {derived && <p className="mono text-xs text-[var(--brass)]">{derived}</p>}
+          </div>
+
+          <div className="flex items-center justify-between border-t border-line px-5 py-3">
+            {hasOverride ? (
+              <button
+                onClick={reset}
+                disabled={pending}
+                className="text-xs text-[var(--coral)] transition-opacity hover:opacity-80 disabled:opacity-40"
+              >
+                Reset to brokerage
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOpen(false)}
+                className="text-xs text-[var(--muted)] hover:text-[var(--paper)]"
+              >
+                Cancel
+              </button>
+              <Button size="sm" variant="primary" onClick={save} disabled={!canSave || pending}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function fmtUsd(n: number): string {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
