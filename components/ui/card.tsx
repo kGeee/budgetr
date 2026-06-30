@@ -1,11 +1,16 @@
 import { cn } from "@/lib/utils";
 
-export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Opt-in hover lift + border highlight for cards that are genuinely clickable. */
+  interactive?: boolean;
+}
+
+export function Card({ className, interactive, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        "rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6",
-        "shadow-[0_1px_0_0_rgba(255,255,255,0.02)_inset,0_20px_40px_-30px_rgba(0,0,0,0.8)]",
+        "rounded-[var(--radius)] border border-line bg-gradient-to-b from-[var(--panel-2)] to-[var(--panel)] p-6 shadow-[var(--elev-2)]",
+        interactive && "lift cursor-pointer",
         className,
       )}
       {...props}

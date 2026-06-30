@@ -106,6 +106,9 @@ export function ValueHistory({
         gradientId={cfg.gradientId}
         valueLabel={cfg.label}
         height={height}
+        // Portfolio value swings are small relative to the total, so frame the
+        // axis to the data instead of flattening it against a 0 baseline.
+        baseline={kind === "portfolio" ? "auto" : "zero"}
       />
     </div>
   );

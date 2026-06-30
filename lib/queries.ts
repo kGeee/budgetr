@@ -273,6 +273,26 @@ export function getMonthlyBudgetSummary(): BudgetSummary {
   return { totalBudget, totalSpent, left: totalBudget - totalSpent, month };
 }
 
+/**
+ * Per-day spend for the budget month across budgeted spending categories only —
+ * mirrors getMonthlyBudgetSummary.totalSpent so a cumulative chart reconciles
+ * with the budget totals. Returns days with spend, oldest first.
+ */
+export function getBudgetSpendByDay(): { date: string; spent: number }[] {
+  const month = getBudgetMonth();
+  return db
+    .all<{ date: string; spent: number }>(
+      sql`SELECT t.date AS date, SUM(t.amount) AS spent
+          FROM transactions t
+          JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          JOIN budgets b ON b.category_id = cat.id
+          WHERE t.pending = 0 AND t.amount > 0
+            AND cat."group" = 'spending'
+            AND substr(t.date, 1, 7) = ${month}
+          GROUP BY t.date
+          ORDER BY t.date ASC`,
+    )
+    .map((r) => ({ date: r.date, spent: Number(r.spent) }));
 export type CategoryTrend = {
   category: string;
   icon: string | null;

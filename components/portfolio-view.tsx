@@ -651,7 +651,7 @@ function GainBreakdownModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-2xl">
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
             <p className="text-sm font-medium">Unrealized gain breakdown</p>
@@ -1088,6 +1088,7 @@ function Stat({
   if (onClick) {
     return (
       <Card
+        interactive
         role="button"
         tabIndex={0}
         onClick={onClick}
@@ -1097,7 +1098,7 @@ function Stat({
             onClick();
           }
         }}
-        className="group cursor-pointer text-left transition-colors hover:bg-[var(--panel-2)] focus:outline-none focus:ring-1 focus:ring-[var(--brass-dim)]"
+        className="group text-left hover:bg-[var(--panel-2)] focus:outline-none focus:ring-1 focus:ring-[var(--brass-dim)]"
       >
         {body}
       </Card>
