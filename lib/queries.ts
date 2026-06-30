@@ -2,6 +2,7 @@ import { db } from "@/db";
 import {
   accounts,
   holdings,
+  investmentSectors,
   investmentTransactions,
   items,
   manualHoldings,
@@ -292,6 +293,63 @@ export function getBudgetSpendByDay(): { date: string; spent: number }[] {
           ORDER BY t.date ASC`,
     )
     .map((r) => ({ date: r.date, spent: Number(r.spent) }));
+export type CategoryTrend = {
+  category: string;
+  icon: string | null;
+  thisMonth: number;
+  prevMonth: number;
+};
+
+/**
+ * Per spending-category spend for the budget month and the month before it —
+ * the raw material for "this category is climbing" insights. Categories with no
+ * spend in either month are excluded.
+ */
+export function getCategorySpendTrend(): CategoryTrend[] {
+  const month = getBudgetMonth();
+  const prevExpr = sql`strftime('%Y-%m', ${month + "-01"}, '-1 month')`;
+  return db
+    .all<{ category: string; icon: string | null; thisMonth: number; prevMonth: number }>(
+      sql`SELECT cat.name AS category, cat.icon AS icon,
+             COALESCE(SUM(CASE WHEN substr(t.date,1,7) = ${month} THEN t.amount ELSE 0 END), 0) AS thisMonth,
+             COALESCE(SUM(CASE WHEN substr(t.date,1,7) = ${prevExpr} THEN t.amount ELSE 0 END), 0) AS prevMonth
+          FROM transactions t
+          JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          WHERE t.pending = 0 AND t.amount > 0 AND cat."group" = 'spending'
+            AND substr(t.date,1,7) IN (${month}, ${prevExpr})
+          GROUP BY cat.id
+          ORDER BY thisMonth DESC`,
+    )
+    .map((r) => ({
+      category: r.category,
+      icon: r.icon,
+      thisMonth: Number(r.thisMonth),
+      prevMonth: Number(r.prevMonth),
+    }));
+}
+
+export type TopMerchant = { vendor: string; total: number; count: number };
+
+/** Highest-spend merchants over the last `days`, excluding internal transfers. */
+export function getTopMerchants(days = 90, limit = 8): TopMerchant[] {
+  return db
+    .all<{ vendor: string | null; total: number; count: number }>(
+      sql`SELECT COALESCE(t.merchant_name, t.name) AS vendor,
+             SUM(t.amount) AS total, COUNT(*) AS count
+          FROM transactions t
+          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          WHERE t.pending = 0 AND t.amount > 0
+            AND (cat."group" IS NULL OR cat."group" != 'transfer')
+            AND t.date >= date('now', ${"-" + days + " days"})
+          GROUP BY vendor
+          ORDER BY total DESC
+          LIMIT ${limit}`,
+    )
+    .map((r) => ({
+      vendor: cleanTransactionName(r.vendor ?? "Unknown", null),
+      total: Number(r.total),
+      count: Number(r.count),
+    }));
 }
 
 export type TxTag = { id: string; name: string; color: string | null };
@@ -755,6 +813,36 @@ export function getHoldings() {
     .leftJoin(accounts, eq(holdings.accountId, accounts.id))
     .orderBy(desc(holdings.institutionValue))
     .all();
+}
+
+/**
+ * Sector key for a holding — uppercased ticker (`sym:AAPL`) so every position of
+ * a ticker shares one sector, else the manual-holding id (`man:<id>`) for
+ * symbol-less fixed-value assets. Mirror in actions.ts / portfolio-view.tsx.
+ */
+export function sectorKeyFor(ticker: string | null | undefined, id: string): string {
+  return ticker ? `sym:${ticker.toUpperCase()}` : `man:${id}`;
+}
+
+/** Map of sectorKey → sector name for every assigned investment. */
+export function getInvestmentSectors(): Record<string, string> {
+  const rows = db
+    .select({ sectorKey: investmentSectors.sectorKey, sector: investmentSectors.sector })
+    .from(investmentSectors)
+    .all();
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.sectorKey] = r.sector;
+  return map;
+}
+
+/** Distinct sector names already in use, alphabetical — backs the editor's suggestions. */
+export function getKnownSectors(): string[] {
+  return db
+    .selectDistinct({ sector: investmentSectors.sector })
+    .from(investmentSectors)
+    .orderBy(investmentSectors.sector)
+    .all()
+    .map((r) => r.sector);
 }
 
 export type ManualHoldingRow = {

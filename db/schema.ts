@@ -320,6 +320,19 @@ export const manualHoldings = sqliteTable("manual_holdings", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Single sector assignment per investment, keyed so it spans both `holdings`
+ * (Plaid) and `manual_holdings`. The key is the uppercased ticker symbol
+ * (prefixed `sym:`) so every position of the same ticker — across accounts and
+ * across Plaid/manual — shares one sector; symbol-less fixed-value manual
+ * holdings fall back to `man:${manualHoldingId}`. One row = one assignment, so
+ * allocation percentages always sum cleanly to 100%.
+ */
+export const investmentSectors = sqliteTable("investment_sectors", {
+  sectorKey: text("sector_key").primaryKey(),
+  sector: text("sector").notNull(),
+});
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -336,3 +349,4 @@ export type TagRule = typeof tagRules.$inferSelect;
 export type RecurringStream = typeof recurringStreams.$inferSelect;
 export type VendorGroup = typeof vendorGroups.$inferSelect;
 export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
+export type InvestmentSector = typeof investmentSectors.$inferSelect;

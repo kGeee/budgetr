@@ -5,6 +5,7 @@ import { db } from "@/db";
 import {
   budgets,
   categories,
+  investmentSectors,
   manualHoldings,
   tagBudgets,
   tagRules,
@@ -405,5 +406,27 @@ export async function updateManualHolding(
 /** Remove an off-account holding. */
 export async function deleteManualHolding(id: string) {
   db.delete(manualHoldings).where(eq(manualHoldings.id, id)).run();
+  revalidateAll();
+}
+
+// ── Investment sectors ──────────────────────────────────────────────────────
+
+/**
+ * Assign (or clear) the sector for a holding. `sectorKey` is the symbol-scoped
+ * key from `sectorKeyFor` — so setting "Technology" on one AAPL row tags every
+ * AAPL position at once. An empty/whitespace sector clears the assignment.
+ */
+export async function setHoldingSector(sectorKey: string, sector: string) {
+  const key = sectorKey.trim();
+  if (!key) return;
+  const name = sector.trim();
+  if (!name) {
+    db.delete(investmentSectors).where(eq(investmentSectors.sectorKey, key)).run();
+  } else {
+    db.insert(investmentSectors)
+      .values({ sectorKey: key, sector: name })
+      .onConflictDoUpdate({ target: investmentSectors.sectorKey, set: { sector: name } })
+      .run();
+  }
   revalidateAll();
 }

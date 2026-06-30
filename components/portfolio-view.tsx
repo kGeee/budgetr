@@ -1,17 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Check, ChevronDown, Pencil, Tag, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Sparkline, TickerPriceChart } from "@/components/charts";
+import {
+  AllocationDonut,
+  PIE_COLORS,
+  SectorBarChart,
+  Sparkline,
+  TickerPriceChart,
+  type SectorSlice,
+} from "@/components/charts";
 import { ValueHistory } from "@/components/value-history";
 import {
   AddManualHoldingButton,
   DeleteManualHoldingButton,
   EditManualHoldingButton,
 } from "@/components/manual-holding-dialog";
+import { setHoldingSector } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 import type { InvestmentTxnRow } from "@/lib/queries";
+
+const UNASSIGNED = "Unassigned";
 import {
   LivePricesProvider,
   useLivePrices,
@@ -33,6 +44,10 @@ export type HoldingRow = {
   accountName: string | null;
   /** True for user-entered off-Plaid holdings (crypto, fixed-value assets). */
   manual?: boolean;
+  /** Symbol-scoped key the sector assignment is stored under (see sectorKeyFor). */
+  sectorKey: string;
+  /** Currently assigned sector, or null when untagged. */
+  sector?: string | null;
 };
 
 type PricePoint = { date: string; close: number };
@@ -42,11 +57,13 @@ export function PortfolioView({
   histories = {},
   portfolioSeries = [],
   transactions = [],
+  knownSectors = [],
 }: {
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
   portfolioSeries?: { date: string; value: number }[];
   transactions?: InvestmentTxnRow[];
+  knownSectors?: string[];
 }) {
   const symbols = useMemo(
     () => holdings.map((h) => h.ticker).filter((t): t is string => Boolean(t)),
@@ -60,6 +77,7 @@ export function PortfolioView({
         histories={histories}
         portfolioSeries={portfolioSeries}
         transactions={transactions}
+        knownSectors={knownSectors}
       />
     </LivePricesProvider>
   );
@@ -106,16 +124,79 @@ function PortfolioInner({
   histories,
   portfolioSeries,
   transactions,
+  knownSectors,
 }: {
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
   portfolioSeries: { date: string; value: number }[];
   transactions: InvestmentTxnRow[];
+  knownSectors: string[];
 }) {
   const { quotes, status } = useLivePrices();
+  const router = useRouter();
+  const [, startTransition] = useTransition();
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [showBreakdown, setShowBreakdown] = useState(false);
+  // Optimistic sector edits, keyed by sectorKey so a change to one ticker's
+  // sector lights up every position of that ticker instantly (the server action
+  // persists in the background and a refresh reconciles).
+  const [sectorEdits, setSectorEdits] = useState<Record<string, string | null>>({});
+  const [sectorFilter, setSectorFilter] = useState<string | null>(null);
+
+  const sectorOf = (h: HoldingRow): string | null =>
+    h.sectorKey in sectorEdits ? sectorEdits[h.sectorKey] : h.sector ?? null;
+
+  function setSector(sectorKey: string, sector: string | null) {
+    setSectorEdits((prev) => ({ ...prev, [sectorKey]: sector }));
+    startTransition(async () => {
+      await setHoldingSector(sectorKey, sector ?? "");
+      router.refresh();
+    });
+  }
+
+  // Stable color per sector: index by alphabetical name so a sector keeps its
+  // hue as live prices reorder it by value. Unassigned is always muted gray.
+  const sectorColor = useMemo(() => {
+    const names = Array.from(
+      new Set(holdings.map((h) => sectorOf(h) ?? UNASSIGNED).filter((s) => s !== UNASSIGNED)),
+    ).sort();
+    const map: Record<string, string> = { [UNASSIGNED]: "#8b948c" };
+    names.forEach((n, i) => (map[n] = PIE_COLORS[i % PIE_COLORS.length]));
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdings, sectorEdits]);
+
+  // Allocation by sector, recomputed on every live-price tick and sector edit.
+  const allocation = useMemo<SectorSlice[]>(() => {
+    const agg = new Map<string, { value: number; count: number }>();
+    for (const h of holdings) {
+      const s = sectorOf(h) ?? UNASSIGNED;
+      const cur = agg.get(s) ?? { value: 0, count: 0 };
+      cur.value += effectiveValue(h, quotes);
+      cur.count += 1;
+      agg.set(s, cur);
+    }
+    return Array.from(agg.entries())
+      .map(([sector, { value, count }]) => ({
+        sector,
+        value,
+        count,
+        color: sectorColor[sector] ?? "#8b948c",
+      }))
+      .sort((a, b) => b.value - a.value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdings, quotes, sectorEdits, sectorColor]);
+
+  const allocationTotal = allocation.reduce((s, d) => s + d.value, 0);
+  // Suggestions for the sector editor: known sectors from the DB plus any added
+  // optimistically this session, deduped.
+  const sectorOptions = useMemo(
+    () => Array.from(new Set([...knownSectors, ...allocation.map((a) => a.sector)]))
+      .filter((s) => s !== UNASSIGNED)
+      .sort(),
+    [knownSectors, allocation],
+  );
 
   // Group investment transactions by ticker for each holding's expanded panel.
   const txnsByTicker = useMemo(() => {
@@ -166,6 +247,11 @@ function PortfolioInner({
   const gainPct = totalCost !== 0 ? (gain / totalCost) * 100 : 0;
   const uncostedValue = total - costedValue;
 
+  // Holdings shown in the table, narrowed to the drilled-into sector if any.
+  const visible = sectorFilter
+    ? sorted.filter((h) => (sectorOf(h) ?? UNASSIGNED) === sectorFilter)
+    : sorted;
+
   return (
     <div className="space-y-7">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -192,6 +278,13 @@ function PortfolioInner({
         />
       )}
 
+      <SectorAllocation
+        allocation={allocation}
+        total={allocationTotal}
+        activeSector={sectorFilter}
+        onSelect={setSectorFilter}
+      />
+
       <Card className="p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <span className="eyebrow">Portfolio value</span>
@@ -209,9 +302,22 @@ function PortfolioInner({
             <StatusBadge status={status} />
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-xs text-[var(--muted)]">
-              {holdings.length} {holdings.length === 1 ? "position" : "positions"}
-            </span>
+            {sectorFilter ? (
+              <button
+                onClick={() => setSectorFilter(null)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
+              >
+                <Tag size={11} />
+                {sectorFilter}
+                <span className="text-[var(--faint)]">·</span>
+                {visible.length}
+                <X size={11} />
+              </button>
+            ) : (
+              <span className="text-xs text-[var(--muted)]">
+                {holdings.length} {holdings.length === 1 ? "position" : "positions"}
+              </span>
+            )}
             <AddManualHoldingButton />
           </div>
         </div>
@@ -243,7 +349,7 @@ function PortfolioInner({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((h) => {
+            {visible.map((h) => {
               const sym = h.ticker?.toUpperCase();
               return (
                 <HoldingRowView
@@ -252,6 +358,10 @@ function PortfolioInner({
                   quotes={quotes}
                   history={sym ? histories[sym] : undefined}
                   txns={sym ? txnsByTicker[sym] ?? [] : []}
+                  sector={sectorOf(h)}
+                  sectorOptions={sectorOptions}
+                  onSetSector={(name) => setSector(h.sectorKey, name)}
+                  sectorColor={sectorColor}
                 />
               );
             })}
@@ -259,6 +369,13 @@ function PortfolioInner({
               <tr>
                 <td colSpan={9} className="px-6 py-10 text-center text-[var(--muted)]">
                   No holdings yet. Connect a brokerage account and hit Sync.
+                </td>
+              </tr>
+            )}
+            {holdings.length > 0 && visible.length === 0 && (
+              <tr>
+                <td colSpan={9} className="px-6 py-10 text-center text-[var(--muted)]">
+                  No holdings in {sectorFilter}.
                 </td>
               </tr>
             )}
@@ -276,11 +393,19 @@ function HoldingRowView({
   quotes,
   history,
   txns,
+  sector,
+  sectorOptions,
+  onSetSector,
+  sectorColor,
 }: {
   h: HoldingRow;
   quotes: Record<string, LiveQuote>;
   history?: PricePoint[];
   txns: InvestmentTxnRow[];
+  sector: string | null;
+  sectorOptions: string[];
+  onSetSector: (sector: string | null) => void;
+  sectorColor: Record<string, string>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const price = effectivePrice(h, quotes);
@@ -310,31 +435,39 @@ function HoldingRowView({
           )}
         </td>
         <td className="py-3.5 pr-3 pl-1">
-          <span className="inline-flex items-center gap-2">
-            <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-            <span className="text-[var(--muted)]">{h.securityName}</span>
-            {h.manual && (
-              <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
-                {h.securityType ?? "manual"}
-              </span>
-            )}
-            {h.manual && (
-              <span className="inline-flex items-center">
-                <EditManualHoldingButton
-                  id={h.id}
-                  name={h.securityName ?? h.ticker ?? "holding"}
-                  isTickered={Boolean(h.ticker)}
-                  quantity={h.quantity}
-                  costBasis={h.costBasis}
-                  value={h.value}
-                />
-                <DeleteManualHoldingButton
-                  id={h.id}
-                  name={h.securityName ?? h.ticker ?? "holding"}
-                />
-              </span>
-            )}
-          </span>
+          <div className="flex flex-col gap-1">
+            <span className="inline-flex items-center gap-2">
+              <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+              <span className="text-[var(--muted)]">{h.securityName}</span>
+              {h.manual && (
+                <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+                  {h.securityType ?? "manual"}
+                </span>
+              )}
+              {h.manual && (
+                <span className="inline-flex items-center">
+                  <EditManualHoldingButton
+                    id={h.id}
+                    name={h.securityName ?? h.ticker ?? "holding"}
+                    isTickered={Boolean(h.ticker)}
+                    quantity={h.quantity}
+                    costBasis={h.costBasis}
+                    value={h.value}
+                  />
+                  <DeleteManualHoldingButton
+                    id={h.id}
+                    name={h.securityName ?? h.ticker ?? "holding"}
+                  />
+                </span>
+              )}
+            </span>
+            <SectorEditor
+              sector={sector}
+              options={sectorOptions}
+              color={sector ? sectorColor[sector] : undefined}
+              onSave={onSetSector}
+            />
+          </div>
         </td>
         <td className="px-3 py-3.5 text-[var(--muted)]">{h.accountName}</td>
         <td className="px-3 py-2">
@@ -603,6 +736,199 @@ function GainBreakdownModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Inline sector pill + editor for a holding. Collapsed it shows the assigned
+ * sector (or a dashed "+ sector" prompt); clicking reveals a small text input
+ * with a datalist of existing sectors so you can reuse or coin a new one. An
+ * empty value clears the assignment. Edits propagate by sectorKey, so changing
+ * one ticker's sector updates every position of that ticker at once.
+ */
+function SectorEditor({
+  sector,
+  options,
+  color,
+  onSave,
+}: {
+  sector: string | null;
+  options: string[];
+  color?: string;
+  onSave: (sector: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState(sector ?? "");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const skip = useRef(false);
+  const listId = useId();
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  function commit() {
+    setOpen(false);
+    if (skip.current) {
+      skip.current = false;
+      return;
+    }
+    const next = val.trim() || null;
+    if (next !== (sector ?? null)) onSave(next);
+  }
+
+  if (open) {
+    return (
+      <span className="inline-flex w-fit items-center">
+        <input
+          ref={inputRef}
+          list={listId}
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") inputRef.current?.blur();
+            else if (e.key === "Escape") {
+              skip.current = true;
+              inputRef.current?.blur();
+            }
+          }}
+          placeholder="Sector…"
+          className="w-36 rounded-md border border-line bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--paper)] outline-none focus:border-[var(--brass-dim)]"
+        />
+        <datalist id={listId}>
+          {options.map((o) => (
+            <option key={o} value={o} />
+          ))}
+        </datalist>
+      </span>
+    );
+  }
+
+  if (sector) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setVal(sector);
+          setOpen(true);
+        }}
+        className="group/sec inline-flex w-fit items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[11px] text-[var(--muted)] transition hover:text-[var(--paper)]"
+      >
+        <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: color }} />
+        {sector}
+        <Pencil size={9} className="opacity-0 transition group-hover/sec:opacity-60" />
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        setVal("");
+        setOpen(true);
+      }}
+      className="inline-flex w-fit items-center gap-1 rounded-full border border-dashed border-line px-2 py-0.5 text-[11px] text-[var(--faint)] transition hover:text-[var(--muted)]"
+    >
+      <Tag size={9} /> sector
+    </button>
+  );
+}
+
+/**
+ * Allocation-by-sector panel: a labelled donut, a value-ranked bar chart, and a
+ * breakdown table (value, % of portfolio, # holdings). Selecting any sector in
+ * any of the three drives the shared drill-down filter on the holdings table.
+ * All three recompute live from the same `allocation` (prices + sector edits).
+ */
+function SectorAllocation({
+  allocation,
+  total,
+  activeSector,
+  onSelect,
+}: {
+  allocation: SectorSlice[];
+  total: number;
+  activeSector: string | null;
+  onSelect: (sector: string | null) => void;
+}) {
+  if (allocation.length === 0) return null;
+
+  return (
+    <Card className="p-0">
+      <div className="flex items-center justify-between border-b border-line px-6 py-4">
+        <span className="eyebrow">Allocation by sector</span>
+        {activeSector && (
+          <button
+            onClick={() => onSelect(null)}
+            className="inline-flex items-center gap-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
+          >
+            <Check size={11} /> {activeSector} <X size={11} />
+          </button>
+        )}
+      </div>
+      <div className="grid gap-8 px-6 py-6 lg:grid-cols-2">
+        <AllocationDonut
+          data={allocation}
+          total={total}
+          activeSector={activeSector}
+          onSelect={onSelect}
+        />
+        <div className="min-w-0">
+          <p className="eyebrow mb-3">Ranked by value</p>
+          <SectorBarChart data={allocation} activeSector={activeSector} onSelect={onSelect} />
+        </div>
+      </div>
+      <div className="overflow-x-auto border-t border-line">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-line text-left">
+              {["Sector", "Value", "% of portfolio", "Holdings"].map((h, i) => (
+                <th
+                  key={h}
+                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {allocation.map((d) => {
+              const pct = total ? (d.value / total) * 100 : 0;
+              const active = d.sector === activeSector;
+              return (
+                <tr
+                  key={d.sector}
+                  onClick={() => onSelect(active ? null : d.sector)}
+                  className={`cursor-pointer border-b border-line/60 last:border-0 transition-colors hover:bg-[var(--panel-2)] ${
+                    active ? "bg-[var(--panel-2)]" : ""
+                  }`}
+                >
+                  <td className="px-6 py-2.5">
+                    <span className="inline-flex items-center gap-2.5">
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                        style={{ background: d.color }}
+                      />
+                      <span className={active ? "text-[var(--paper)]" : "text-[var(--muted)]"}>
+                        {d.sector}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="mono px-6 py-2.5 text-right">{formatCurrency(d.value)}</td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
+                    {pct.toFixed(1)}%
+                  </td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{d.count}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 
