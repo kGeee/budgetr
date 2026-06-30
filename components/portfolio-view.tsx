@@ -12,6 +12,12 @@ import {
   EditManualHoldingButton,
 } from "@/components/manual-holding-dialog";
 import { formatCurrency } from "@/lib/utils";
+import {
+  classifyOptionLegs,
+  formatOptionExpiry,
+  formatStrike,
+  parseOccSymbol,
+} from "@/lib/options";
 import type { InvestmentTxnRow } from "@/lib/queries";
 import {
   LivePricesProvider,
@@ -57,8 +63,14 @@ export function PortfolioView({
   portfolioSeries?: { date: string; value: number }[];
   transactions?: InvestmentTxnRow[];
 }) {
+  // Exclude option (OCC-symbol) legs — Finnhub can't quote them, so skip the
+  // wasted live-price subscriptions; they're valued from Plaid instead.
   const symbols = useMemo(
-    () => holdings.map((h) => h.ticker).filter((t): t is string => Boolean(t)),
+    () =>
+      holdings
+        .filter((h) => !parseOccSymbol(h.ticker))
+        .map((h) => h.ticker)
+        .filter((t): t is string => Boolean(t)),
     [holdings],
   );
 
@@ -110,6 +122,11 @@ function effectivePnl(h: HoldingRow, quotes: Record<string, LiveQuote>): number 
 
 type SortKey = "value" | "pnl";
 
+/** A row in the holdings table: a single holding, or a grouped option underlying. */
+type RowItem =
+  | { kind: "holding"; h: HoldingRow; sort: number }
+  | { kind: "options"; underlying: string; legs: HoldingRow[]; sort: number };
+
 function PortfolioInner({
   holdings,
   histories,
@@ -137,22 +154,43 @@ function PortfolioInner({
     return map;
   }, [transactions]);
 
-  // Sort by the chosen metric. Holdings without P&L (no cost basis) sink to the
-  // bottom regardless of direction.
-  const sorted = useMemo(() => {
-    const metric = (h: HoldingRow): number => {
-      if (sortKey === "pnl") return effectivePnl(h, quotes) ?? Number.NEGATIVE_INFINITY;
-      return effectiveValue(h, quotes);
-    };
+  // Build the render list: regular holdings stay as single rows; option legs are
+  // folded into one collapsible group per underlying. Both are sorted together by
+  // the chosen metric, with no-P&L items sinking to the bottom in both directions.
+  const items = useMemo(() => {
+    const metricH = (h: HoldingRow): number =>
+      sortKey === "pnl" ? effectivePnl(h, quotes) ?? Number.NEGATIVE_INFINITY : effectiveValue(h, quotes);
+
+    const singles = holdings.filter((h) => !parseOccSymbol(h.ticker));
+    const optionLegs = holdings.filter((h) => parseOccSymbol(h.ticker) != null);
+
+    const byUnderlying = new Map<string, HoldingRow[]>();
+    for (const h of optionLegs) {
+      const u = parseOccSymbol(h.ticker)!.underlying;
+      const arr = byUnderlying.get(u);
+      if (arr) arr.push(h);
+      else byUnderlying.set(u, [h]);
+    }
+
+    const result: RowItem[] = [
+      ...singles.map((h) => ({ kind: "holding" as const, h, sort: metricH(h) })),
+      ...[...byUnderlying.entries()].map(([underlying, legs]) => {
+        const value = legs.reduce((s, h) => s + effectiveValue(h, quotes), 0);
+        const costed = legs.filter((h) => h.costBasis != null);
+        const pnl = costed.length
+          ? costed.reduce((s, h) => s + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
+          : null;
+        const sort = sortKey === "pnl" ? pnl ?? Number.NEGATIVE_INFINITY : value;
+        return { kind: "options" as const, underlying, legs, sort };
+      }),
+    ];
+
     const dir = sortDir === "desc" ? -1 : 1;
-    return [...holdings].sort((a, b) => {
-      const av = metric(a);
-      const bv = metric(b);
-      if (av === bv) return 0;
-      // Keep no-P&L rows last in both directions.
-      if (av === Number.NEGATIVE_INFINITY) return 1;
-      if (bv === Number.NEGATIVE_INFINITY) return -1;
-      return (av - bv) * dir;
+    return result.sort((a, b) => {
+      if (a.sort === b.sort) return 0;
+      if (a.sort === Number.NEGATIVE_INFINITY) return 1;
+      if (b.sort === Number.NEGATIVE_INFINITY) return -1;
+      return (a.sort - b.sort) * dir;
     });
   }, [holdings, quotes, sortKey, sortDir]);
 
@@ -252,18 +290,24 @@ function PortfolioInner({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((h) => {
-              const sym = h.ticker?.toUpperCase();
-              return (
+            {items.map((it) =>
+              it.kind === "holding" ? (
                 <HoldingRowView
-                  key={h.id}
-                  h={h}
+                  key={it.h.id}
+                  h={it.h}
                   quotes={quotes}
-                  history={sym ? histories[sym] : undefined}
-                  txns={sym ? txnsByTicker[sym] ?? [] : []}
+                  history={it.h.ticker ? histories[it.h.ticker.toUpperCase()] : undefined}
+                  txns={it.h.ticker ? txnsByTicker[it.h.ticker.toUpperCase()] ?? [] : []}
                 />
-              );
-            })}
+              ) : (
+                <OptionGroupRow
+                  key={`opt:${it.underlying}`}
+                  underlying={it.underlying}
+                  legs={it.legs}
+                  quotes={quotes}
+                />
+              ),
+            )}
             {holdings.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-6 py-10 text-center text-[var(--muted)]">
@@ -482,6 +526,139 @@ function TickerHistoryPanel({
 }
 
 /** Price cell that briefly flashes green/red when the live price ticks. */
+/**
+ * One collapsible row consolidating every option contract on a single underlying.
+ * The parent shows the aggregate value/P&L and a summary (the structure name when
+ * there's just one, e.g. "Bull call spread"); expanding reveals each recognized
+ * structure and its individual legs.
+ */
+function OptionGroupRow({
+  underlying,
+  legs,
+  quotes,
+}: {
+  underlying: string;
+  legs: HoldingRow[];
+  quotes: Record<string, LiveQuote>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const parsed = legs.map((h) => ({ h, p: parseOccSymbol(h.ticker)! }));
+  const structures = classifyOptionLegs(
+    parsed.map(({ h, p }) => ({ parsed: p, quantity: h.quantity })),
+  );
+
+  const value = legs.reduce((s, h) => s + effectiveValue(h, quotes), 0);
+  const costed = legs.filter((h) => h.costBasis != null);
+  const totalCost = costed.reduce((s, h) => s + (h.costBasis ?? 0), 0);
+  const pnl = costed.length
+    ? costed.reduce((s, h) => s + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
+    : null;
+  const pnlPct = pnl != null && totalCost ? (pnl / totalCost) * 100 : null;
+  const contracts = legs.reduce((s, h) => s + Math.abs(h.quantity ?? 0), 0);
+  const currency = legs[0]?.currency ?? "USD";
+
+  const accounts = Array.from(new Set(legs.map((h) => h.accountName).filter(Boolean)));
+  const account = accounts.length === 1 ? accounts[0] : "Multiple";
+
+  const summary =
+    structures.length === 1
+      ? structures[0].label
+      : `${structures.length} structures · ${legs.length} legs`;
+
+  return (
+    <>
+      <tr
+        className="group cursor-pointer border-b border-line/60 last:border-0 transition-colors hover:bg-[var(--panel-2)]"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="w-8 pl-2">
+          <span className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition group-hover:text-[var(--paper)]">
+            <ChevronDown size={14} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
+          </span>
+        </td>
+        <td className="py-3.5 pr-3 pl-1">
+          <span className="inline-flex items-center gap-2">
+            <span className="font-medium text-[var(--brass)]">{underlying}</span>
+            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+              options
+            </span>
+            <span className="text-[var(--muted)]">{summary}</span>
+          </span>
+        </td>
+        <td className="px-3 py-3.5 text-[var(--muted)]">{account}</td>
+        <td className="px-3 py-2 text-[var(--faint)]">—</td>
+        <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">{contracts}</td>
+        <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>
+        <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>
+        <td className="mono px-3 py-3.5 text-right">{formatCurrency(value, currency)}</td>
+        <PnlCell pnl={pnl} pct={pnlPct} currency={currency} />
+      </tr>
+
+      {expanded && (
+        <tr className="border-b border-line/60 bg-[var(--panel-2)]/40">
+          <td colSpan={9} className="px-4 py-4 sm:px-6">
+            <div className="space-y-3">
+              {structures.map((st, i) => {
+                const stLegs = st.legIndexes.map((idx) => parsed[idx]);
+                const stValue = stLegs.reduce((s, { h }) => s + effectiveValue(h, quotes), 0);
+                const stCosted = stLegs.filter(({ h }) => h.costBasis != null);
+                const stPnl = stCosted.length
+                  ? stCosted.reduce((s, { h }) => s + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
+                  : null;
+                return (
+                  <div key={i} className="rounded-lg border border-line/60 bg-[var(--panel)]/40 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{st.label}</p>
+                        <p className="text-xs text-[var(--muted)]">{st.detail}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="mono text-sm">{formatCurrency(stValue, currency)}</p>
+                        {stPnl != null && (
+                          <p
+                            className={`mono text-xs ${stPnl >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
+                          >
+                            {stPnl >= 0 ? "+" : "−"}
+                            {formatCurrency(Math.abs(stPnl), currency)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <ul className="mt-2 space-y-1 border-t border-line/60 pt-2">
+                      {stLegs.map(({ h, p }) => {
+                        const long = (h.quantity ?? 0) >= 0;
+                        return (
+                          <li key={h.id} className="flex items-center justify-between gap-3 text-xs">
+                            <span className="flex min-w-0 items-center gap-2 text-[var(--muted)]">
+                              <span
+                                className={`mono shrink-0 ${long ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
+                              >
+                                {long ? "+" : "−"}
+                                {Math.abs(h.quantity ?? 0)}
+                              </span>
+                              <span className="truncate">
+                                {formatStrike(p.strike)} {p.right} · {formatOptionExpiry(p.expiry)}
+                              </span>
+                            </span>
+                            <span className="mono shrink-0 text-[var(--paper)]">
+                              {formatCurrency(effectiveValue(h, quotes), currency)}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 function PriceCell({ price, currency }: { price: number; currency: string }) {
   const prev = useRef<number | null>(null);
   const [flash, setFlash] = useState<"up" | "down" | null>(null);

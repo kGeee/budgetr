@@ -2,6 +2,7 @@ import { PageHead } from "@/components/page-head";
 import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
 import { getHoldings, getInvestmentTransactions, getManualHoldings } from "@/lib/queries";
 import { buildReconstructedSeries, getTickerHistories } from "@/lib/portfolio-history";
+import { parseOccSymbol } from "@/lib/options";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (always fresh), but the Yahoo history fetches should
@@ -19,7 +20,10 @@ export default async function InvestmentsPage() {
     .map((m) => m.symbol)
     .filter((s): s is string => Boolean(s));
   const symbols = [
-    ...plaidHoldings.map((h) => h.ticker).filter((t): t is string => Boolean(t)),
+    // Skip option (OCC) tickers — Yahoo has no history for them.
+    ...plaidHoldings
+      .map((h) => h.ticker)
+      .filter((t): t is string => Boolean(t) && !parseOccSymbol(t)),
     ...manualSymbols,
   ];
   const histories = await getTickerHistories(symbols);
