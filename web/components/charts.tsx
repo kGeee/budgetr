@@ -375,6 +375,94 @@ export function ValueAreaChart({
   );
 }
 
+/** Rebased-to-100 comparison line colors, shared by chart + legend. */
+const BENCHMARK_LINES = [
+  { key: "portfolio", label: "Portfolio", color: "#cbb07c" },
+  { key: "spy", label: "SPY", color: "#7fb2e0" },
+  { key: "qqq", label: "QQQ", color: "#b59ce0" },
+] as const;
+
+/**
+ * Portfolio vs benchmark overlay: every series rebased to 100 at the window's
+ * start so their *shapes* are comparable regardless of absolute scale. Portfolio
+ * is brass; SPY/QQQ ride cooler hues. Benchmark lines only draw when present.
+ */
+export function BenchmarkLineChart({
+  data,
+  height = 280,
+}: {
+  data: { date: string; portfolio: number; spy: number | null; qqq: number | null }[];
+  height?: number;
+}) {
+  if (data.length < 2)
+    return <Empty label="No history yet" hint="Sync to compare against SPY and QQQ." />;
+
+  // Only legend/plot benchmarks that actually carry data in this window.
+  const present = BENCHMARK_LINES.filter(
+    (l) => l.key === "portfolio" || data.some((d) => d[l.key] != null),
+  );
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {present.map((l) => (
+          <span key={l.key} className="inline-flex items-center gap-1.5 text-xs text-[var(--muted)]">
+            <span className="inline-block h-2 w-3 rounded-full" style={{ background: l.color }} />
+            {l.label}
+          </span>
+        ))}
+        <span className="ml-auto text-[10px] text-[var(--faint)]">indexed to 100 at window start</span>
+      </div>
+      <ResponsiveContainer width="100%" height={height}>
+        <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+          <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+          <XAxis
+            dataKey="date"
+            tickFormatter={(d) => format(parseISO(d), "MMM d")}
+            tick={tick}
+            tickLine={false}
+            axisLine={{ stroke: GRID }}
+            minTickGap={28}
+          />
+          <YAxis
+            tickFormatter={(v) => Number(v).toFixed(0)}
+            tick={tick}
+            tickLine={false}
+            axisLine={false}
+            width={40}
+            domain={["auto", "auto"]}
+          />
+          <Tooltip
+            contentStyle={tooltipStyle}
+            labelStyle={labelStyle}
+            cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+            formatter={(value, name) => {
+              const line = BENCHMARK_LINES.find((l) => l.key === name);
+              const v = Number(value);
+              const pct = v - 100;
+              return [`${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`, line?.label ?? name];
+            }}
+            labelFormatter={(d) => format(parseISO(d as string), "PP")}
+          />
+          {present.map((l) => (
+            <Line
+              key={l.key}
+              type="monotone"
+              dataKey={l.key}
+              stroke={l.color}
+              strokeWidth={l.key === "portfolio" ? 2.5 : 1.75}
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
+              activeDot={{ r: 4, fill: l.color, stroke: "#090c0b", strokeWidth: 2 }}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 /**
  * Cumulative spend for the month against a straight budget-pace line (0 → total
  * budget). Spend line is jade when on/under pace, coral when ahead of it.

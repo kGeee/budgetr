@@ -36,7 +36,8 @@ import { AssetAllocation, type AllocRow } from "@/components/asset-allocation";
 import { DividendPanel } from "@/components/dividend-panel";
 import type { InvestmentTxnRow } from "@/lib/queries";
 import type { DividendSummary } from "@/lib/dividends";
-import type { DividendCalendarEntry } from "@/lib/yahoo";
+import type { DividendCalendarEntry, PricePoint as YahooPricePoint } from "@/lib/yahoo";
+import type { BenchmarkKey, ComparisonRow } from "@/lib/benchmark";
 
 const UNASSIGNED = "Unassigned";
 import {
@@ -80,6 +81,8 @@ export function PortfolioView({
   holdings,
   histories = {},
   portfolioSeries = [],
+  benchmarks = {},
+  comparison = [],
   transactions = [],
   knownSectors = [],
   ivByOcc = {},
@@ -93,6 +96,10 @@ export function PortfolioView({
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
   portfolioSeries?: { date: string; value: number }[];
+  /** SPY/QQQ daily closes for the value-chart overlay. */
+  benchmarks?: Partial<Record<BenchmarkKey, YahooPricePoint[]>>;
+  /** Per-window portfolio-vs-benchmark return comparison. */
+  comparison?: ComparisonRow[];
   transactions?: InvestmentTxnRow[];
   knownSectors?: string[];
   /** Live implied volatility by OCC symbol (from the Yahoo option chains). */
@@ -127,6 +134,8 @@ export function PortfolioView({
         holdings={holdings}
         histories={histories}
         portfolioSeries={portfolioSeries}
+        benchmarks={benchmarks}
+        comparison={comparison}
         transactions={transactions}
         knownSectors={knownSectors}
         ivByOcc={ivByOcc}
@@ -374,6 +383,8 @@ function PortfolioInner({
   holdings,
   histories,
   portfolioSeries,
+  benchmarks,
+  comparison,
   transactions,
   knownSectors,
   ivByOcc,
@@ -387,6 +398,8 @@ function PortfolioInner({
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
   portfolioSeries: { date: string; value: number }[];
+  benchmarks: Partial<Record<BenchmarkKey, YahooPricePoint[]>>;
+  comparison: ComparisonRow[];
   transactions: InvestmentTxnRow[];
   knownSectors: string[];
   ivByOcc: Record<string, number>;
@@ -630,9 +643,12 @@ function PortfolioInner({
           <span className="text-xs text-[var(--faint)]">reconstructed from your trades</span>
         </div>
         <div className="px-3 py-5 sm:px-5">
-          <ValueHistory data={portfolioSeries} kind="portfolio" />
+          <ValueHistory data={portfolioSeries} kind="portfolio" benchmarks={benchmarks} />
         </div>
       </Card>
+
+      <BenchmarkComparison comparison={comparison} />
+
 
       <Card className="overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
@@ -1452,6 +1468,85 @@ function SectorAllocation({
                     {pct.toFixed(1)}%
                   </td>
                   <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{d.count}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Compact out/under-performance table: one row per time window comparing the
+ * portfolio's return to SPY and QQQ, with the delta colored jade when the
+ * portfolio outperformed and coral when it lagged. Hidden until there's at
+ * least one window's worth of comparison data.
+ */
+function BenchmarkComparison({ comparison }: { comparison: ComparisonRow[] }) {
+  if (comparison.length === 0) return null;
+
+  const pct = (v: number | null) =>
+    v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}%`;
+
+  const WINDOW_LABEL: Record<ComparisonRow["window"], string> = {
+    "1M": "1 month",
+    "3M": "3 months",
+    "6M": "6 months",
+    "1Y": "1 year",
+    YTD: "Year to date",
+  };
+
+  return (
+    <Card className="p-0">
+      <div className="flex items-center justify-between border-b border-line px-6 py-4">
+        <span className="eyebrow">Return vs benchmarks</span>
+        <span className="text-xs text-[var(--faint)]">portfolio return vs SPY &amp; QQQ</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead>
+            <tr className="border-b border-line text-left">
+              {["Window", "Portfolio", "SPY", "QQQ", "Δ vs SPY", "Δ vs QQQ"].map((h, i) => (
+                <th
+                  key={h}
+                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {comparison.map((r) => {
+              const pColor =
+                r.portfolioPct == null
+                  ? "text-[var(--faint)]"
+                  : r.portfolioPct >= 0
+                    ? "text-[var(--jade)]"
+                    : "text-[var(--coral)]";
+              const delta = (v: number | null) => (
+                <td
+                  className={`mono px-6 py-2.5 text-right ${
+                    v == null
+                      ? "text-[var(--faint)]"
+                      : v >= 0
+                        ? "text-[var(--jade)]"
+                        : "text-[var(--coral)]"
+                  }`}
+                >
+                  {pct(v)}
+                </td>
+              );
+              return (
+                <tr key={r.window} className="border-b border-line/60 last:border-0">
+                  <td className="px-6 py-2.5 text-[var(--muted)]">{WINDOW_LABEL[r.window]}</td>
+                  <td className={`mono px-6 py-2.5 text-right ${pColor}`}>{pct(r.portfolioPct)}</td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{pct(r.spyPct)}</td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{pct(r.qqqPct)}</td>
+                  {delta(r.deltaVsSpy)}
+                  {delta(r.deltaVsQqq)}
                 </tr>
               );
             })}

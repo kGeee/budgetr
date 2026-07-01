@@ -12,7 +12,12 @@ import {
   getManualHoldings,
   sectorKeyFor,
 } from "@/lib/queries";
-import { buildReconstructedSeries, getTickerHistories } from "@/lib/portfolio-history";
+import {
+  buildReconstructedSeries,
+  getTickerHistories,
+  type PricePoint,
+} from "@/lib/portfolio-history";
+import { computeComparison, type BenchmarkKey } from "@/lib/benchmark";
 import { parseOccSymbol } from "@/lib/options";
 import { getDividendCalendar, getOptionChain } from "@/lib/yahoo";
 
@@ -108,6 +113,19 @@ export default async function InvestmentsPage() {
       ? rawSeries.map((p) => ({ date: p.date, value: p.value + fixedValueTotal }))
       : rawSeries;
 
+  // Benchmark comparison: pull SPY/QQQ closes (via the shared 6h Yahoo Data
+  // Cache) and measure the portfolio's return against them per window. Skipped
+  // when there's no portfolio series to compare (empty holdings).
+  const benchmarkSeries =
+    portfolioSeries.length > 1
+      ? await getTickerHistories(["SPY", "QQQ"])
+      : ({} as Record<string, PricePoint[]>);
+  const benchmarks: Partial<Record<BenchmarkKey, PricePoint[]>> = {
+    SPY: benchmarkSeries.SPY,
+    QQQ: benchmarkSeries.QQQ,
+  };
+  const comparison = computeComparison(portfolioSeries, benchmarks);
+
   // Options analytics: for the distinct OCC underlyings we hold, pull Yahoo's
   // option chains (only when option legs exist) for live IV + underlying prices,
   // fetching just the expiries we actually own. Everything downstream is derived.
@@ -151,6 +169,8 @@ export default async function InvestmentsPage() {
         holdings={holdings}
         histories={histories}
         portfolioSeries={portfolioSeries}
+        benchmarks={benchmarks}
+        comparison={comparison}
         transactions={transactions}
         knownSectors={knownSectors}
         ivByOcc={ivByOcc}
