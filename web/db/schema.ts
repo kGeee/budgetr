@@ -163,8 +163,16 @@ export const tagBudgets = sqliteTable("tag_budgets", {
 });
 
 /**
- * Auto-tagging rule: when a transaction's merchant/name contains `pattern`
- * (stored lowercased), apply `tagId`. Applied on sync and backfilled on create.
+ * Auto-tagging rule: when a transaction matches `pattern` (per `matchType`)
+ * and every set condition (amount bounds, account scope), apply `tagId` and —
+ * when `categoryId` is set — also assign that category. Applied on sync and
+ * backfilled on create.
+ *
+ * `matchType` selects how `pattern` is tested against the merchant/name:
+ *  - `contains` (default): substring — the fast SQL LIKE path, pattern lowercased.
+ *  - `exact`: full-string equality (case-insensitive).
+ *  - `regex`: JS regular expression (SQLite can't do this, so these rules drop
+ *    to JS evaluation in applyTagRules).
  */
 export const tagRules = sqliteTable(
   "tag_rules",
@@ -175,6 +183,19 @@ export const tagRules = sqliteTable(
     tagId: text("tag_id")
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
+    // contains | exact | regex — how `pattern` is tested (see doc above).
+    matchType: text("match_type").notNull().default("contains"),
+    // Optional inclusive amount bounds (Plaid sign: positive = spending).
+    minAmount: real("min_amount"),
+    maxAmount: real("max_amount"),
+    // Optional scope: only transactions in this account.
+    accountId: text("account_id").references(() => accounts.id, {
+      onDelete: "set null",
+    }),
+    // Optional: also assign this category to matching transactions.
+    categoryId: text("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
   (t) => [index("tag_rules_tag_idx").on(t.tagId)],
@@ -526,6 +547,110 @@ export const netWorthMilestones = sqliteTable("net_worth_milestones", {
   sortOrder: integer("sort_order").notNull().default(0),
 });
 
+/**
+ * Overlay that divides one transaction's amount across several categories. Purely
+ * additive: a transaction with no rows here still resolves through
+ * effectiveCatId() exactly as before; once it has splits, each split's `amount`
+ * lands in its own category for category/budget reporting instead of the whole
+ * amount landing in one. Split amounts are expected to sum to the parent
+ * transaction's signed amount — enforced in the setTransactionSplits action.
+ */
+export const transactionSplits = sqliteTable(
+  "transaction_splits",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    // Null (or an archived category) simply reports as Uncategorized; the FK
+    // clears rather than blocking a category delete.
+    categoryId: text("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    amount: real("amount").notNull(), // same sign convention as transactions.amount
+    note: text("note"),
+  },
+  (t) => [
+    index("tx_splits_txn_idx").on(t.transactionId),
+    index("tx_splits_category_idx").on(t.categoryId),
+  ],
+);
+
+/**
+ * Links two offsetting transactions so they can be excluded from cashflow and
+ * category spend (avoiding double-counting). Two flavours by `kind`:
+ *  - `transfer`: a transfer out of one account matched to the transfer in on
+ *    another (different accounts, opposite signs, equal magnitude).
+ *  - `refund`: a purchase matched to its later refund (same account).
+ *
+ * Suggestions are computed in lib/matching.ts; the user confirms or dismisses
+ * each. A `dismissed` row is a tombstone — it suppresses the pair from ever
+ * being re-suggested without excluding the transactions from reporting. Only
+ * `confirmed` rows drive the exclusion. Additive overlay: transactions with no
+ * row here report exactly as before.
+ */
+export const transactionMatches = sqliteTable(
+  "transaction_matches",
+  {
+    id: text("id").primaryKey(),
+    txnAId: text("txn_a_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    txnBId: text("txn_b_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // refund | transfer
+    status: text("status").notNull().default("confirmed"), // confirmed | dismissed
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("txn_matches_pair_idx").on(t.txnAId, t.txnBId),
+    index("txn_matches_a_idx").on(t.txnAId),
+    index("txn_matches_b_idx").on(t.txnBId),
+  ],
+);
+
+/**
+ * Receipt/invoice files attached to a transaction. The bytes live on disk under
+ * ATTACHMENTS_DIR (see lib/attachments.ts) — outside public/ — with one metadata
+ * row per file here. `file_path` is the absolute on-disk path the streaming API
+ * route (app/api/attachments/[id]) reads back. Additive overlay: a transaction
+ * with no rows here behaves exactly as before. The notes half of the feature
+ * reuses the existing transactions.notes column.
+ */
+export const attachments = sqliteTable(
+  "attachments",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    filePath: text("file_path").notNull(),
+    mimeType: text("mime_type"),
+    size: integer("size"),
+    originalName: text("original_name"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("attachments_txn_idx").on(t.transactionId)],
+);
+
+/**
+ * A named, reusable set of transaction filter criteria for the transactions
+ * search bar. `query` is the JSON-serialized TxnCriteria (see lib/queries.ts) —
+ * kept opaque here so new criteria fields never require a schema change. Purely
+ * additive: nothing else references this table.
+ */
+export const savedFilters = sqliteTable(
+  "saved_filters",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    query: text("query").notNull(), // JSON-serialized TxnCriteria
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("saved_filters_created_idx").on(t.createdAt)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -554,3 +679,7 @@ export type SavingsGoal = typeof savingsGoals.$inferSelect;
 export type SavingsContribution = typeof savingsContributions.$inferSelect;
 export type FireSettings = typeof fireSettings.$inferSelect;
 export type NetWorthMilestone = typeof netWorthMilestones.$inferSelect;
+export type TransactionSplit = typeof transactionSplits.$inferSelect;
+export type TransactionMatch = typeof transactionMatches.$inferSelect;
+export type Attachment = typeof attachments.$inferSelect;
+export type SavedFilter = typeof savedFilters.$inferSelect;

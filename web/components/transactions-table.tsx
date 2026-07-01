@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check } from "lucide-react";
+import { Check, Paperclip, Split } from "lucide-react";
 import { CategoryPill } from "@/components/category-pill";
 import { TransactionDetail } from "@/components/transaction-detail";
 import { setReviewed } from "@/lib/actions";
@@ -110,6 +110,15 @@ export function TransactionsTable({
                         />
                       )}
                       <span className="font-medium">{t.displayName}</span>
+                      {t.attachmentCount > 0 && (
+                        <Paperclip
+                          size={13}
+                          className="shrink-0 text-[var(--muted)]"
+                          aria-label={`${t.attachmentCount} attached ${
+                            t.attachmentCount === 1 ? "receipt" : "receipts"
+                          }`}
+                        />
+                      )}
                       {t.tags.map((tag) => (
                         <span
                           key={tag.id}
@@ -126,7 +135,18 @@ export function TransactionsTable({
                     </span>
                   </td>
                   <td className="px-6 py-3.5">
-                    <CategoryPill name={t.categoryName} icon={t.categoryIcon} />
+                    <span className="flex items-center gap-1.5">
+                      {t.splitCount > 0 ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-[var(--panel-2)] px-2.5 py-1 text-xs text-[var(--brass)]"
+                          title={`Split across ${t.splitCount} categories`}
+                        >
+                          <Split size={13} /> {t.splitCount} splits
+                        </span>
+                      ) : (
+                        <CategoryPill name={t.categoryName} icon={t.categoryIcon} />
+                      )}
+                    </span>
                   </td>
                   <td className="whitespace-nowrap px-6 py-3.5 text-[var(--muted)]">
                     {t.accountName}

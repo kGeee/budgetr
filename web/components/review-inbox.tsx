@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check } from "lucide-react";
+import { Check, Sparkles } from "lucide-react";
 import { CategoryIcon } from "@/components/category-pill";
 import { TransactionDetail } from "@/components/transaction-detail";
-import { setReviewed } from "@/lib/actions";
+import { setReviewed, setTransactionCategory, suggestForTransaction } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
-import type { CategoryRow, TransactionRow } from "@/lib/queries";
+import type { CategoryRow, CategorySuggestion, TransactionRow } from "@/lib/queries";
 
 export function ReviewInbox({
   transactions,
@@ -70,6 +70,7 @@ export function ReviewInbox({
                 <p className="truncate text-xs text-[var(--muted)]">
                   {t.categoryName} · {t.accountName}
                 </p>
+                <InboxSuggestion txn={t} disabled={pending} />
               </div>
               <span
                 className={`mono shrink-0 text-sm ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
@@ -99,5 +100,46 @@ export function ReviewInbox({
         onClose={() => setOpenId(null)}
       />
     </div>
+  );
+}
+
+/**
+ * One-click category suggestion inline in an inbox row: lazily learns how this
+ * vendor was classified before and, when that disagrees with the row's current
+ * category, offers to apply it without opening the drawer. Hidden when there's
+ * no history or the guess already matches.
+ */
+function InboxSuggestion({ txn, disabled }: { txn: TransactionRow; disabled: boolean }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [sug, setSug] = useState<CategorySuggestion | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    suggestForTransaction(txn.id).then((s) => {
+      if (alive) setSug(s.category);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [txn.id]);
+
+  if (!sug || sug.categoryId === txn.categoryId || txn.splitCount > 0) return null;
+
+  return (
+    <button
+      disabled={disabled || pending}
+      onClick={(e) => {
+        e.stopPropagation();
+        start(async () => {
+          await setTransactionCategory(txn.id, sug.categoryId);
+          router.refresh();
+        });
+      }}
+      className="mt-1 inline-flex max-w-full items-center gap-1 rounded-full border border-dashed border-[var(--brass-dim)] px-2 py-0.5 text-[11px] text-[var(--muted)] transition hover:bg-[color-mix(in_srgb,var(--brass)_10%,transparent)] hover:text-[var(--paper)] disabled:opacity-50"
+    >
+      <Sparkles size={11} className="shrink-0 text-[var(--brass)]" />
+      <span className="truncate">Set {sug.categoryName}</span>
+    </button>
   );
 }

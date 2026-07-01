@@ -85,6 +85,13 @@
       "when": 1782894141331,
       "tag": "0011_clean_titanium_man",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1782894440322,
+      "tag": "0012_open_vermin",
+      "breakpoints": true
     }
   ]
 }
