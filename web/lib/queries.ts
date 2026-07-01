@@ -11,11 +11,13 @@ import {
   investmentTransactions,
   items,
   manualHoldings,
+  savingsContributions,
   securities,
   taxLotOverrides,
   vendorGroupMembers,
   vendorGroups,
 } from "@/db/schema";
+import type { SavingsContribution } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 import {
@@ -45,7 +47,7 @@ const transferPrimaries = sql`
  * category id: the user's override if set, else the category mapped to its
  * Plaid primary. Alias-parameterized so it composes inside aliased joins/subqueries.
  */
-function effectiveCatId(alias: string) {
+export function effectiveCatId(alias: string) {
   const a = sql.raw(alias);
   return sql`COALESCE(
     ${a}.user_category_id,
@@ -222,6 +224,74 @@ export function getBudgetsWithSpend(): BudgetRow[] {
         budget,
         spent,
         remaining: budget == null ? null : budget - spent,
+      };
+    });
+}
+
+/** A BudgetRow plus its envelope/rollover state for the budget month. */
+export type EnvelopeBudgetRow = BudgetRow & {
+  rollover: boolean;
+  carryIn: number; // balance carried into this month (+ unused, − overspent)
+  available: number; // budget + carryIn − spent — what's actually spendable
+  carryOut: number; // projected balance rolling into next month (= available)
+};
+
+/**
+ * Envelope view of every spending category: the plain budget/spend of
+ * getBudgetsWithSpend plus the rollover toggle and the persisted carry-in for
+ * getBudgetMonth(). available = budget + carryIn − spent; carryOut = available
+ * (what next month would inherit). Non-rollover categories read carryIn 0, so
+ * their available/carryOut collapse to the usual remaining.
+ */
+export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
+  const month = getBudgetMonth();
+  return db
+    .all<{
+      categoryId: string;
+      name: string;
+      icon: string | null;
+      budget: number | null;
+      rollover: number;
+      carryIn: number;
+      spent: number;
+    }>(
+      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
+             b.amount AS budget,
+             COALESCE(b.rollover, 0) AS rollover,
+             COALESCE((
+               SELECT r.carry_in FROM budget_rollovers r
+               WHERE r.category_id = cat.id AND r.month = ${month}
+             ), 0) AS carryIn,
+             COALESCE((
+               SELECT SUM(t.amount) FROM transactions t
+               WHERE t.pending = 0 AND t.amount > 0
+                 AND ${effectiveCatId("t")} = cat.id
+                 AND substr(t.date, 1, 7) = ${month}
+             ), 0) AS spent
+          FROM categories cat
+          LEFT JOIN budgets b ON b.category_id = cat.id
+          WHERE cat.archived = 0 AND cat."group" = 'spending'
+          ORDER BY (b.amount IS NULL), spent DESC, cat.sort_order ASC`,
+    )
+    .map((r) => {
+      const budget = r.budget == null ? null : Number(r.budget);
+      const spent = Number(r.spent);
+      const rollover = Boolean(r.rollover);
+      const carryIn = rollover ? Number(r.carryIn) : 0;
+      // available/carryOut only meaningful once a budget exists; keep them at 0
+      // for unbudgeted rows so the UI shows "No budget" as before.
+      const available = budget == null ? 0 : budget + carryIn - spent;
+      return {
+        categoryId: r.categoryId,
+        name: r.name,
+        icon: r.icon,
+        budget,
+        spent,
+        remaining: budget == null ? null : budget - spent,
+        rollover,
+        carryIn,
+        available,
+        carryOut: available,
       };
     });
 }
@@ -1147,4 +1217,79 @@ export function prettyCategory(c: string | null): string {
     .split("_")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+}
+
+// ── Sinking funds / savings goals ─────────────────────────────────────────────
+
+/**
+ * A savings goal with its ledger-derived progress: `saved` is the running sum of
+ * all contributions (deposits minus withdrawals), `remaining` the gap to target,
+ * and `pct` the clamped fill percentage for the progress bar.
+ */
+export type SavingsGoalRow = {
+  id: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  targetAmount: number;
+  targetDate: string | null;
+  saved: number;
+  remaining: number;
+  pct: number;
+  archived: boolean;
+};
+
+/**
+ * Every savings goal with its contribution total. Active goals first, then by
+ * the user's sort order; archived goals sink to the bottom.
+ */
+export function getSavingsGoals(): SavingsGoalRow[] {
+  return db
+    .all<{
+      id: string;
+      name: string;
+      icon: string | null;
+      color: string | null;
+      targetAmount: number;
+      targetDate: string | null;
+      archived: number;
+      saved: number;
+    }>(
+      sql`SELECT g.id AS id, g.name AS name, g.icon AS icon, g.color AS color,
+             g.target_amount AS targetAmount, g.target_date AS targetDate,
+             g.archived AS archived,
+             COALESCE((
+               SELECT SUM(c.amount) FROM savings_contributions c
+               WHERE c.goal_id = g.id
+             ), 0) AS saved
+          FROM savings_goals g
+          ORDER BY g.archived ASC, g.sort_order ASC, g.created_at ASC`,
+    )
+    .map((r) => {
+      const targetAmount = Number(r.targetAmount);
+      const saved = Number(r.saved);
+      const pct = targetAmount > 0 ? Math.min(Math.max((saved / targetAmount) * 100, 0), 100) : 0;
+      return {
+        id: r.id,
+        name: r.name,
+        icon: r.icon,
+        color: r.color,
+        targetAmount,
+        targetDate: r.targetDate,
+        saved,
+        remaining: targetAmount - saved,
+        pct,
+        archived: Boolean(r.archived),
+      };
+    });
+}
+
+/** A goal's contribution ledger, newest first, for the audit/history view. */
+export function getSavingsGoalContributions(goalId: string): SavingsContribution[] {
+  return db
+    .select()
+    .from(savingsContributions)
+    .where(eq(savingsContributions.goalId, goalId))
+    .orderBy(desc(savingsContributions.date), desc(savingsContributions.createdAt))
+    .all();
 }

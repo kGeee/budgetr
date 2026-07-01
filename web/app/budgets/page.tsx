@@ -4,8 +4,8 @@ import { BudgetPaceChart } from "@/components/charts";
 import { Card } from "@/components/ui/card";
 import {
   getBudgetSpendByDay,
-  getBudgetsWithSpend,
   getCategories,
+  getEnvelopeBudgets,
   getMonthlyBudgetSummary,
   getTagBudgetsWithSpend,
 } from "@/lib/queries";
@@ -14,8 +14,11 @@ import { formatCurrency } from "@/lib/utils";
 export const dynamic = "force-dynamic";
 
 export default function BudgetsPage() {
-  const rows = getBudgetsWithSpend();
+  const rows = getEnvelopeBudgets();
   const tagRows = getTagBudgetsWithSpend();
+  // Net balance carried into this month across all envelope-enabled categories.
+  const carriedForward = rows.reduce((sum, r) => sum + (r.rollover ? r.carryIn : 0), 0);
+  const hasRollovers = rows.some((r) => r.rollover);
   const categories = getCategories();
   const { totalBudget, totalSpent, left, month } = getMonthlyBudgetSummary();
   const over = left < 0;
@@ -65,6 +68,15 @@ export default function BudgetsPage() {
             {formatCurrency(totalSpent)} spent of {formatCurrency(totalBudget)} budgeted ·{" "}
             {monthLabel}
           </p>
+          {hasRollovers && (
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              <span className={carriedForward < 0 ? "text-[var(--coral)]" : "text-[var(--jade)]"}>
+                {carriedForward >= 0 ? "+" : "−"}
+                {formatCurrency(Math.abs(carriedForward))}
+              </span>{" "}
+              carried forward from last month
+            </p>
+          )}
         </div>
       </div>
 

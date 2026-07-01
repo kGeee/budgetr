@@ -7,7 +7,9 @@ import { buildReconstructedSeries, getTickerHistories, overlayNetWorth } from "@
 import { CategoryIcon } from "@/components/category-pill";
 import { BudgetBar } from "@/components/budget-bar";
 import { ReviewInbox } from "@/components/review-inbox";
+import { AlertsPanel } from "@/components/alerts-panel";
 import { UpcomingBills } from "@/components/upcoming-bills";
+import { detectAnomalies } from "@/lib/anomalies";
 import { PlaidLink } from "@/components/plaid-link";
 import Link from "next/link";
 import {
@@ -83,6 +85,7 @@ export default async function Dashboard() {
     { month: "long", year: "numeric" },
   );
   const upcoming = getUpcomingBills(14);
+  const alerts = detectAnomalies();
 
   const first = series[0]?.netWorth ?? nw.net;
   const change = nw.net - first;
@@ -214,6 +217,9 @@ export default async function Dashboard() {
           )}
         </Card>
       </div>
+
+      {/* Anomaly alerts — spikes, duplicates, price creep, trials */}
+      {alerts.length > 0 && <AlertsPanel alerts={alerts} compact limit={3} />}
 
       {/* Review queue */}
       {toReview.length > 0 && (

@@ -127,7 +127,30 @@ export const budgets = sqliteTable("budgets", {
     .unique()
     .references(() => categories.id, { onDelete: "cascade" }),
   amount: real("amount").notNull(),
+  // Envelope mode: when set, this category's unused (or overspent) balance
+  // carries forward month to month via the budget_rollovers ledger.
+  rollover: integer("rollover", { mode: "boolean" }).notNull().default(false),
 });
+
+/**
+ * Per-category, per-month carry ledger backing envelope/rollover budgets. One
+ * row records how much unused (positive) or overspent (negative) balance rolled
+ * into `month` for a category. An envelope's available = budget + carryIn −
+ * spent; carryOut = available then seeds the next month's carryIn. Persisted so
+ * the running envelope balance stays auditable rather than recomputed blindly.
+ */
+export const budgetRollovers = sqliteTable(
+  "budget_rollovers",
+  {
+    id: text("id").primaryKey(),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "cascade" }),
+    month: text("month").notNull(), // YYYY-MM
+    carryIn: real("carry_in").notNull().default(0),
+  },
+  (t) => [uniqueIndex("budget_rollover_cat_month_idx").on(t.categoryId, t.month)],
+);
 
 /** Rolling monthly budget scoped to a tag — overlaps category budgets intentionally. */
 export const tagBudgets = sqliteTable("tag_budgets", {
@@ -416,6 +439,93 @@ export const taxLotOverrides = sqliteTable(
   (t) => [index("tax_lot_overrides_sell_idx").on(t.sellTxnId)],
 );
 
+/**
+ * User dismissals / snoozes for the anomaly-detection alerts (lib/anomalies.ts).
+ * Alerts themselves are derived on the fly from transactions + recurring_streams,
+ * so we only persist the user's action against a deterministic `alertKey`.
+ *  - `snoozeUntil` null  → permanently dismissed.
+ *  - `snoozeUntil` set   → hidden until that YYYY-MM-DD, then re-surfaces.
+ */
+export const dismissedAlerts = sqliteTable(
+  "dismissed_alerts",
+  {
+    id: text("id").primaryKey(),
+    alertKey: text("alert_key").notNull(),
+    dismissedAt: integer("dismissed_at", { mode: "timestamp" }).notNull(),
+    snoozeUntil: text("snooze_until"), // YYYY-MM-DD, null = dismissed for good
+  },
+  (t) => [uniqueIndex("dismissed_alert_key_idx").on(t.alertKey)],
+);
+
+/**
+ * A named savings goal / sinking fund (vacation, emergency fund, new laptop).
+ * Progress is derived from the `savings_contributions` ledger, never stored on
+ * the goal itself, so the running total is always auditable. `targetDate` is
+ * optional; when set and passed, the UI flags a still-underfunded goal.
+ */
+export const savingsGoals = sqliteTable("savings_goals", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  icon: text("icon"), // lucide icon name
+  color: text("color"), // hex / token, optional accent
+  targetAmount: real("target_amount").notNull(),
+  targetDate: text("target_date"), // YYYY-MM-DD, optional
+  sortOrder: integer("sort_order").notNull().default(0),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * Append-only ledger of money earmarked toward a goal. A deposit is a positive
+ * `amount`, a withdrawal is negative — summing the rows gives the amount saved.
+ */
+export const savingsContributions = sqliteTable(
+  "savings_contributions",
+  {
+    id: text("id").primaryKey(),
+    goalId: text("goal_id")
+      .notNull()
+      .references(() => savingsGoals.id, { onDelete: "cascade" }),
+    amount: real("amount").notNull(), // + deposit, - withdrawal
+    date: text("date").notNull(), // YYYY-MM-DD
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("savings_contributions_goal_idx").on(t.goalId)],
+);
+
+/**
+ * Single-row (`id = 'default'`) FIRE / financial-independence assumptions the
+ * user tunes on the FIRE dashboard. Kept as one settings row rather than a
+ * key/value blob so the columns stay typed and additive. `annualExpenses` and
+ * `monthlyContribution` are nullable — when unset the dashboard falls back to
+ * figures derived from recent cashflow. Rates are stored as whole percents
+ * (e.g. 4 = 4%).
+ */
+export const fireSettings = sqliteTable("fire_settings", {
+  id: text("id").primaryKey().default("default"),
+  annualExpenses: real("annual_expenses"), // null → derive from cashflow
+  safeWithdrawalRate: real("safe_withdrawal_rate").notNull().default(4), // %
+  expectedReturn: real("expected_return").notNull().default(7), // % nominal annual
+  monthlyContribution: real("monthly_contribution"), // null → derive from savings
+  targetRetirementAge: integer("target_retirement_age"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * User-defined net-worth milestones ("First $100k", "Half a million", "FIRE").
+ * Progress is derived against live net worth; `achievedDate` is stamped when the
+ * user marks it hit (kept even if net worth later dips) and `sortOrder` controls
+ * display order alongside the ascending target amounts.
+ */
+export const netWorthMilestones = sqliteTable("net_worth_milestones", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  amount: real("amount").notNull(),
+  achievedDate: text("achieved_date"), // YYYY-MM-DD, null = not yet marked hit
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -427,6 +537,7 @@ export type BalanceSnapshot = typeof balanceSnapshots.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
 export type Budget = typeof budgets.$inferSelect;
+export type BudgetRollover = typeof budgetRollovers.$inferSelect;
 export type TagBudget = typeof tagBudgets.$inferSelect;
 export type TagRule = typeof tagRules.$inferSelect;
 export type RecurringStream = typeof recurringStreams.$inferSelect;
@@ -438,3 +549,8 @@ export type InvestmentAssetClass = typeof investmentAssetClasses.$inferSelect;
 export type InvestmentGeography = typeof investmentGeographies.$inferSelect;
 export type CostBasisMethod = typeof costBasisMethod.$inferSelect;
 export type TaxLotOverride = typeof taxLotOverrides.$inferSelect;
+export type DismissedAlert = typeof dismissedAlerts.$inferSelect;
+export type SavingsGoal = typeof savingsGoals.$inferSelect;
+export type SavingsContribution = typeof savingsContributions.$inferSelect;
+export type FireSettings = typeof fireSettings.$inferSelect;
+export type NetWorthMilestone = typeof netWorthMilestones.$inferSelect;
