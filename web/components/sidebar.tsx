@@ -11,6 +11,7 @@ import {
   Wallet,
   Repeat,
   Store,
+  TrendingUp,
   Wand2,
   type LucideIcon,
 } from "lucide-react";
@@ -23,6 +24,7 @@ const nav: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/investments", label: "Investments", icon: LineChart },
   { href: "/categories", label: "Categories", icon: Shapes },
   { href: "/budgets", label: "Budgets", icon: Wallet },
+  { href: "/cashflow", label: "Cashflow", icon: TrendingUp },
   { href: "/recurring", label: "Recurring", icon: Repeat },
   { href: "/rules", label: "Auto-tag rules", icon: Wand2 },
 ];

@@ -11,6 +11,7 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -432,6 +433,84 @@ export function BudgetPaceChart({
           dataKey="spent"
           stroke={spendColor}
           strokeWidth={2.5}
+          dot={false}
+          connectNulls={false}
+          isAnimationActive={false}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+/**
+ * Actual-vs-projected end-of-month cash balance. The solid jade line is the
+ * reconstructed balance up to today; the dashed brass line projects forward
+ * (pace spend + scheduled bills/income). A reference line marks today, where the
+ * two series meet. Y-axis auto-frames so the projected drawdown stays legible.
+ */
+export function ForecastChart({
+  data,
+  today = null,
+}: {
+  data: { date: string; actual: number | null; projected: number | null }[];
+  /** 'YYYY-MM-DD' of today within the charted month, or null for a past month. */
+  today?: string | null;
+}) {
+  if (data.length === 0)
+    return <Empty label="No forecast yet" hint="Connect a cash account to project your month." />;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+        <XAxis
+          dataKey="date"
+          tickFormatter={(d) => format(parseISO(d), "MMM d")}
+          tick={tick}
+          tickLine={false}
+          axisLine={{ stroke: GRID }}
+          minTickGap={24}
+        />
+        <YAxis
+          tickFormatter={(v) => formatCompactCurrency(v)}
+          tick={tick}
+          tickLine={false}
+          axisLine={false}
+          width={58}
+          domain={["auto", "auto"]}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          formatter={(value, name) => [
+            value == null ? "—" : formatCurrency(Number(value)),
+            name === "actual" ? "Actual" : "Projected",
+          ]}
+          labelFormatter={(d) => format(parseISO(d as string), "PP")}
+        />
+        {today && (
+          <ReferenceLine
+            x={today}
+            stroke="#8b948c"
+            strokeDasharray="3 3"
+            label={{ value: "Today", position: "insideTopRight", fill: "#8b948c", fontSize: 10 }}
+          />
+        )}
+        <Line
+          type="monotone"
+          dataKey="actual"
+          stroke="#6fe3a6"
+          strokeWidth={2.5}
+          dot={false}
+          connectNulls={false}
+          isAnimationActive={false}
+        />
+        <Line
+          type="monotone"
+          dataKey="projected"
+          stroke="#cbb07c"
+          strokeWidth={2}
+          strokeDasharray="5 4"
           dot={false}
           connectNulls={false}
           isAnimationActive={false}
