@@ -3,9 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
+  allocationTargets,
   budgets,
   categories,
   holdingCostBasisOverrides,
+  investmentAssetClasses,
+  investmentGeographies,
   investmentSectors,
   manualHoldings,
   tagBudgets,
@@ -435,6 +438,81 @@ export async function setHoldingSector(sectorKey: string, sector: string) {
     db.insert(investmentSectors)
       .values({ sectorKey: key, sector: name })
       .onConflictDoUpdate({ target: investmentSectors.sectorKey, set: { sector: name } })
+      .run();
+  }
+  revalidateAll();
+}
+
+// ── Allocation targets & asset-class / geography overrides ───────────────────
+
+/**
+ * Set a target allocation percentage. `targetKey` is namespaced by dimension
+ * (`class:stocks` | `sector:Technology` | `ticker:NVDA` — see targetKeyFor).
+ * The percent is clamped to 0–100; a non-positive value clears the target.
+ */
+export async function setAllocationTarget(targetKey: string, pct: number) {
+  const key = targetKey.trim();
+  if (!key) return;
+  if (!Number.isFinite(pct) || pct <= 0) {
+    return clearAllocationTarget(key);
+  }
+  const target = Math.min(100, pct);
+  db.insert(allocationTargets)
+    .values({ targetKey: key, target })
+    .onConflictDoUpdate({ target: allocationTargets.targetKey, set: { target } })
+    .run();
+  revalidateAll();
+}
+
+/** Drop an allocation target so it no longer shows in the drift table. */
+export async function clearAllocationTarget(targetKey: string) {
+  const key = targetKey.trim();
+  if (!key) return;
+  db.delete(allocationTargets).where(eq(allocationTargets.targetKey, key)).run();
+  revalidateAll();
+}
+
+/**
+ * Override a position's asset class (keyed by sectorKey, like sectors, so it
+ * spans every lot of a ticker). An empty value clears the override, reverting
+ * to the auto-classification.
+ */
+export async function setAssetClass(sectorKey: string, assetClass: string) {
+  const key = sectorKey.trim();
+  if (!key) return;
+  const cls = assetClass.trim().toLowerCase();
+  if (!cls) {
+    db.delete(investmentAssetClasses)
+      .where(eq(investmentAssetClasses.sectorKey, key))
+      .run();
+  } else {
+    db.insert(investmentAssetClasses)
+      .values({ sectorKey: key, assetClass: cls })
+      .onConflictDoUpdate({
+        target: investmentAssetClasses.sectorKey,
+        set: { assetClass: cls },
+      })
+      .run();
+  }
+  revalidateAll();
+}
+
+/**
+ * Set (or clear) a position's geography/region (keyed by sectorKey). This is
+ * the only source of the region-exposure breakdown; an empty value clears it.
+ */
+export async function setGeography(sectorKey: string, region: string) {
+  const key = sectorKey.trim();
+  if (!key) return;
+  const name = region.trim();
+  if (!name) {
+    db.delete(investmentGeographies)
+      .where(eq(investmentGeographies.sectorKey, key))
+      .run();
+  } else {
+    db.insert(investmentGeographies)
+      .values({ sectorKey: key, region: name })
+      .onConflictDoUpdate({ target: investmentGeographies.sectorKey, set: { region: name } })
       .run();
   }
   revalidateAll();

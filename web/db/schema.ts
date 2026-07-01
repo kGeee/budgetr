@@ -334,6 +334,41 @@ export const investmentSectors = sqliteTable("investment_sectors", {
 });
 
 /**
+ * User-set target allocation percentages, one row per allocation dimension.
+ * `targetKey` is namespaced so a single flat table covers every dimension the
+ * rebalancing view can drift against:
+ *  - `class:stocks` | `class:bonds` | … — the coarse asset-class mix.
+ *  - `sector:Technology` — a sector weight (mirrors investmentSectors' names).
+ *  - `ticker:NVDA` — a single-position cap (drives concentration targets).
+ * `target` is stored as a percent (0–100) so it reads the same everywhere.
+ */
+export const allocationTargets = sqliteTable("allocation_targets", {
+  targetKey: text("target_key").primaryKey(),
+  target: real("target").notNull(),
+});
+
+/**
+ * Optional per-position asset-class override, keyed exactly like
+ * investmentSectors (`sym:NVDA` / `man:<id>` via sectorKeyFor). Lets the user
+ * correct the auto-classification (securityType/OCC → stocks|bonds|cash|
+ * crypto|options) when Plaid mislabels an instrument. Absent = auto-classified.
+ */
+export const investmentAssetClasses = sqliteTable("investment_asset_classes", {
+  sectorKey: text("sector_key").primaryKey(),
+  assetClass: text("asset_class").notNull(), // stocks | bonds | cash | crypto | options
+});
+
+/**
+ * Optional per-position geography override, keyed like investmentSectors. There
+ * is no automatic geography signal, so these overrides are the sole source of
+ * the region-exposure breakdown (unset positions fall into "Unclassified").
+ */
+export const investmentGeographies = sqliteTable("investment_geographies", {
+  sectorKey: text("sector_key").primaryKey(),
+  region: text("region").notNull(),
+});
+
+/**
  * User corrections to a Plaid holding's cost basis. Kept in its own table so the
  * `holdings` sync (which overwrites cost_basis from Plaid on every run) can never
  * clobber a manual correction — e.g. after a brokerage transfer/merger (TD
@@ -369,3 +404,6 @@ export type RecurringStream = typeof recurringStreams.$inferSelect;
 export type VendorGroup = typeof vendorGroups.$inferSelect;
 export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
+export type AllocationTarget = typeof allocationTargets.$inferSelect;
+export type InvestmentAssetClass = typeof investmentAssetClasses.$inferSelect;
+export type InvestmentGeography = typeof investmentGeographies.$inferSelect;

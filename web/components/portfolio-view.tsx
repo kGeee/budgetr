@@ -32,6 +32,7 @@ import {
   riskLevel,
 } from "@/lib/options";
 import { OptionsAnalytics } from "@/components/options-analytics";
+import { AssetAllocation, type AllocRow } from "@/components/asset-allocation";
 import type { InvestmentTxnRow } from "@/lib/queries";
 
 const UNASSIGNED = "Unassigned";
@@ -80,6 +81,9 @@ export function PortfolioView({
   knownSectors = [],
   ivByOcc = {},
   underlyingPrices = {},
+  allocationTargets = {},
+  assetClassOverrides = {},
+  geographyOverrides = {},
 }: {
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
@@ -90,6 +94,12 @@ export function PortfolioView({
   ivByOcc?: Record<string, number>;
   /** Underlying spot price by symbol (Yahoo chain quote fallback). */
   underlyingPrices?: Record<string, number>;
+  /** User-set target allocation percentages, keyed by dimension (see targetKeyFor). */
+  allocationTargets?: Record<string, number>;
+  /** Per-position asset-class overrides, keyed by sectorKey. */
+  assetClassOverrides?: Record<string, string>;
+  /** Per-position geography overrides, keyed by sectorKey. */
+  geographyOverrides?: Record<string, string>;
 }) {
   // Exclude option (OCC-symbol) legs — Finnhub can't quote them, so skip the
   // wasted live-price subscriptions; they're valued from Plaid instead.
@@ -112,6 +122,9 @@ export function PortfolioView({
         knownSectors={knownSectors}
         ivByOcc={ivByOcc}
         underlyingPrices={underlyingPrices}
+        allocationTargets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
       />
     </LivePricesProvider>
   );
@@ -354,6 +367,9 @@ function PortfolioInner({
   knownSectors,
   ivByOcc,
   underlyingPrices,
+  allocationTargets,
+  assetClassOverrides,
+  geographyOverrides,
 }: {
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
@@ -362,6 +378,9 @@ function PortfolioInner({
   knownSectors: string[];
   ivByOcc: Record<string, number>;
   underlyingPrices: Record<string, number>;
+  allocationTargets: Record<string, number>;
+  assetClassOverrides: Record<string, string>;
+  geographyOverrides: Record<string, string>;
 }) {
   const { quotes, status } = useLivePrices();
   const router = useRouter();
@@ -459,6 +478,23 @@ function PortfolioInner({
   const total = useMemo(
     () => holdings.reduce((s, h) => s + effectiveValue(h, quotes), 0),
     [holdings, quotes],
+  );
+
+  // Live-valued rows for the asset-allocation / targets panel, recomputed on each
+  // price tick and sector edit (sector drives the sector-target drift).
+  const allocRows = useMemo<AllocRow[]>(
+    () =>
+      holdings.map((h) => ({
+        id: h.id,
+        ticker: h.ticker,
+        securityType: h.securityType,
+        securityName: h.securityName,
+        sectorKey: h.sectorKey,
+        sector: sectorOf(h),
+        value: effectiveValue(h, quotes),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [holdings, quotes, sectorEdits],
   );
 
   // Every option (OCC) leg across all holdings — drives the analytics panel.
@@ -562,6 +598,15 @@ function PortfolioInner({
         total={allocationTotal}
         activeSector={sectorFilter}
         onSelect={setSectorFilter}
+      />
+
+      <AssetAllocation
+        rows={allocRows}
+        total={total}
+        targets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
+        knownSectors={sectorOptions}
       />
 
       <Card className="p-0">

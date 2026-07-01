@@ -1,6 +1,9 @@
 import { PageHead } from "@/components/page-head";
 import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
 import {
+  getAllocationTargets,
+  getAssetClassOverrides,
+  getGeographyOverrides,
   getHoldings,
   getInvestmentSectors,
   getInvestmentTransactions,
@@ -23,6 +26,9 @@ export default async function InvestmentsPage() {
   const manual = getManualHoldings();
   const sectors = getInvestmentSectors();
   const knownSectors = getKnownSectors();
+  const allocationTargets = getAllocationTargets();
+  const assetClassOverrides = getAssetClassOverrides();
+  const geographyOverrides = getGeographyOverrides();
 
   // Attach the symbol-scoped sector key + its current sector to every Plaid
   // holding so the row carries what the sector editor and allocation need.
@@ -139,6 +145,9 @@ export default async function InvestmentsPage() {
         knownSectors={knownSectors}
         ivByOcc={ivByOcc}
         underlyingPrices={underlyingPrices}
+        allocationTargets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
       />
     </div>
   );

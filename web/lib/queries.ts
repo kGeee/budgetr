@@ -1,8 +1,11 @@
 import { db } from "@/db";
 import {
   accounts,
+  allocationTargets,
   holdingCostBasisOverrides,
   holdings,
+  investmentAssetClasses,
+  investmentGeographies,
   investmentSectors,
   investmentTransactions,
   items,
@@ -924,6 +927,42 @@ export function getKnownSectors(): string[] {
     .orderBy(investmentSectors.sector)
     .all()
     .map((r) => r.sector);
+}
+
+/** Map of targetKey → target percent for every user-set allocation target. */
+export function getAllocationTargets(): Record<string, number> {
+  const rows = db
+    .select({ targetKey: allocationTargets.targetKey, target: allocationTargets.target })
+    .from(allocationTargets)
+    .all();
+  const map: Record<string, number> = {};
+  for (const r of rows) map[r.targetKey] = r.target;
+  return map;
+}
+
+/** Map of sectorKey → user asset-class override (auto-classified when absent). */
+export function getAssetClassOverrides(): Record<string, string> {
+  const rows = db
+    .select({
+      sectorKey: investmentAssetClasses.sectorKey,
+      assetClass: investmentAssetClasses.assetClass,
+    })
+    .from(investmentAssetClasses)
+    .all();
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.sectorKey] = r.assetClass;
+  return map;
+}
+
+/** Map of sectorKey → user geography (region) override; sole source of geo exposure. */
+export function getGeographyOverrides(): Record<string, string> {
+  const rows = db
+    .select({ sectorKey: investmentGeographies.sectorKey, region: investmentGeographies.region })
+    .from(investmentGeographies)
+    .all();
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.sectorKey] = r.region;
+  return map;
 }
 
 export type ManualHoldingRow = {
