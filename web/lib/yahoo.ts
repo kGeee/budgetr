@@ -160,3 +160,97 @@ export async function getOptionChain(
     return null;
   }
 }
+
+/**
+ * Yahoo Finance dividend calendar — free, no API key.
+ *
+ *   https://query1.finance.yahoo.com/v7/finance/quote?symbols=AAPL,MSFT
+ *
+ * The batch quote endpoint carries each symbol's `exDividendDate` and
+ * `dividendDate` (pay date) as UTC epochs, plus the trailing annual dividend
+ * rate/yield. We only surface symbols that actually pay (have an ex-div date),
+ * so non-payers drop out. Cached in Next's Data Cache for 6h like the closes —
+ * ex-div dates don't move intraday. A hard failure resolves to `[]` so the
+ * calendar just renders empty rather than breaking the page.
+ */
+
+export type DividendCalendarEntry = {
+  symbol: string;
+  /** Upcoming (or most recent) ex-dividend date, YYYY-MM-DD, or null. */
+  exDividendDate: string | null;
+  /** Dividend pay date, YYYY-MM-DD, or null. */
+  payDate: string | null;
+  /** Trailing annual dividend per share, or null. */
+  rate: number | null;
+  /** Trailing annual dividend yield, percent, or null. */
+  yield: number | null;
+};
+
+type YahooQuoteResult = {
+  symbol?: string;
+  exDividendDate?: number;
+  dividendDate?: number;
+  dividendRate?: number;
+  trailingAnnualDividendRate?: number;
+  dividendYield?: number;
+  trailingAnnualDividendYield?: number;
+};
+
+type YahooQuote = {
+  quoteResponse?: { result?: YahooQuoteResult[] };
+};
+
+/** Epoch (seconds) → YYYY-MM-DD, or null when missing/non-finite. */
+function epochToDate(sec: number | undefined): string | null {
+  if (typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return null;
+  return new Date(sec * 1000).toISOString().slice(0, 10);
+}
+
+/** Ex-dividend + pay dates for the given symbols. Only dividend payers returned. */
+export async function getDividendCalendar(symbols: string[]): Promise<DividendCalendarEntry[]> {
+  const unique = Array.from(
+    new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)),
+  );
+  if (unique.length === 0) return [];
+
+  const out: DividendCalendarEntry[] = [];
+
+  // Batch into chunks — the quote endpoint accepts many symbols per call.
+  const CHUNK = 50;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const batch = unique.slice(i, i + CHUNK);
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(
+      batch.join(","),
+    )}`;
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        next: { revalidate: 21600 }, // 6h
+      });
+      if (!res.ok) continue;
+      const j = (await res.json()) as YahooQuote;
+      for (const r of j.quoteResponse?.result ?? []) {
+        if (!r.symbol) continue;
+        const exDividendDate = epochToDate(r.exDividendDate);
+        const payDate = epochToDate(r.dividendDate);
+        // Skip non-payers — no ex-div and no pay date means no dividend.
+        if (!exDividendDate && !payDate) continue;
+        const rate = r.trailingAnnualDividendRate ?? r.dividendRate ?? null;
+        const rawYield = r.trailingAnnualDividendYield ?? r.dividendYield ?? null;
+        out.push({
+          symbol: r.symbol.toUpperCase(),
+          exDividendDate,
+          payDate,
+          rate: typeof rate === "number" && Number.isFinite(rate) ? rate : null,
+          // Yahoo reports trailing yield as a fraction (0.0056 → 0.56%).
+          yield:
+            typeof rawYield === "number" && Number.isFinite(rawYield) ? rawYield * 100 : null,
+        });
+      }
+    } catch {
+      /* best-effort — skip this batch */
+    }
+  }
+
+  return out;
+}

@@ -33,7 +33,10 @@ import {
 } from "@/lib/options";
 import { OptionsAnalytics } from "@/components/options-analytics";
 import { AssetAllocation, type AllocRow } from "@/components/asset-allocation";
+import { DividendPanel } from "@/components/dividend-panel";
 import type { InvestmentTxnRow } from "@/lib/queries";
+import type { DividendSummary } from "@/lib/dividends";
+import type { DividendCalendarEntry } from "@/lib/yahoo";
 
 const UNASSIGNED = "Unassigned";
 import {
@@ -84,6 +87,8 @@ export function PortfolioView({
   allocationTargets = {},
   assetClassOverrides = {},
   geographyOverrides = {},
+  dividendSummary,
+  dividendCalendar = [],
 }: {
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
@@ -100,6 +105,10 @@ export function PortfolioView({
   assetClassOverrides?: Record<string, string>;
   /** Per-position geography overrides, keyed by sectorKey. */
   geographyOverrides?: Record<string, string>;
+  /** Derived dividend income stream (trailing/projected/yield-on-cost). */
+  dividendSummary?: DividendSummary;
+  /** Yahoo ex-dividend calendar for held tickers. */
+  dividendCalendar?: DividendCalendarEntry[];
 }) {
   // Exclude option (OCC-symbol) legs — Finnhub can't quote them, so skip the
   // wasted live-price subscriptions; they're valued from Plaid instead.
@@ -125,6 +134,8 @@ export function PortfolioView({
         allocationTargets={allocationTargets}
         assetClassOverrides={assetClassOverrides}
         geographyOverrides={geographyOverrides}
+        dividendSummary={dividendSummary}
+        dividendCalendar={dividendCalendar}
       />
     </LivePricesProvider>
   );
@@ -370,6 +381,8 @@ function PortfolioInner({
   allocationTargets,
   assetClassOverrides,
   geographyOverrides,
+  dividendSummary,
+  dividendCalendar,
 }: {
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
@@ -381,6 +394,8 @@ function PortfolioInner({
   allocationTargets: Record<string, number>;
   assetClassOverrides: Record<string, string>;
   geographyOverrides: Record<string, string>;
+  dividendSummary?: DividendSummary;
+  dividendCalendar?: DividendCalendarEntry[];
 }) {
   const { quotes, status } = useLivePrices();
   const router = useRouter();
@@ -732,6 +747,10 @@ function PortfolioInner({
           underlyingPrices={underlyingPrices}
           currency={optionLegs[0]?.currency ?? "USD"}
         />
+      )}
+
+      {dividendSummary && dividendSummary.payments.length > 0 && (
+        <DividendPanel summary={dividendSummary} calendar={dividendCalendar} />
       )}
     </div>
   );

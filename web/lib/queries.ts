@@ -26,6 +26,11 @@ import {
   type RealizedLot,
   type YearSummary,
 } from "@/lib/tax-lots";
+import {
+  buildDividendSummary,
+  isDividendTxn,
+  type DividendSummary,
+} from "@/lib/dividends";
 
 // Plaid primaries that resolve to a `transfer` category are internal money
 // movement, not real income/spending. Source of truth is the categories table
@@ -1114,6 +1119,25 @@ export function getRealizedGains(year?: number): RealizedGains {
     year != null ? all.filter((l) => Number(l.closeDate.slice(0, 4)) === year) : all;
 
   return { lots, summaries, totals: summarize(lots), years, year: year ?? null };
+}
+
+// ── Dividend income ───────────────────────────────────────────────────────────
+
+/** Just the cash-dividend rows from the investment ledger, newest first. */
+export function getDividendTransactions(): InvestmentTxnRow[] {
+  return getInvestmentTransactions().filter(isDividendTxn);
+}
+
+/**
+ * Stitch the investment ledger + holdings cost basis through lib/dividends.ts:
+ * classify the cash-dividend rows into an income stream (trailing income by
+ * month/ticker), compute each position's yield-on-cost, and annualize the
+ * trailing cadence into a projected forward annual income.
+ */
+export function getDividendSummary(): DividendSummary {
+  const txns = getInvestmentTransactions();
+  const positions = getHoldings().map((h) => ({ ticker: h.ticker, costBasis: h.costBasis }));
+  return buildDividendSummary(txns, positions);
 }
 
 export function prettyCategory(c: string | null): string {

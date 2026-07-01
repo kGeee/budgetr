@@ -3,6 +3,7 @@ import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
 import {
   getAllocationTargets,
   getAssetClassOverrides,
+  getDividendSummary,
   getGeographyOverrides,
   getHoldings,
   getInvestmentSectors,
@@ -13,7 +14,7 @@ import {
 } from "@/lib/queries";
 import { buildReconstructedSeries, getTickerHistories } from "@/lib/portfolio-history";
 import { parseOccSymbol } from "@/lib/options";
-import { getOptionChain } from "@/lib/yahoo";
+import { getDividendCalendar, getOptionChain } from "@/lib/yahoo";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (always fresh), but the Yahoo history fetches should
@@ -29,6 +30,7 @@ export default async function InvestmentsPage() {
   const allocationTargets = getAllocationTargets();
   const assetClassOverrides = getAssetClassOverrides();
   const geographyOverrides = getGeographyOverrides();
+  const dividendSummary = getDividendSummary();
 
   // Attach the symbol-scoped sector key + its current sector to every Plaid
   // holding so the row carries what the sector editor and allocation need.
@@ -134,6 +136,14 @@ export default async function InvestmentsPage() {
     }
   }
 
+  // Ex-dividend calendar: pull Yahoo's upcoming ex-div/pay dates for the held
+  // tickers, but only once we know some dividend income exists (the panel is
+  // hidden otherwise, so the fetch would be wasted). Cached in the Data Cache.
+  const dividendCalendar =
+    dividendSummary.payments.length > 0 && symbols.length > 0
+      ? await getDividendCalendar(symbols)
+      : [];
+
   return (
     <div className="space-y-7">
       <PageHead title="Investments" />
@@ -148,6 +158,8 @@ export default async function InvestmentsPage() {
         allocationTargets={allocationTargets}
         assetClassOverrides={assetClassOverrides}
         geographyOverrides={geographyOverrides}
+        dividendSummary={dividendSummary}
+        dividendCalendar={dividendCalendar}
       />
     </div>
   );
