@@ -14,6 +14,7 @@ import {
   Sparkles,
   Store,
   Wand2,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ const nav: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/budgets", label: "Budgets", icon: Wallet },
   { href: "/recurring", label: "Recurring", icon: Repeat },
   { href: "/rules", label: "Auto-tag rules", icon: Wand2 },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string, href: string) {
