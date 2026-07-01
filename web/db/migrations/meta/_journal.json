@@ -85,6 +85,13 @@
       "when": 1782887296926,
       "tag": "0011_safe_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1782887552479,
+      "tag": "0012_brief_zodiak",
+      "breakpoints": true
     }
   ]
 }

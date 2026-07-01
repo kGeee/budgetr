@@ -430,6 +430,38 @@ export const savingsContributions = sqliteTable(
   (t) => [index("savings_contributions_goal_idx").on(t.goalId)],
 );
 
+/**
+ * Single-row (`id = 'default'`) FIRE / financial-independence assumptions the
+ * user tunes on the FIRE dashboard. Kept as one settings row rather than a
+ * key/value blob so the columns stay typed and additive. `annualExpenses` and
+ * `monthlyContribution` are nullable — when unset the dashboard falls back to
+ * figures derived from recent cashflow. Rates are stored as whole percents
+ * (e.g. 4 = 4%).
+ */
+export const fireSettings = sqliteTable("fire_settings", {
+  id: text("id").primaryKey().default("default"),
+  annualExpenses: real("annual_expenses"), // null → derive from cashflow
+  safeWithdrawalRate: real("safe_withdrawal_rate").notNull().default(4), // %
+  expectedReturn: real("expected_return").notNull().default(7), // % nominal annual
+  monthlyContribution: real("monthly_contribution"), // null → derive from savings
+  targetRetirementAge: integer("target_retirement_age"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * User-defined net-worth milestones ("First $100k", "Half a million", "FIRE").
+ * Progress is derived against live net worth; `achievedDate` is stamped when the
+ * user marks it hit (kept even if net worth later dips) and `sortOrder` controls
+ * display order alongside the ascending target amounts.
+ */
+export const netWorthMilestones = sqliteTable("net_worth_milestones", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  amount: real("amount").notNull(),
+  achievedDate: text("achieved_date"), // YYYY-MM-DD, null = not yet marked hit
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -451,3 +483,5 @@ export type InvestmentSector = typeof investmentSectors.$inferSelect;
 export type DismissedAlert = typeof dismissedAlerts.$inferSelect;
 export type SavingsGoal = typeof savingsGoals.$inferSelect;
 export type SavingsContribution = typeof savingsContributions.$inferSelect;
+export type FireSettings = typeof fireSettings.$inferSelect;
+export type NetWorthMilestone = typeof netWorthMilestones.$inferSelect;

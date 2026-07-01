@@ -520,6 +520,89 @@ export function ForecastChart({
   );
 }
 
+/**
+ * Net-worth history (solid jade `actual`) continued by a compounding forward
+ * projection (dashed brass `projected`) toward the FIRE number, marked with a
+ * horizontal reference line. The two lines meet at today's point. Reuses the
+ * ValueAreaChart axis/tooltip idiom on a dual-line chart. Years span decades, so
+ * the X axis is formatted as years.
+ */
+export function FireProjectionChart({
+  data,
+  fireNumber,
+}: {
+  data: { date: string; actual: number | null; projected: number | null }[];
+  fireNumber: number;
+}) {
+  if (data.length === 0)
+    return <Empty label="No projection yet" hint="Sync accounts and set your FIRE assumptions." />;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+        <XAxis
+          dataKey="date"
+          tickFormatter={(d) => format(parseISO(d), "yyyy")}
+          tick={tick}
+          tickLine={false}
+          axisLine={{ stroke: GRID }}
+          minTickGap={40}
+        />
+        <YAxis
+          tickFormatter={(v) => formatCompactCurrency(v)}
+          tick={tick}
+          tickLine={false}
+          axisLine={false}
+          width={58}
+          domain={["auto", "auto"]}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          labelStyle={labelStyle}
+          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          formatter={(value, name) => [
+            value == null ? "—" : formatCurrency(Number(value)),
+            name === "actual" ? "Net worth" : "Projected",
+          ]}
+          labelFormatter={(d) => format(parseISO(d as string), "MMM yyyy")}
+        />
+        {fireNumber > 0 && (
+          <ReferenceLine
+            y={fireNumber}
+            stroke="#6fe3a6"
+            strokeDasharray="4 4"
+            label={{
+              value: `FIRE ${formatCompactCurrency(fireNumber)}`,
+              position: "insideTopLeft",
+              fill: "#6fe3a6",
+              fontSize: 10,
+            }}
+          />
+        )}
+        <Line
+          type="monotone"
+          dataKey="actual"
+          stroke="#6fe3a6"
+          strokeWidth={2.5}
+          dot={false}
+          connectNulls={false}
+          isAnimationActive={false}
+        />
+        <Line
+          type="monotone"
+          dataKey="projected"
+          stroke="#cbb07c"
+          strokeWidth={2}
+          strokeDasharray="5 4"
+          dot={false}
+          connectNulls={false}
+          isAnimationActive={false}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
 /** Tiny inline price trend; green when up over the window, coral when down. */
 export function Sparkline({
   data,
