@@ -78,6 +78,13 @@
       "when": 1782887733102,
       "tag": "0010_lush_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1782894141331,
+      "tag": "0011_clean_titanium_man",
+      "breakpoints": true
     }
   ]
 }

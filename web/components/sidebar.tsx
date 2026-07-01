@@ -9,10 +9,14 @@ import {
   Landmark,
   Shapes,
   Wallet,
+  PiggyBank,
   Repeat,
   Receipt,
   Store,
+  TrendingUp,
   Wand2,
+  Sparkles,
+  Flame,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,6 +29,10 @@ const nav: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/realized-gains", label: "Realized gains", icon: Receipt },
   { href: "/categories", label: "Categories", icon: Shapes },
   { href: "/budgets", label: "Budgets", icon: Wallet },
+  { href: "/goals", label: "Goals", icon: PiggyBank },
+  { href: "/cashflow", label: "Cashflow", icon: TrendingUp },
+  { href: "/fire", label: "FIRE", icon: Flame },
+  { href: "/insights", label: "Insights", icon: Sparkles },
   { href: "/recurring", label: "Recurring", icon: Repeat },
   { href: "/rules", label: "Auto-tag rules", icon: Wand2 },
 ];

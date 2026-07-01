@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
   allocationTargets,
+  budgetRollovers,
   budgets,
   categories,
   costBasisMethod,
@@ -25,6 +26,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { applyTagRules } from "@/lib/tag-rules";
 import { cleanTransactionName } from "@/lib/utils";
 import {
+  effectiveCatId,
   getCategoryDailySpend,
   getCategoryMonthlyBreakdown,
   getCategoryTransactions,
@@ -298,6 +300,68 @@ export async function setBudget(categoryId: string, amount: number) {
 
 export async function clearBudget(categoryId: string) {
   db.delete(budgets).where(eq(budgets.categoryId, categoryId)).run();
+  revalidateAll();
+}
+
+/**
+ * Toggle envelope/rollover mode for a category's budget. No-op if the category
+ * has no budget row yet (the UI only surfaces the toggle once a budget is set).
+ */
+export async function setBudgetRollover(categoryId: string, enabled: boolean) {
+  db.update(budgets)
+    .set({ rollover: enabled })
+    .where(eq(budgets.categoryId, categoryId))
+    .run();
+  revalidateAll();
+}
+
+/**
+ * Seed each rollover-enabled category's carry-in for `month` ('YYYY-MM') from
+ * the prior month's leftover (budget + priorCarryIn − priorSpent), so an
+ * envelope's balance rolls forward. Idempotent: re-running recomputes and
+ * upserts the same (categoryId, month) carry via the unique index.
+ */
+export async function rolloverToMonth(month: string) {
+  // Prior calendar month, handling year wrap. `month` is 1-indexed YYYY-MM, so
+  // (m - 2) lands JS's 0-indexed Date on the month before it.
+  const [y, m] = month.split("-").map(Number);
+  const prev = new Date(y, m - 2, 1);
+  const priorMonth = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+
+  const rows = db.all<{ categoryId: string; leftover: number }>(
+    sql`SELECT cat.id AS categoryId,
+           (b.amount
+             + COALESCE((
+                 SELECT r.carry_in FROM budget_rollovers r
+                 WHERE r.category_id = cat.id AND r.month = ${priorMonth}
+               ), 0)
+             - COALESCE((
+                 SELECT SUM(t.amount) FROM transactions t
+                 WHERE t.pending = 0 AND t.amount > 0
+                   AND ${effectiveCatId("t")} = cat.id
+                   AND substr(t.date, 1, 7) = ${priorMonth}
+               ), 0)
+           ) AS leftover
+        FROM budgets b
+        JOIN categories cat ON cat.id = b.category_id
+        WHERE b.rollover = 1 AND cat.archived = 0 AND cat."group" = 'spending'`,
+  );
+
+  for (const row of rows) {
+    const carryIn = Number(row.leftover);
+    db.insert(budgetRollovers)
+      .values({
+        id: `roll_${row.categoryId}_${month}`,
+        categoryId: row.categoryId,
+        month,
+        carryIn,
+      })
+      .onConflictDoUpdate({
+        target: [budgetRollovers.categoryId, budgetRollovers.month],
+        set: { carryIn },
+      })
+      .run();
+  }
   revalidateAll();
 }
 
