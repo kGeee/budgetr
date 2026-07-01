@@ -20,6 +20,7 @@
 		98B97D03BFE97096C44DF212 /* CategoryMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DD47B1F2F7AB1398DFC8D9D /* CategoryMapping.swift */; };
 		9E1F220AA1164A46A02D8DBC /* BudgetPacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A41E17B8FA93E4B7A051599 /* BudgetPacing.swift */; };
 		D99A7E025DD77605EA371985 /* BudgetsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39F03E00FB78FA0A5877618 /* BudgetsView.swift */; };
+		DEFD11F59E5C74669CA2CCA9 /* ImportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A536026645A9DD5568BF538 /* ImportController.swift */; };
 		FA264A4DA55251BA685AB151 /* BudgetrApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98C9AF58DA5F7B6EE730B24C /* BudgetrApp.swift */; };
 /* End PBXBuildFile section */
 
@@ -29,6 +30,7 @@
 		46FA8EB2F73B59E24E6278A5 /* VendorGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VendorGrouping.swift; sourceTree = "<group>"; };
 		4A41E17B8FA93E4B7A051599 /* BudgetPacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetPacing.swift; sourceTree = "<group>"; };
 		5A35A40CB99B49966F9199EC /* Budgetr.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Budgetr.entitlements; sourceTree = "<group>"; };
+		5A536026645A9DD5568BF538 /* ImportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportController.swift; sourceTree = "<group>"; };
 		68FC64F6AE91E4DB23F8C3A2 /* AutoTagging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTagging.swift; sourceTree = "<group>"; };
 		6DD47B1F2F7AB1398DFC8D9D /* CategoryMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryMapping.swift; sourceTree = "<group>"; };
 		6EF5C4E36C3182F51EB25B6B /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
@@ -39,7 +41,7 @@
 		A39F03E00FB78FA0A5877618 /* BudgetsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetsView.swift; sourceTree = "<group>"; };
 		BADF462CADCE7DEA792E49E5 /* AppCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCrypto.swift; sourceTree = "<group>"; };
 		DF4CA55ECF30D059AE48C257 /* Model.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = Model.xcdatamodel; sourceTree = "<group>"; };
-		F038438482828015BB08B95A /* Budgetr.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Budgetr.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F038438482828015BB08B95A /* Budgetr.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Budgetr.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -73,6 +75,7 @@
 		6AC81D98D12C9C3B372BE0B4 /* Persistence */ = {
 			isa = PBXGroup;
 			children = (
+				5A536026645A9DD5568BF538 /* ImportController.swift */,
 				6EF5C4E36C3182F51EB25B6B /* PersistenceController.swift */,
 				A0D3B593CF453D31B4C22355 /* Model.xcdatamodeld */,
 			);
@@ -151,7 +154,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					57A57B0C05FDEC9F7EE049F2 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -187,6 +189,7 @@
 				D99A7E025DD77605EA371985 /* BudgetsView.swift in Sources */,
 				98B97D03BFE97096C44DF212 /* CategoryMapping.swift in Sources */,
 				3ED2976907FDA90E8E8F5564 /* DashboardView.swift in Sources */,
+				DEFD11F59E5C74669CA2CCA9 /* ImportController.swift in Sources */,
 				37A5FD19C1CA4BEBBF8FB070 /* KeychainStore.swift in Sources */,
 				51888A3C79D4C9DCB8F6AF3D /* Model.xcdatamodeld in Sources */,
 				32B2CDB63243DADD775957EF /* PersistenceController.swift in Sources */,
@@ -237,7 +240,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 68YAY3V65J;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -274,11 +277,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Budgetr/Support/Budgetr.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 7CK43PG7GZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Budgetr;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -332,7 +335,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 68YAY3V65J;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -362,11 +365,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Budgetr/Support/Budgetr.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 7CK43PG7GZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Budgetr;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

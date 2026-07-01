@@ -20,8 +20,11 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { applyTagRules } from "@/lib/tag-rules";
 import { cleanTransactionName } from "@/lib/utils";
 import {
+  getCategoryDailySpend,
   getCategoryMonthlyBreakdown,
   getCategoryTransactions,
+  getTransactionsByDate,
+  type CategoryDay,
   type CategoryMonth,
   type TransactionRow,
 } from "@/lib/queries";
@@ -50,10 +53,15 @@ type CategoryGroup = "income" | "spending" | "transfer";
  * expandable panels on the Categories and Budgets pages. Read-only — it just
  * wraps the queries so client components can fetch on demand when a row opens.
  */
+export async function getTransactionsForDate(date: string): Promise<TransactionRow[]> {
+  return getTransactionsByDate(date);
+}
+
 export async function getCategoryDetail(
   categoryId: string,
-): Promise<{ months: CategoryMonth[]; txns: TransactionRow[] }> {
+): Promise<{ days: CategoryDay[]; months: CategoryMonth[]; txns: TransactionRow[] }> {
   return {
+    days: getCategoryDailySpend(categoryId),
     months: getCategoryMonthlyBreakdown(categoryId),
     txns: getCategoryTransactions(categoryId),
   };

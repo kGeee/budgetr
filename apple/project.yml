@@ -16,7 +16,7 @@ settings:
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     # Set your Apple Developer Team ID here (or in Xcode > Signing & Capabilities).
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "68YAY3V65J"  # Replace with your 10-char Team ID from developer.apple.com/account
 
 targets:
   Budgetr:
@@ -35,5 +35,4 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.finance"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        # CloudKit needs the background mode for remote-change push.
-        INFOPLIST_KEY_UIBackgroundModes: "remote-notification"
+        # INFOPLIST_KEY_UIBackgroundModes: "remote-notification"  # restore when CloudKit re-enabled

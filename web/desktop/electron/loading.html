@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>budgetr</title>
+    <style>
+      :root {
+        --ink: #080b0a;
+        --paper: #ece7da;
+        --muted: #8b948c;
+        --brass: #cbb07c;
+        --coral: #f0897b;
+      }
+      * {
+        margin: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        background: var(--ink);
+        color: var(--paper);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Hanken Grotesk", "Segoe UI", sans-serif;
+        /* The whole surface is the window drag region (frameless window). */
+        -webkit-app-region: drag;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 22px;
+        text-align: center;
+      }
+      .mark {
+        font-size: 26px;
+        letter-spacing: 0.02em;
+        font-weight: 600;
+      }
+      .mark .dot {
+        color: var(--brass);
+      }
+      .spinner {
+        width: 26px;
+        height: 26px;
+        border: 2px solid rgba(203, 176, 124, 0.22);
+        border-top-color: var(--brass);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      .status {
+        font-size: 13px;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      /* Error state — toggled when the page is loaded with #error. */
+      .error .spinner {
+        display: none;
+      }
+      .error .status {
+        display: none;
+      }
+      .error-msg {
+        display: none;
+        max-width: 360px;
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--coral);
+      }
+      .error .error-msg {
+        display: block;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner {
+          animation-duration: 2.4s;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="mark">budgetr<span class="dot">.</span></div>
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="status">Starting your local server…</div>
+      <div class="error-msg">
+        Couldn't reach the local server. Try relaunching the app, or check that
+        nothing else is using the port.
+      </div>
+    </div>
+    <script>
+      if (location.hash === "#error") document.body.classList.add("error");
+    </script>
+  </body>
+</html>

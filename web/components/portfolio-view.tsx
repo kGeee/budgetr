@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Pencil, Tag, X } from "lucide-react";
+import { Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import {
   AllocationDonut,
@@ -138,12 +138,200 @@ function effectivePnl(h: HoldingRow, quotes: Record<string, LiveQuote>): number 
   return effectiveValue(h, quotes) - h.costBasis;
 }
 
-type SortKey = "value" | "pnl";
+/** Day-change in currency terms: qty × (price − prevClose), or null with no quote. */
+function dayChangeValue(h: HoldingRow, quotes: Record<string, LiveQuote>): number | null {
+  const q = h.ticker ? quotes[h.ticker.toUpperCase()] : undefined;
+  if (q?.price != null && q.prevClose != null && h.quantity != null) {
+    return (q.price - q.prevClose) * h.quantity;
+  }
+  return null;
+}
+
+/**
+ * Display-ready numbers for one table row, normalized so a single-holding row and
+ * a grouped option underlying render through the same cell renderer. Columns that
+ * don't apply to a row (e.g. a live price for an option group) are `null` and show
+ * an em dash.
+ */
+type RowMetrics = {
+  account: string | null;
+  qty: number | null;
+  price: number | null;
+  /** Day change, percent. */
+  day: number | null;
+  /** Day change, currency. */
+  dayValue: number | null;
+  /** Total cost basis (dollars). */
+  costBasis: number | null;
+  /** Cost basis per unit. */
+  avgCost: number | null;
+  value: number;
+  /** Share of the whole portfolio, percent. */
+  weight: number;
+  pnl: number | null;
+  pnlPct: number | null;
+  currency: string;
+};
+
+function holdingMetrics(
+  h: HoldingRow,
+  quotes: Record<string, LiveQuote>,
+  total: number,
+): RowMetrics {
+  const price = effectivePrice(h, quotes);
+  const value = effectiveValue(h, quotes);
+  const pnl = effectivePnl(h, quotes);
+  const costBasis = h.costBasis ?? null;
+  return {
+    account: h.accountName,
+    qty: h.quantity,
+    price,
+    day: dayChangePct(h, quotes),
+    dayValue: dayChangeValue(h, quotes),
+    costBasis,
+    avgCost: costBasis != null && h.quantity ? costBasis / h.quantity : null,
+    value,
+    weight: total ? (value / total) * 100 : 0,
+    pnl,
+    pnlPct: pnl != null && costBasis ? (pnl / costBasis) * 100 : null,
+    currency: h.currency ?? "USD",
+  };
+}
+
+function optionMetrics(
+  legs: HoldingRow[],
+  quotes: Record<string, LiveQuote>,
+  total: number,
+): RowMetrics {
+  const value = legs.reduce((s, h) => s + effectiveValue(h, quotes), 0);
+  const costed = legs.filter((h) => h.costBasis != null);
+  const costBasis = costed.length
+    ? costed.reduce((s, h) => s + (h.costBasis ?? 0), 0)
+    : null;
+  const pnl = costed.length
+    ? costed.reduce((s, h) => s + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
+    : null;
+  const accounts = Array.from(new Set(legs.map((h) => h.accountName).filter(Boolean)));
+  return {
+    account: accounts.length === 1 ? (accounts[0] as string) : "Multiple",
+    qty: legs.reduce((s, h) => s + Math.abs(h.quantity ?? 0), 0),
+    price: null,
+    day: null,
+    dayValue: null,
+    costBasis,
+    avgCost: null,
+    value,
+    weight: total ? (value / total) * 100 : 0,
+    pnl,
+    pnlPct: pnl != null && costBasis ? (pnl / costBasis) * 100 : null,
+    currency: legs[0]?.currency ?? "USD",
+  };
+}
+
+/** Sortable metric keys (Security sorts by `name`, handled separately). */
+type SortKey =
+  | "name"
+  | "qty"
+  | "price"
+  | "day"
+  | "dayValue"
+  | "costBasis"
+  | "avgCost"
+  | "value"
+  | "weight"
+  | "pnl";
+
+/** Every toggleable metric column, in display order. Security is always shown. */
+type ColumnKey =
+  | "account"
+  | "trend"
+  | "qty"
+  | "price"
+  | "day"
+  | "dayValue"
+  | "costBasis"
+  | "avgCost"
+  | "value"
+  | "weight"
+  | "pnl";
+
+type ColumnDef = {
+  key: ColumnKey;
+  label: string;
+  align: "left" | "right";
+  /** Sortable columns share their key with SortKey. */
+  sortable: boolean;
+  /** Shown until the user hides it via the Columns menu. */
+  defaultVisible: boolean;
+};
+
+const COLUMNS: ColumnDef[] = [
+  { key: "account", label: "Account", align: "left", sortable: false, defaultVisible: true },
+  { key: "trend", label: "Trend", align: "left", sortable: false, defaultVisible: true },
+  { key: "qty", label: "Qty", align: "right", sortable: true, defaultVisible: true },
+  { key: "price", label: "Price", align: "right", sortable: true, defaultVisible: true },
+  { key: "day", label: "Day", align: "right", sortable: true, defaultVisible: true },
+  { key: "dayValue", label: "Day $", align: "right", sortable: true, defaultVisible: false },
+  { key: "costBasis", label: "Cost basis", align: "right", sortable: true, defaultVisible: false },
+  { key: "avgCost", label: "Avg cost", align: "right", sortable: true, defaultVisible: false },
+  { key: "value", label: "Value", align: "right", sortable: true, defaultVisible: true },
+  { key: "weight", label: "% of total", align: "right", sortable: true, defaultVisible: true },
+  { key: "pnl", label: "P&L", align: "right", sortable: true, defaultVisible: true },
+];
+
+const COLS_STORAGE_KEY = "budgetr.holdings.columns.v1";
+
+function defaultVisibleColumns(): ColumnKey[] {
+  return COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key);
+}
+
+/**
+ * Per-user column visibility, persisted to localStorage. Initial render uses the
+ * defaults (so SSR and first paint match); the saved set is applied after mount.
+ */
+function useColumnPrefs() {
+  const [visible, setVisible] = useState<ColumnKey[]>(defaultVisibleColumns);
+  const loaded = useRef(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COLS_STORAGE_KEY);
+      if (raw) {
+        const valid = new Set(COLUMNS.map((c) => c.key));
+        const saved = (JSON.parse(raw) as ColumnKey[]).filter((k) => valid.has(k));
+        // Deferred to an effect on purpose: SSR/first paint use the defaults so
+        // hydration matches, then the saved set is applied once on the client.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setVisible(saved);
+      }
+    } catch {
+      /* corrupt or unavailable storage — keep defaults */
+    }
+    loaded.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!loaded.current) return;
+    try {
+      localStorage.setItem(COLS_STORAGE_KEY, JSON.stringify(visible));
+    } catch {
+      /* ignore */
+    }
+  }, [visible]);
+
+  const toggle = (key: ColumnKey) =>
+    setVisible((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  const reset = () => setVisible(defaultVisibleColumns());
+
+  return { visible, toggle, reset };
+}
 
 /** A row in the holdings table: a single holding, or a grouped option underlying. */
 type RowItem =
-  | { kind: "holding"; h: HoldingRow; sort: number }
-  | { kind: "options"; underlying: string; legs: HoldingRow[]; sort: number };
+  | { kind: "holding"; h: HoldingRow; name: string; m: RowMetrics }
+  | { kind: "options"; underlying: string; legs: HoldingRow[]; name: string; m: RowMetrics };
 
 function PortfolioInner({
   holdings,
@@ -169,6 +357,11 @@ function PortfolioInner({
   // persists in the background and a refresh reconciles).
   const [sectorEdits, setSectorEdits] = useState<Record<string, string | null>>({});
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
+  const { visible: visibleCols, toggle: toggleColumn, reset: resetColumns } = useColumnPrefs();
+  const orderedCols = useMemo(
+    () => COLUMNS.filter((c) => visibleCols.includes(c.key)),
+    [visibleCols],
+  );
 
   const sectorOf = (h: HoldingRow): string | null =>
     h.sectorKey in sectorEdits ? sectorEdits[h.sectorKey] : h.sector ?? null;
@@ -245,13 +438,17 @@ function PortfolioInner({
     [holdings, sectorFilter, sectorEdits],
   );
 
-  // Build the render list: regular holdings stay as single rows; option legs are
-  // folded into one collapsible group per underlying. Both are sorted together by
-  // the chosen metric, with no-P&L items sinking to the bottom in both directions.
-  const items = useMemo(() => {
-    const metricH = (h: HoldingRow): number =>
-      sortKey === "pnl" ? effectivePnl(h, quotes) ?? Number.NEGATIVE_INFINITY : effectiveValue(h, quotes);
+  // Whole-portfolio market value — the denominator for each row's "% of total".
+  const total = useMemo(
+    () => holdings.reduce((s, h) => s + effectiveValue(h, quotes), 0),
+    [holdings, quotes],
+  );
 
+  // Build the render list: regular holdings stay as single rows; option legs are
+  // folded into one collapsible group per underlying. Both carry the same
+  // normalized metrics and are sorted together by the chosen column, with rows
+  // missing that metric sinking to the bottom in both directions.
+  const items = useMemo(() => {
     const singles = visible.filter((h) => !parseOccSymbol(h.ticker));
     const optionLegs = visible.filter((h) => parseOccSymbol(h.ticker) != null);
 
@@ -264,26 +461,34 @@ function PortfolioInner({
     }
 
     const result: RowItem[] = [
-      ...singles.map((h) => ({ kind: "holding" as const, h, sort: metricH(h) })),
-      ...[...byUnderlying.entries()].map(([underlying, legs]) => {
-        const value = legs.reduce((s, h) => s + effectiveValue(h, quotes), 0);
-        const costed = legs.filter((h) => h.costBasis != null);
-        const pnl = costed.length
-          ? costed.reduce((s, h) => s + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
-          : null;
-        const sort = sortKey === "pnl" ? pnl ?? Number.NEGATIVE_INFINITY : value;
-        return { kind: "options" as const, underlying, legs, sort };
-      }),
+      ...singles.map((h) => ({
+        kind: "holding" as const,
+        h,
+        name: (h.ticker ?? h.securityName ?? "").toUpperCase(),
+        m: holdingMetrics(h, quotes, total),
+      })),
+      ...[...byUnderlying.entries()].map(([underlying, legs]) => ({
+        kind: "options" as const,
+        underlying,
+        legs,
+        name: underlying.toUpperCase(),
+        m: optionMetrics(legs, quotes, total),
+      })),
     ];
 
     const dir = sortDir === "desc" ? -1 : 1;
     return result.sort((a, b) => {
-      if (a.sort === b.sort) return 0;
-      if (a.sort === Number.NEGATIVE_INFINITY) return 1;
-      if (b.sort === Number.NEGATIVE_INFINITY) return -1;
-      return (a.sort - b.sort) * dir;
+      if (sortKey === "name") {
+        return a.name.localeCompare(b.name) * (sortDir === "asc" ? 1 : -1);
+      }
+      const av = a.m[sortKey] ?? Number.NEGATIVE_INFINITY;
+      const bv = b.m[sortKey] ?? Number.NEGATIVE_INFINITY;
+      if (av === bv) return 0;
+      if (av === Number.NEGATIVE_INFINITY) return 1;
+      if (bv === Number.NEGATIVE_INFINITY) return -1;
+      return (av - bv) * dir;
     });
-  }, [visible, quotes, sortKey, sortDir]);
+  }, [visible, quotes, sortKey, sortDir, total]);
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -293,7 +498,6 @@ function PortfolioInner({
     }
   }
 
-  const total = holdings.reduce((s, h) => s + effectiveValue(h, quotes), 0);
   // Unrealized gain only spans holdings with a known cost basis — otherwise a
   // position's whole value would masquerade as gain. This keeps the headline in
   // lockstep with the sum of the per-row P&L (which is "—" for no-basis rows).
@@ -370,34 +574,34 @@ function PortfolioInner({
                 {holdings.length} {holdings.length === 1 ? "position" : "positions"}
               </span>
             )}
+            <ColumnsMenu visible={visibleCols} onToggle={toggleColumn} onReset={resetColumns} />
             <AddManualHoldingButton />
           </div>
         </div>
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-line text-left">
               <th className="w-8" aria-hidden />
-              {["Security", "Account", "Trend", "Qty", "Price", "Day"].map((h, i) => (
-                <th
-                  key={h}
-                  className={`py-3.5 eyebrow font-medium ${i === 0 ? "pr-3" : "px-3"} ${i >= 3 ? "text-right" : ""}`}
-                >
-                  {h}
-                </th>
+              <HeaderCell
+                label="Security"
+                align="left"
+                sortable
+                active={sortKey === "name"}
+                dir={sortDir}
+                onClick={() => toggleSort("name")}
+              />
+              {orderedCols.map((c) => (
+                <HeaderCell
+                  key={c.key}
+                  label={c.label}
+                  align={c.align}
+                  sortable={c.sortable}
+                  active={c.sortable && sortKey === c.key}
+                  dir={sortDir}
+                  onClick={c.sortable ? () => toggleSort(c.key as SortKey) : undefined}
+                />
               ))}
-              <SortHeader
-                label="Value"
-                active={sortKey === "value"}
-                dir={sortDir}
-                onClick={() => toggleSort("value")}
-              />
-              <SortHeader
-                label="P&L"
-                active={sortKey === "pnl"}
-                dir={sortDir}
-                onClick={() => toggleSort("pnl")}
-              />
             </tr>
           </thead>
           <tbody>
@@ -406,7 +610,8 @@ function PortfolioInner({
                 <HoldingRowView
                   key={it.h.id}
                   h={it.h}
-                  quotes={quotes}
+                  m={it.m}
+                  columns={orderedCols}
                   history={it.h.ticker ? histories[it.h.ticker.toUpperCase()] : undefined}
                   txns={it.h.ticker ? txnsByTicker[it.h.ticker.toUpperCase()] ?? [] : []}
                   sector={sectorOf(it.h)}
@@ -419,20 +624,28 @@ function PortfolioInner({
                   key={`opt:${it.underlying}`}
                   underlying={it.underlying}
                   legs={it.legs}
+                  m={it.m}
+                  columns={orderedCols}
                   quotes={quotes}
                 />
               ),
             )}
             {holdings.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-6 py-10 text-center text-[var(--muted)]">
+                <td
+                  colSpan={orderedCols.length + 2}
+                  className="px-6 py-10 text-center text-[var(--muted)]"
+                >
                   No holdings yet. Connect a brokerage account and hit Sync.
                 </td>
               </tr>
             )}
             {holdings.length > 0 && visible.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-6 py-10 text-center text-[var(--muted)]">
+                <td
+                  colSpan={orderedCols.length + 2}
+                  className="px-6 py-10 text-center text-[var(--muted)]"
+                >
                   No holdings in {sectorFilter}.
                 </td>
               </tr>
@@ -448,7 +661,8 @@ function PortfolioInner({
 /** A holding row plus, when expanded, its full price-history + trades panel. */
 function HoldingRowView({
   h,
-  quotes,
+  m,
+  columns,
   history,
   txns,
   sector,
@@ -457,7 +671,8 @@ function HoldingRowView({
   sectorColor,
 }: {
   h: HoldingRow;
-  quotes: Record<string, LiveQuote>;
+  m: RowMetrics;
+  columns: ColumnDef[];
   history?: PricePoint[];
   txns: InvestmentTxnRow[];
   sector: string | null;
@@ -466,12 +681,7 @@ function HoldingRowView({
   sectorColor: Record<string, string>;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const price = effectivePrice(h, quotes);
-  const value = effectiveValue(h, quotes);
-  const dayPct = dayChangePct(h, quotes);
-  const pnl = effectivePnl(h, quotes);
-  const pnlPct = pnl != null && h.costBasis ? (pnl / h.costBasis) * 100 : null;
-  const currency = h.currency ?? "USD";
+  const currency = m.currency;
   const canExpand = Boolean(h.ticker);
 
   return (
@@ -549,25 +759,11 @@ function HoldingRowView({
             />
           </div>
         </td>
-        <td className="px-3 py-3.5 text-[var(--muted)]">{h.accountName}</td>
-        <td className="px-3 py-2">
-          {history && history.length > 1 ? (
-            <Sparkline data={history} />
-          ) : (
-            <span className="text-[var(--faint)]">—</span>
-          )}
-        </td>
-        <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">
-          {h.quantity?.toLocaleString()}
-        </td>
-        <PriceCell price={price ?? 0} currency={currency} />
-        <DayCell pct={dayPct} />
-        <td className="mono px-3 py-3.5 text-right">{formatCurrency(value, currency)}</td>
-        <PnlCell pnl={pnl} pct={pnlPct} currency={currency} />
+        <MetricCells columns={columns} m={m} history={history} />
       </tr>
       {expanded && canExpand && (
         <tr className="border-b border-line/60 bg-[var(--panel-2)]/40">
-          <td colSpan={9} className="px-4 py-5 sm:px-6">
+          <td colSpan={columns.length + 2} className="px-4 py-5 sm:px-6">
             <TickerHistoryPanel
               ticker={h.ticker as string}
               history={history ?? []}
@@ -673,10 +869,14 @@ function TickerHistoryPanel({
 function OptionGroupRow({
   underlying,
   legs,
+  m,
+  columns,
   quotes,
 }: {
   underlying: string;
   legs: HoldingRow[];
+  m: RowMetrics;
+  columns: ColumnDef[];
   quotes: Record<string, LiveQuote>;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -685,19 +885,7 @@ function OptionGroupRow({
   const structures = classifyOptionLegs(
     parsed.map(({ h, p }) => ({ parsed: p, quantity: h.quantity })),
   );
-
-  const value = legs.reduce((s, h) => s + effectiveValue(h, quotes), 0);
-  const costed = legs.filter((h) => h.costBasis != null);
-  const totalCost = costed.reduce((s, h) => s + (h.costBasis ?? 0), 0);
-  const pnl = costed.length
-    ? costed.reduce((s, h) => s + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
-    : null;
-  const pnlPct = pnl != null && totalCost ? (pnl / totalCost) * 100 : null;
-  const contracts = legs.reduce((s, h) => s + Math.abs(h.quantity ?? 0), 0);
-  const currency = legs[0]?.currency ?? "USD";
-
-  const accounts = Array.from(new Set(legs.map((h) => h.accountName).filter(Boolean)));
-  const account = accounts.length === 1 ? accounts[0] : "Multiple";
+  const currency = m.currency;
 
   const summary =
     structures.length === 1
@@ -724,18 +912,12 @@ function OptionGroupRow({
             <span className="text-[var(--muted)]">{summary}</span>
           </span>
         </td>
-        <td className="px-3 py-3.5 text-[var(--muted)]">{account}</td>
-        <td className="px-3 py-2 text-[var(--faint)]">—</td>
-        <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">{contracts}</td>
-        <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>
-        <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>
-        <td className="mono px-3 py-3.5 text-right">{formatCurrency(value, currency)}</td>
-        <PnlCell pnl={pnl} pct={pnlPct} currency={currency} />
+        <MetricCells columns={columns} m={m} />
       </tr>
 
       {expanded && (
         <tr className="border-b border-line/60 bg-[var(--panel-2)]/40">
-          <td colSpan={9} className="px-4 py-4 sm:px-6">
+          <td colSpan={columns.length + 2} className="px-4 py-4 sm:px-6">
             <div className="space-y-3">
               {structures.map((st, i) => {
                 const stLegs = st.legIndexes.map((idx) => parsed[idx]);
@@ -1145,25 +1327,33 @@ function SectorAllocation({
   );
 }
 
-/** Clickable, right-aligned column header that drives the holdings sort. */
-function SortHeader({
+/** Column header. Sortable headers show a ↓/↑/↕ glyph and drive the holdings sort. */
+function HeaderCell({
   label,
-  active,
+  align,
+  sortable,
+  active = false,
   dir,
   onClick,
 }: {
   label: string;
-  active: boolean;
+  align: "left" | "right";
+  sortable: boolean;
+  active?: boolean;
   dir: "asc" | "desc";
-  onClick: () => void;
+  onClick?: () => void;
 }) {
+  const alignCls = align === "right" ? "text-right" : "text-left";
+  if (!sortable || !onClick) {
+    return <th className={`px-3 py-3.5 eyebrow font-medium ${alignCls}`}>{label}</th>;
+  }
   return (
-    <th className="px-3 py-3.5 text-right eyebrow font-medium">
+    <th className={`px-3 py-3.5 eyebrow font-medium ${alignCls}`}>
       <button
         onClick={onClick}
         className={`inline-flex items-center gap-1 transition-colors hover:text-[var(--paper)] ${
           active ? "text-[var(--paper)]" : ""
-        }`}
+        } ${align === "right" ? "flex-row-reverse" : ""}`}
       >
         {label}
         <span className={active ? "text-[var(--brass)]" : "text-[var(--faint)]"}>
@@ -1171,6 +1361,206 @@ function SortHeader({
         </span>
       </button>
     </th>
+  );
+}
+
+/**
+ * Renders the toggleable metric cells for one row, in the user's column order.
+ * The same renderer serves single holdings and option groups: option groups pass
+ * `null` for the columns that don't apply (price, day, …) and get an em dash.
+ */
+function MetricCells({
+  columns,
+  m,
+  history,
+}: {
+  columns: ColumnDef[];
+  m: RowMetrics;
+  history?: PricePoint[];
+}) {
+  const numRight = "mono px-3 py-3.5 text-right";
+  const dash = (key: string) => (
+    <td key={key} className={`${numRight} text-[var(--faint)]`}>
+      —
+    </td>
+  );
+  return (
+    <>
+      {columns.map((c) => {
+        switch (c.key) {
+          case "account":
+            return (
+              <td key={c.key} className="px-3 py-3.5 text-[var(--muted)]">
+                {m.account ?? "—"}
+              </td>
+            );
+          case "trend":
+            return (
+              <td key={c.key} className="px-3 py-2">
+                {history && history.length > 1 ? (
+                  <Sparkline data={history} />
+                ) : (
+                  <span className="text-[var(--faint)]">—</span>
+                )}
+              </td>
+            );
+          case "qty":
+            return (
+              <td key={c.key} className={`${numRight} text-[var(--muted)]`}>
+                {m.qty != null ? m.qty.toLocaleString() : "—"}
+              </td>
+            );
+          case "price":
+            return m.price != null ? (
+              <PriceCell key={c.key} price={m.price} currency={m.currency} />
+            ) : (
+              dash(c.key)
+            );
+          case "day":
+            return <DayCell key={c.key} pct={m.day} />;
+          case "dayValue":
+            return <SignedCurrencyCell key={c.key} amount={m.dayValue} currency={m.currency} />;
+          case "costBasis":
+            return (
+              <td key={c.key} className={`${numRight} text-[var(--muted)]`}>
+                {m.costBasis != null ? formatCurrency(m.costBasis, m.currency) : "—"}
+              </td>
+            );
+          case "avgCost":
+            return (
+              <td key={c.key} className={`${numRight} text-[var(--muted)]`}>
+                {m.avgCost != null ? formatCurrency(m.avgCost, m.currency) : "—"}
+              </td>
+            );
+          case "value":
+            return (
+              <td key={c.key} className={numRight}>
+                {formatCurrency(m.value, m.currency)}
+              </td>
+            );
+          case "weight":
+            return <WeightCell key={c.key} pct={m.weight} />;
+          case "pnl":
+            return <PnlCell key={c.key} pnl={m.pnl} pct={m.pnlPct} currency={m.currency} />;
+        }
+      })}
+    </>
+  );
+}
+
+/** Signed currency cell (green/red), or a dash when there's no value. */
+function SignedCurrencyCell({ amount, currency }: { amount: number | null; currency: string }) {
+  if (amount == null) {
+    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
+  }
+  const positive = amount >= 0;
+  const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";
+  return (
+    <td className={`mono px-3 py-3.5 text-right ${color}`}>
+      {positive ? "+" : "−"}
+      {formatCurrency(Math.abs(amount), currency)}
+    </td>
+  );
+}
+
+/** Share-of-portfolio cell: a thin proportion bar plus the percent. */
+function WeightCell({ pct }: { pct: number }) {
+  const w = Math.max(0, Math.min(100, pct));
+  return (
+    <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">
+      <span className="inline-flex items-center justify-end gap-2">
+        <span className="hidden h-1 w-10 overflow-hidden rounded-full bg-[var(--line)] sm:inline-block">
+          <span
+            className="block h-full rounded-full bg-[var(--brass-dim)]"
+            style={{ width: `${w}%` }}
+          />
+        </span>
+        {pct.toFixed(1)}%
+      </span>
+    </td>
+  );
+}
+
+/** Popover to toggle which metric columns are shown; choice persists per browser. */
+function ColumnsMenu({
+  visible,
+  onToggle,
+  onReset,
+}: {
+  visible: ColumnKey[];
+  onToggle: (key: ColumnKey) => void;
+  onReset: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
+      >
+        <SlidersHorizontal size={12} />
+        Columns
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-2 w-52 overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
+          <div className="flex items-center justify-between border-b border-line px-3 py-2">
+            <span className="eyebrow">Columns</span>
+            <button
+              onClick={onReset}
+              className="text-[10px] uppercase tracking-wide text-[var(--faint)] transition hover:text-[var(--brass)]"
+            >
+              Reset
+            </button>
+          </div>
+          <ul className="max-h-72 overflow-y-auto py-1">
+            {COLUMNS.map((c) => {
+              const on = visible.includes(c.key);
+              return (
+                <li key={c.key}>
+                  <button
+                    onClick={() => onToggle(c.key)}
+                    role="menuitemcheckbox"
+                    aria-checked={on}
+                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--muted)] transition hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
+                  >
+                    <span
+                      className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded border ${
+                        on
+                          ? "border-[var(--brass-dim)] bg-[var(--brass-dim)] text-[var(--ink)]"
+                          : "border-line"
+                      }`}
+                    >
+                      {on && <Check size={10} strokeWidth={3} />}
+                    </span>
+                    {c.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 

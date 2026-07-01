@@ -1,8 +1,12 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Fraunces, Hanken_Grotesk, Spline_Sans_Mono } from "next/font/google";
+import { cookies } from "next/headers";
 import { Sidebar, MobileNav } from "@/components/sidebar";
 import { SyncButton } from "@/components/sync-button";
+import { RegisterSW } from "@/components/register-sw";
+import { ScaleInit, ObfuscationToggle } from "@/components/obfuscation";
 import { getAccounts } from "@/lib/queries";
+import { OBF_COOKIE, factorFromCookie, setScaleFactor } from "@/lib/scale";
 import "./globals.css";
 
 // Read live account balances at request time for the sidebar.
@@ -30,19 +34,47 @@ const mono = Spline_Sans_Mono({
 export const metadata: Metadata = {
   title: "budgetr — private ledger",
   description: "Net worth, spending & income — read-only, on your machine.",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: "/icons/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    title: "budgetr",
+    statusBarStyle: "black-translucent",
+  },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export const viewport: Viewport = {
+  themeColor: "#080b0a",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Seed the obfuscation scale from the cookie before any server component
+  // formats currency this request.
+  const obfFactor = factorFromCookie((await cookies()).get(OBF_COOKIE)?.value);
+  setScaleFactor(obfFactor);
+
   const accounts = getAccounts();
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
       <body>
+        <ScaleInit factor={obfFactor} />
+        <RegisterSW />
         <div className="mx-auto flex min-h-dvh max-w-[1500px]">
           <Sidebar accounts={accounts} />
           <div className="flex min-w-0 flex-1 flex-col">
             <header className="sticky top-0 z-20 flex items-center gap-4 border-b border-line bg-[color-mix(in_srgb,var(--ink)_82%,transparent)] px-5 py-3 backdrop-blur-xl sm:px-8">
               <MobileNav />
-              <div className="ml-auto">
+              <div className="ml-auto flex items-center gap-2">
+                <ObfuscationToggle initialFactor={obfFactor} />
                 <SyncButton />
               </div>
             </header>

@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { MonthlySpendChart } from "@/components/charts";
 import { TransactionsTable } from "@/components/transactions-table";
 import { getCategoryDetail } from "@/lib/actions";
-import type { CategoryMonth, CategoryRow, TransactionRow } from "@/lib/queries";
+import type { CategoryDay, CategoryMonth, CategoryRow, TransactionRow } from "@/lib/queries";
 
 /**
  * Inline, lazily-loaded breakdown for a single category — the monthly trend
@@ -24,6 +24,7 @@ export function CategoryDetailPanel({
   group?: string;
 }) {
   const [data, setData] = useState<{
+    days: CategoryDay[];
     months: CategoryMonth[];
     txns: TransactionRow[];
   } | null>(null);

@@ -1,12 +1,15 @@
 import { PageHead } from "@/components/page-head";
 import { CategoryManager } from "@/components/category-manager";
-import { getArchivedCategories, getCategories } from "@/lib/queries";
+import { CategoriesSpendChart } from "@/components/categories-spend-chart";
+import { Card } from "@/components/ui/card";
+import { getArchivedCategories, getCategories, getDailySpend } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default function CategoriesPage() {
   const categories = getCategories();
   const archived = getArchivedCategories();
+  const daily = getDailySpend(30);
 
   return (
     <div className="space-y-7">
@@ -16,6 +19,14 @@ export default function CategoriesPage() {
         through these — overrides set per-transaction take precedence. Click a category to see its
         transactions broken down by month.
       </p>
+      <Card className="p-0">
+        <div className="border-b border-line px-6 py-4">
+          <span className="eyebrow">Daily spending · 30d</span>
+        </div>
+        <div className="px-2 py-4 sm:px-4">
+          <CategoriesSpendChart daily={daily} categories={categories} />
+        </div>
+      </Card>
       <CategoryManager categories={categories} archived={archived} />
     </div>
   );

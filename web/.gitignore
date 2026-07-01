@@ -1,0 +1,3 @@
+# Electron desktop build artifacts
+/dist/
+/desktop/build/icon.icns
