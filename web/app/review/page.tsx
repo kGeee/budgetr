@@ -3,14 +3,18 @@ import {
   endOfYear,
   format,
   startOfMonth,
+  startOfWeek,
   startOfYear,
+  subDays,
   subMonths,
   subYears,
 } from "date-fns";
 import { ReviewView } from "@/components/review-view";
 import {
   getBiggestPurchases,
+  getCategories,
   getCategorySpendForPeriod,
+  getDailySpendRange,
   getMonthlySpendForYear,
   getPeriodTotals,
   getTopMerchantsForPeriod,
@@ -92,7 +96,15 @@ export default async function ReviewPage({
   const { period: raw } = await searchParams;
   const period: Period = PERIODS.includes(raw as Period) ? (raw as Period) : "this-month";
 
-  const p = resolvePeriod(period, new Date());
+  const now = new Date();
+  const p = resolvePeriod(period, now);
+
+  // Calendar heatmap window: the trailing ~53 weeks, aligned back to a Sunday so
+  // the grid columns are whole weeks. Independent of the selected review period.
+  const heatmapEnd = iso(now);
+  const heatmapStart = iso(startOfWeek(subDays(now, 364), { weekStartsOn: 0 }));
+  const heatmap = getDailySpendRange(heatmapStart, heatmapEnd);
+  const allCategories = getCategories();
 
   const totals = getPeriodTotals(p.start, p.end);
   const topVendors = getTopMerchantsForPeriod(p.start, p.end, 8);
@@ -141,6 +153,10 @@ export default async function ReviewPage({
       shifts={shifts}
       monthlySpend={monthlySpend}
       year={p.year}
+      heatmap={heatmap}
+      heatmapStart={heatmapStart}
+      heatmapEnd={heatmapEnd}
+      allCategories={allCategories}
     />
   );
 }

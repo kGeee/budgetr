@@ -705,6 +705,32 @@ export function getDailySpend(days = 30): { date: string; spent: number }[] {
     .map((r) => ({ date: r.date, spent: Number(r.spent) }));
 }
 
+/**
+ * Day-by-day total spending across all spending categories between two ISO
+ * dates (inclusive), oldest first. Same spending-only / transfer-excluded WHERE
+ * as {@link getDailySpend}, but over an explicit window (e.g. a trailing year
+ * for the contribution-graph heatmap). Days with no spend are simply absent.
+ */
+export function getDailySpendRange(
+  start: string,
+  end: string,
+): { date: string; spent: number }[] {
+  return db
+    .all<{ date: string; spent: number }>(sql`
+      SELECT t.date AS date,
+             SUM(t.amount) AS spent
+      FROM transactions t
+      JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+      WHERE t.pending = 0
+        AND t.amount > 0
+        AND cat."group" = 'spending'
+        AND t.date >= ${start}
+        AND t.date <= ${end}
+      GROUP BY t.date
+      ORDER BY t.date ASC`)
+    .map((r) => ({ date: r.date, spent: Number(r.spent) }));
+}
+
 /** Day-by-day breakdown for a category over the last N days, oldest first. */
 export function getCategoryDailySpend(id: string, days = 30): CategoryDay[] {
   return db

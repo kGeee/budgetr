@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
-import { ArrowDownRight, ArrowUpRight, Receipt, Sparkles, Trophy } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CalendarDays, Receipt, Sparkles, Trophy } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHead } from "@/components/page-head";
 import { CategoryChart, MonthlySpendChart } from "@/components/charts";
 import { CategoryIcon } from "@/components/category-pill";
+import { SpendHeatmap } from "@/components/spend-heatmap";
 import { formatMoney } from "@/lib/utils";
 import type {
   BiggestPurchase,
+  CategoryRow,
   CategorySpend,
   PeriodTotals,
   TopMerchant,
@@ -47,6 +49,10 @@ export function ReviewView({
   shifts,
   monthlySpend,
   year,
+  heatmap,
+  heatmapStart,
+  heatmapEnd,
+  allCategories,
 }: {
   period: Period;
   label: string;
@@ -58,6 +64,10 @@ export function ReviewView({
   shifts: CategoryShift[];
   monthlySpend: { month: string; spent: number }[];
   year: number;
+  heatmap: { date: string; spent: number }[];
+  heatmapStart: string;
+  heatmapEnd: string;
+  allCategories: CategoryRow[];
 }) {
   const empty = totals.txCount === 0;
   const topVendor = topVendors[0];
@@ -133,6 +143,20 @@ export function ReviewView({
             )}
           </>
         )}
+      </Card>
+
+      {/* Daily-spend calendar — trailing year, period-independent. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Daily spend · trailing year</CardTitle>
+          <CalendarDays size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <SpendHeatmap
+          data={heatmap}
+          start={heatmapStart}
+          end={heatmapEnd}
+          categories={allCategories}
+        />
       </Card>
 
       {/* Top vendors + biggest purchases */}
