@@ -71,6 +71,13 @@
       "when": 1782886665811,
       "tag": "0009_ambitious_the_liberteens",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1782886954492,
+      "tag": "0010_nifty_pete_wisdom",
+      "breakpoints": true
     }
   ]
 }

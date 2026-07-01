@@ -7,10 +7,12 @@ import {
   investmentTransactions,
   items,
   manualHoldings,
+  savingsContributions,
   securities,
   vendorGroupMembers,
   vendorGroups,
 } from "@/db/schema";
+import type { SavingsContribution } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 
@@ -1003,4 +1005,79 @@ export function prettyCategory(c: string | null): string {
     .split("_")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+}
+
+// ── Sinking funds / savings goals ─────────────────────────────────────────────
+
+/**
+ * A savings goal with its ledger-derived progress: `saved` is the running sum of
+ * all contributions (deposits minus withdrawals), `remaining` the gap to target,
+ * and `pct` the clamped fill percentage for the progress bar.
+ */
+export type SavingsGoalRow = {
+  id: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  targetAmount: number;
+  targetDate: string | null;
+  saved: number;
+  remaining: number;
+  pct: number;
+  archived: boolean;
+};
+
+/**
+ * Every savings goal with its contribution total. Active goals first, then by
+ * the user's sort order; archived goals sink to the bottom.
+ */
+export function getSavingsGoals(): SavingsGoalRow[] {
+  return db
+    .all<{
+      id: string;
+      name: string;
+      icon: string | null;
+      color: string | null;
+      targetAmount: number;
+      targetDate: string | null;
+      archived: number;
+      saved: number;
+    }>(
+      sql`SELECT g.id AS id, g.name AS name, g.icon AS icon, g.color AS color,
+             g.target_amount AS targetAmount, g.target_date AS targetDate,
+             g.archived AS archived,
+             COALESCE((
+               SELECT SUM(c.amount) FROM savings_contributions c
+               WHERE c.goal_id = g.id
+             ), 0) AS saved
+          FROM savings_goals g
+          ORDER BY g.archived ASC, g.sort_order ASC, g.created_at ASC`,
+    )
+    .map((r) => {
+      const targetAmount = Number(r.targetAmount);
+      const saved = Number(r.saved);
+      const pct = targetAmount > 0 ? Math.min(Math.max((saved / targetAmount) * 100, 0), 100) : 0;
+      return {
+        id: r.id,
+        name: r.name,
+        icon: r.icon,
+        color: r.color,
+        targetAmount,
+        targetDate: r.targetDate,
+        saved,
+        remaining: targetAmount - saved,
+        pct,
+        archived: Boolean(r.archived),
+      };
+    });
+}
+
+/** A goal's contribution ledger, newest first, for the audit/history view. */
+export function getSavingsGoalContributions(goalId: string): SavingsContribution[] {
+  return db
+    .select()
+    .from(savingsContributions)
+    .where(eq(savingsContributions.goalId, goalId))
+    .orderBy(desc(savingsContributions.date), desc(savingsContributions.createdAt))
+    .all();
 }

@@ -370,6 +370,43 @@ export const dismissedAlerts = sqliteTable(
   (t) => [uniqueIndex("dismissed_alert_key_idx").on(t.alertKey)],
 );
 
+/**
+ * A named savings goal / sinking fund (vacation, emergency fund, new laptop).
+ * Progress is derived from the `savings_contributions` ledger, never stored on
+ * the goal itself, so the running total is always auditable. `targetDate` is
+ * optional; when set and passed, the UI flags a still-underfunded goal.
+ */
+export const savingsGoals = sqliteTable("savings_goals", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  icon: text("icon"), // lucide icon name
+  color: text("color"), // hex / token, optional accent
+  targetAmount: real("target_amount").notNull(),
+  targetDate: text("target_date"), // YYYY-MM-DD, optional
+  sortOrder: integer("sort_order").notNull().default(0),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * Append-only ledger of money earmarked toward a goal. A deposit is a positive
+ * `amount`, a withdrawal is negative — summing the rows gives the amount saved.
+ */
+export const savingsContributions = sqliteTable(
+  "savings_contributions",
+  {
+    id: text("id").primaryKey(),
+    goalId: text("goal_id")
+      .notNull()
+      .references(() => savingsGoals.id, { onDelete: "cascade" }),
+    amount: real("amount").notNull(), // + deposit, - withdrawal
+    date: text("date").notNull(), // YYYY-MM-DD
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("savings_contributions_goal_idx").on(t.goalId)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -388,3 +425,5 @@ export type VendorGroup = typeof vendorGroups.$inferSelect;
 export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
 export type DismissedAlert = typeof dismissedAlerts.$inferSelect;
+export type SavingsGoal = typeof savingsGoals.$inferSelect;
+export type SavingsContribution = typeof savingsContributions.$inferSelect;
