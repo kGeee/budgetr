@@ -10,6 +10,7 @@ import {
 } from "@/lib/queries";
 import { buildReconstructedSeries, getTickerHistories } from "@/lib/portfolio-history";
 import { parseOccSymbol } from "@/lib/options";
+import { getOptionChain } from "@/lib/yahoo";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (always fresh), but the Yahoo history fetches should
@@ -99,6 +100,34 @@ export default async function InvestmentsPage() {
       ? rawSeries.map((p) => ({ date: p.date, value: p.value + fixedValueTotal }))
       : rawSeries;
 
+  // Options analytics: for the distinct OCC underlyings we hold, pull Yahoo's
+  // option chains (only when option legs exist) for live IV + underlying prices,
+  // fetching just the expiries we actually own. Everything downstream is derived.
+  const occLegs = holdings
+    .map((h) => parseOccSymbol(h.ticker))
+    .filter((p): p is NonNullable<typeof p> => p != null);
+  const expiriesByUnderlying = new Map<string, Set<string>>();
+  for (const p of occLegs) {
+    const set = expiriesByUnderlying.get(p.underlying) ?? new Set<string>();
+    set.add(p.expiry);
+    expiriesByUnderlying.set(p.underlying, set);
+  }
+  const ivByOcc: Record<string, number> = {};
+  const underlyingPrices: Record<string, number> = {};
+  if (expiriesByUnderlying.size > 0) {
+    const chains = await Promise.all(
+      [...expiriesByUnderlying.entries()].map(
+        async ([underlying, expiries]) =>
+          [underlying, await getOptionChain(underlying, [...expiries])] as const,
+      ),
+    );
+    for (const [underlying, chain] of chains) {
+      if (!chain) continue;
+      Object.assign(ivByOcc, chain.ivByOcc);
+      if (chain.underlyingPrice != null) underlyingPrices[underlying] = chain.underlyingPrice;
+    }
+  }
+
   return (
     <div className="space-y-7">
       <PageHead title="Investments" />
@@ -108,6 +137,8 @@ export default async function InvestmentsPage() {
         portfolioSeries={portfolioSeries}
         transactions={transactions}
         knownSectors={knownSectors}
+        ivByOcc={ivByOcc}
+        underlyingPrices={underlyingPrices}
       />
     </div>
   );

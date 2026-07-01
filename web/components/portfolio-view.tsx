@@ -23,10 +23,15 @@ import { setHoldingSector } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 import {
   classifyOptionLegs,
+  daysToExpiry,
+  expiryBucket,
   formatOptionExpiry,
   formatStrike,
+  optionRiskFlag,
   parseOccSymbol,
+  riskLevel,
 } from "@/lib/options";
+import { OptionsAnalytics } from "@/components/options-analytics";
 import type { InvestmentTxnRow } from "@/lib/queries";
 
 const UNASSIGNED = "Unassigned";
@@ -73,12 +78,18 @@ export function PortfolioView({
   portfolioSeries = [],
   transactions = [],
   knownSectors = [],
+  ivByOcc = {},
+  underlyingPrices = {},
 }: {
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
   portfolioSeries?: { date: string; value: number }[];
   transactions?: InvestmentTxnRow[];
   knownSectors?: string[];
+  /** Live implied volatility by OCC symbol (from the Yahoo option chains). */
+  ivByOcc?: Record<string, number>;
+  /** Underlying spot price by symbol (Yahoo chain quote fallback). */
+  underlyingPrices?: Record<string, number>;
 }) {
   // Exclude option (OCC-symbol) legs — Finnhub can't quote them, so skip the
   // wasted live-price subscriptions; they're valued from Plaid instead.
@@ -99,6 +110,8 @@ export function PortfolioView({
         portfolioSeries={portfolioSeries}
         transactions={transactions}
         knownSectors={knownSectors}
+        ivByOcc={ivByOcc}
+        underlyingPrices={underlyingPrices}
       />
     </LivePricesProvider>
   );
@@ -339,12 +352,16 @@ function PortfolioInner({
   portfolioSeries,
   transactions,
   knownSectors,
+  ivByOcc,
+  underlyingPrices,
 }: {
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
   portfolioSeries: { date: string; value: number }[];
   transactions: InvestmentTxnRow[];
   knownSectors: string[];
+  ivByOcc: Record<string, number>;
+  underlyingPrices: Record<string, number>;
 }) {
   const { quotes, status } = useLivePrices();
   const router = useRouter();
@@ -442,6 +459,12 @@ function PortfolioInner({
   const total = useMemo(
     () => holdings.reduce((s, h) => s + effectiveValue(h, quotes), 0),
     [holdings, quotes],
+  );
+
+  // Every option (OCC) leg across all holdings — drives the analytics panel.
+  const optionLegs = useMemo(
+    () => holdings.filter((h) => parseOccSymbol(h.ticker) != null),
+    [holdings],
   );
 
   // Build the render list: regular holdings stay as single rows; option legs are
@@ -627,6 +650,7 @@ function PortfolioInner({
                   m={it.m}
                   columns={orderedCols}
                   quotes={quotes}
+                  underlyingPrices={underlyingPrices}
                 />
               ),
             )}
@@ -654,6 +678,16 @@ function PortfolioInner({
         </table>
         </div>
       </Card>
+
+      {optionLegs.length > 0 && (
+        <OptionsAnalytics
+          legs={optionLegs}
+          quotes={quotes}
+          ivByOcc={ivByOcc}
+          underlyingPrices={underlyingPrices}
+          currency={optionLegs[0]?.currency ?? "USD"}
+        />
+      )}
     </div>
   );
 }
@@ -872,20 +906,35 @@ function OptionGroupRow({
   m,
   columns,
   quotes,
+  underlyingPrices,
 }: {
   underlying: string;
   legs: HoldingRow[];
   m: RowMetrics;
   columns: ColumnDef[];
   quotes: Record<string, LiveQuote>;
+  underlyingPrices: Record<string, number>;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   const parsed = legs.map((h) => ({ h, p: parseOccSymbol(h.ticker)! }));
   const structures = classifyOptionLegs(
-    parsed.map(({ h, p }) => ({ parsed: p, quantity: h.quantity })),
+    parsed.map(({ h, p }) => ({ parsed: p, quantity: h.quantity, costBasis: h.costBasis })),
   );
   const currency = m.currency;
+
+  const underlyingPrice =
+    quotes[underlying.toUpperCase()]?.price ?? underlyingPrices[underlying] ?? null;
+
+  // Soonest expiry across this underlying's legs drives the group's DTE chip.
+  const soonestDte = Math.min(...parsed.map(({ p }) => daysToExpiry(p.expiry)));
+  const groupRisk = riskLevel(soonestDte);
+  // Any leg carrying an assignment / expiry-worthless flag surfaces on the row.
+  const flags = new Set(
+    parsed
+      .map(({ h, p }) => optionRiskFlag(p, h.quantity, underlyingPrice, daysToExpiry(p.expiry)))
+      .filter((f): f is "assignment" | "expiry" => f != null),
+  );
 
   const summary =
     structures.length === 1
@@ -904,12 +953,34 @@ function OptionGroupRow({
           </span>
         </td>
         <td className="py-3.5 pr-3 pl-1">
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex flex-wrap items-center gap-2">
             <span className="font-medium text-[var(--brass)]">{underlying}</span>
             <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
               options
             </span>
             <span className="text-[var(--muted)]">{summary}</span>
+            {Number.isFinite(soonestDte) && (
+              <span
+                className={`mono rounded px-1.5 py-0.5 text-[10px] ${
+                  groupRisk === "expired" || groupRisk === "high"
+                    ? "bg-[var(--coral)]/15 text-[var(--coral)]"
+                    : groupRisk === "medium"
+                      ? "bg-[var(--brass)]/15 text-[var(--brass)]"
+                      : "text-[var(--faint)]"
+                }`}
+                title={`${soonestDte} days to soonest expiry`}
+              >
+                {expiryBucket(soonestDte)}
+              </span>
+            )}
+            {[...flags].map((f) => (
+              <span
+                key={f}
+                className="inline-flex items-center gap-1 rounded bg-[var(--coral)]/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--coral)]"
+              >
+                {f === "assignment" ? "Assign risk" : "Worthless risk"}
+              </span>
+            ))}
           </span>
         </td>
         <MetricCells columns={columns} m={m} />
