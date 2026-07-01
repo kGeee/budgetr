@@ -64,6 +64,20 @@
       "when": 1782786797406,
       "tag": "0008_groovy_doomsday",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1782887126132,
+      "tag": "0009_colossal_tag",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1782887733102,
+      "tag": "0010_lush_leader",
+      "breakpoints": true
     }
   ]
 }

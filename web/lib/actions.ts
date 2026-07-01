@@ -3,14 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
+  allocationTargets,
   budgets,
   categories,
+  costBasisMethod,
   holdingCostBasisOverrides,
+  investmentAssetClasses,
+  investmentGeographies,
   investmentSectors,
   manualHoldings,
   tagBudgets,
   tagRules,
   tags,
+  taxLotOverrides,
   transactionTags,
   transactions,
   vendorGroupMembers,
@@ -440,6 +445,81 @@ export async function setHoldingSector(sectorKey: string, sector: string) {
   revalidateAll();
 }
 
+// ── Allocation targets & asset-class / geography overrides ───────────────────
+
+/**
+ * Set a target allocation percentage. `targetKey` is namespaced by dimension
+ * (`class:stocks` | `sector:Technology` | `ticker:NVDA` — see targetKeyFor).
+ * The percent is clamped to 0–100; a non-positive value clears the target.
+ */
+export async function setAllocationTarget(targetKey: string, pct: number) {
+  const key = targetKey.trim();
+  if (!key) return;
+  if (!Number.isFinite(pct) || pct <= 0) {
+    return clearAllocationTarget(key);
+  }
+  const target = Math.min(100, pct);
+  db.insert(allocationTargets)
+    .values({ targetKey: key, target })
+    .onConflictDoUpdate({ target: allocationTargets.targetKey, set: { target } })
+    .run();
+  revalidateAll();
+}
+
+/** Drop an allocation target so it no longer shows in the drift table. */
+export async function clearAllocationTarget(targetKey: string) {
+  const key = targetKey.trim();
+  if (!key) return;
+  db.delete(allocationTargets).where(eq(allocationTargets.targetKey, key)).run();
+  revalidateAll();
+}
+
+/**
+ * Override a position's asset class (keyed by sectorKey, like sectors, so it
+ * spans every lot of a ticker). An empty value clears the override, reverting
+ * to the auto-classification.
+ */
+export async function setAssetClass(sectorKey: string, assetClass: string) {
+  const key = sectorKey.trim();
+  if (!key) return;
+  const cls = assetClass.trim().toLowerCase();
+  if (!cls) {
+    db.delete(investmentAssetClasses)
+      .where(eq(investmentAssetClasses.sectorKey, key))
+      .run();
+  } else {
+    db.insert(investmentAssetClasses)
+      .values({ sectorKey: key, assetClass: cls })
+      .onConflictDoUpdate({
+        target: investmentAssetClasses.sectorKey,
+        set: { assetClass: cls },
+      })
+      .run();
+  }
+  revalidateAll();
+}
+
+/**
+ * Set (or clear) a position's geography/region (keyed by sectorKey). This is
+ * the only source of the region-exposure breakdown; an empty value clears it.
+ */
+export async function setGeography(sectorKey: string, region: string) {
+  const key = sectorKey.trim();
+  if (!key) return;
+  const name = region.trim();
+  if (!name) {
+    db.delete(investmentGeographies)
+      .where(eq(investmentGeographies.sectorKey, key))
+      .run();
+  } else {
+    db.insert(investmentGeographies)
+      .values({ sectorKey: key, region: name })
+      .onConflictDoUpdate({ target: investmentGeographies.sectorKey, set: { region: name } })
+      .run();
+  }
+  revalidateAll();
+}
+
 // ── Plaid holding cost-basis overrides ───────────────────────────────────────
 
 export type HoldingCostBasisInput = {
@@ -488,5 +568,53 @@ export async function clearHoldingCostBasisOverride(holdingId: string) {
   db.delete(holdingCostBasisOverrides)
     .where(eq(holdingCostBasisOverrides.holdingId, id))
     .run();
+  revalidateAll();
+}
+
+// ── Cost-basis method + spec-ID lot overrides (realized gains) ────────────────
+
+const COST_BASIS_METHODS = new Set(["FIFO", "LIFO", "specid"]);
+
+/**
+ * Set the cost-basis matching method for a scope — `*` (global) or `sym:AAPL`
+ * (per-ticker). An empty/invalid method clears the row, reverting the scope to
+ * its next fallback (per-ticker → global → FIFO default).
+ */
+export async function setCostBasisMethod(scopeKey: string, method: string) {
+  const key = scopeKey?.trim();
+  if (!key) return;
+  if (!COST_BASIS_METHODS.has(method)) {
+    db.delete(costBasisMethod).where(eq(costBasisMethod.scopeKey, key)).run();
+    revalidateAll();
+    return;
+  }
+  db.insert(costBasisMethod)
+    .values({ scopeKey: key, method })
+    .onConflictDoUpdate({ target: costBasisMethod.scopeKey, set: { method } })
+    .run();
+  revalidateAll();
+}
+
+/** Pin `quantity` shares of a sell to a specific buy lot (spec-ID matching). */
+export async function addTaxLotOverride(
+  sellTxnId: string,
+  buyTxnId: string,
+  quantity: number,
+) {
+  const sell = sellTxnId?.trim();
+  const buy = buyTxnId?.trim();
+  if (!sell || !buy) return;
+  if (!Number.isFinite(quantity) || quantity <= 0) return;
+  db.insert(taxLotOverrides)
+    .values({ id: `tlo_${crypto.randomUUID().slice(0, 8)}`, sellTxnId: sell, buyTxnId: buy, quantity })
+    .run();
+  revalidateAll();
+}
+
+/** Remove a spec-ID lot assignment; its shares revert to FIFO matching. */
+export async function removeTaxLotOverride(id: string) {
+  const key = id?.trim();
+  if (!key) return;
+  db.delete(taxLotOverrides).where(eq(taxLotOverrides.id, key)).run();
   revalidateAll();
 }

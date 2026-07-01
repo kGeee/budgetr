@@ -1,6 +1,10 @@
 import { PageHead } from "@/components/page-head";
 import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
 import {
+  getAllocationTargets,
+  getAssetClassOverrides,
+  getDividendSummary,
+  getGeographyOverrides,
   getHoldings,
   getInvestmentSectors,
   getInvestmentTransactions,
@@ -8,8 +12,14 @@ import {
   getManualHoldings,
   sectorKeyFor,
 } from "@/lib/queries";
-import { buildReconstructedSeries, getTickerHistories } from "@/lib/portfolio-history";
+import {
+  buildReconstructedSeries,
+  getTickerHistories,
+  type PricePoint,
+} from "@/lib/portfolio-history";
+import { computeComparison, type BenchmarkKey } from "@/lib/benchmark";
 import { parseOccSymbol } from "@/lib/options";
+import { getDividendCalendar, getOptionChain } from "@/lib/yahoo";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (always fresh), but the Yahoo history fetches should
@@ -22,6 +32,10 @@ export default async function InvestmentsPage() {
   const manual = getManualHoldings();
   const sectors = getInvestmentSectors();
   const knownSectors = getKnownSectors();
+  const allocationTargets = getAllocationTargets();
+  const assetClassOverrides = getAssetClassOverrides();
+  const geographyOverrides = getGeographyOverrides();
+  const dividendSummary = getDividendSummary();
 
   // Attach the symbol-scoped sector key + its current sector to every Plaid
   // holding so the row carries what the sector editor and allocation need.
@@ -99,6 +113,55 @@ export default async function InvestmentsPage() {
       ? rawSeries.map((p) => ({ date: p.date, value: p.value + fixedValueTotal }))
       : rawSeries;
 
+  // Benchmark comparison: pull SPY/QQQ closes (via the shared 6h Yahoo Data
+  // Cache) and measure the portfolio's return against them per window. Skipped
+  // when there's no portfolio series to compare (empty holdings).
+  const benchmarkSeries =
+    portfolioSeries.length > 1
+      ? await getTickerHistories(["SPY", "QQQ"])
+      : ({} as Record<string, PricePoint[]>);
+  const benchmarks: Partial<Record<BenchmarkKey, PricePoint[]>> = {
+    SPY: benchmarkSeries.SPY,
+    QQQ: benchmarkSeries.QQQ,
+  };
+  const comparison = computeComparison(portfolioSeries, benchmarks);
+
+  // Options analytics: for the distinct OCC underlyings we hold, pull Yahoo's
+  // option chains (only when option legs exist) for live IV + underlying prices,
+  // fetching just the expiries we actually own. Everything downstream is derived.
+  const occLegs = holdings
+    .map((h) => parseOccSymbol(h.ticker))
+    .filter((p): p is NonNullable<typeof p> => p != null);
+  const expiriesByUnderlying = new Map<string, Set<string>>();
+  for (const p of occLegs) {
+    const set = expiriesByUnderlying.get(p.underlying) ?? new Set<string>();
+    set.add(p.expiry);
+    expiriesByUnderlying.set(p.underlying, set);
+  }
+  const ivByOcc: Record<string, number> = {};
+  const underlyingPrices: Record<string, number> = {};
+  if (expiriesByUnderlying.size > 0) {
+    const chains = await Promise.all(
+      [...expiriesByUnderlying.entries()].map(
+        async ([underlying, expiries]) =>
+          [underlying, await getOptionChain(underlying, [...expiries])] as const,
+      ),
+    );
+    for (const [underlying, chain] of chains) {
+      if (!chain) continue;
+      Object.assign(ivByOcc, chain.ivByOcc);
+      if (chain.underlyingPrice != null) underlyingPrices[underlying] = chain.underlyingPrice;
+    }
+  }
+
+  // Ex-dividend calendar: pull Yahoo's upcoming ex-div/pay dates for the held
+  // tickers, but only once we know some dividend income exists (the panel is
+  // hidden otherwise, so the fetch would be wasted). Cached in the Data Cache.
+  const dividendCalendar =
+    dividendSummary.payments.length > 0 && symbols.length > 0
+      ? await getDividendCalendar(symbols)
+      : [];
+
   return (
     <div className="space-y-7">
       <PageHead title="Investments" />
@@ -106,8 +169,17 @@ export default async function InvestmentsPage() {
         holdings={holdings}
         histories={histories}
         portfolioSeries={portfolioSeries}
+        benchmarks={benchmarks}
+        comparison={comparison}
         transactions={transactions}
         knownSectors={knownSectors}
+        ivByOcc={ivByOcc}
+        underlyingPrices={underlyingPrices}
+        allocationTargets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
+        dividendSummary={dividendSummary}
+        dividendCalendar={dividendCalendar}
       />
     </div>
   );

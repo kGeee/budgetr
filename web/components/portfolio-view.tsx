@@ -23,11 +23,21 @@ import { setHoldingSector } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 import {
   classifyOptionLegs,
+  daysToExpiry,
+  expiryBucket,
   formatOptionExpiry,
   formatStrike,
+  optionRiskFlag,
   parseOccSymbol,
+  riskLevel,
 } from "@/lib/options";
+import { OptionsAnalytics } from "@/components/options-analytics";
+import { AssetAllocation, type AllocRow } from "@/components/asset-allocation";
+import { DividendPanel } from "@/components/dividend-panel";
 import type { InvestmentTxnRow } from "@/lib/queries";
+import type { DividendSummary } from "@/lib/dividends";
+import type { DividendCalendarEntry, PricePoint as YahooPricePoint } from "@/lib/yahoo";
+import type { BenchmarkKey, ComparisonRow } from "@/lib/benchmark";
 
 const UNASSIGNED = "Unassigned";
 import {
@@ -71,14 +81,41 @@ export function PortfolioView({
   holdings,
   histories = {},
   portfolioSeries = [],
+  benchmarks = {},
+  comparison = [],
   transactions = [],
   knownSectors = [],
+  ivByOcc = {},
+  underlyingPrices = {},
+  allocationTargets = {},
+  assetClassOverrides = {},
+  geographyOverrides = {},
+  dividendSummary,
+  dividendCalendar = [],
 }: {
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
   portfolioSeries?: { date: string; value: number }[];
+  /** SPY/QQQ daily closes for the value-chart overlay. */
+  benchmarks?: Partial<Record<BenchmarkKey, YahooPricePoint[]>>;
+  /** Per-window portfolio-vs-benchmark return comparison. */
+  comparison?: ComparisonRow[];
   transactions?: InvestmentTxnRow[];
   knownSectors?: string[];
+  /** Live implied volatility by OCC symbol (from the Yahoo option chains). */
+  ivByOcc?: Record<string, number>;
+  /** Underlying spot price by symbol (Yahoo chain quote fallback). */
+  underlyingPrices?: Record<string, number>;
+  /** User-set target allocation percentages, keyed by dimension (see targetKeyFor). */
+  allocationTargets?: Record<string, number>;
+  /** Per-position asset-class overrides, keyed by sectorKey. */
+  assetClassOverrides?: Record<string, string>;
+  /** Per-position geography overrides, keyed by sectorKey. */
+  geographyOverrides?: Record<string, string>;
+  /** Derived dividend income stream (trailing/projected/yield-on-cost). */
+  dividendSummary?: DividendSummary;
+  /** Yahoo ex-dividend calendar for held tickers. */
+  dividendCalendar?: DividendCalendarEntry[];
 }) {
   // Exclude option (OCC-symbol) legs — Finnhub can't quote them, so skip the
   // wasted live-price subscriptions; they're valued from Plaid instead.
@@ -97,8 +134,17 @@ export function PortfolioView({
         holdings={holdings}
         histories={histories}
         portfolioSeries={portfolioSeries}
+        benchmarks={benchmarks}
+        comparison={comparison}
         transactions={transactions}
         knownSectors={knownSectors}
+        ivByOcc={ivByOcc}
+        underlyingPrices={underlyingPrices}
+        allocationTargets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
+        dividendSummary={dividendSummary}
+        dividendCalendar={dividendCalendar}
       />
     </LivePricesProvider>
   );
@@ -337,14 +383,32 @@ function PortfolioInner({
   holdings,
   histories,
   portfolioSeries,
+  benchmarks,
+  comparison,
   transactions,
   knownSectors,
+  ivByOcc,
+  underlyingPrices,
+  allocationTargets,
+  assetClassOverrides,
+  geographyOverrides,
+  dividendSummary,
+  dividendCalendar,
 }: {
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
   portfolioSeries: { date: string; value: number }[];
+  benchmarks: Partial<Record<BenchmarkKey, YahooPricePoint[]>>;
+  comparison: ComparisonRow[];
   transactions: InvestmentTxnRow[];
   knownSectors: string[];
+  ivByOcc: Record<string, number>;
+  underlyingPrices: Record<string, number>;
+  allocationTargets: Record<string, number>;
+  assetClassOverrides: Record<string, string>;
+  geographyOverrides: Record<string, string>;
+  dividendSummary?: DividendSummary;
+  dividendCalendar?: DividendCalendarEntry[];
 }) {
   const { quotes, status } = useLivePrices();
   const router = useRouter();
@@ -444,6 +508,29 @@ function PortfolioInner({
     [holdings, quotes],
   );
 
+  // Live-valued rows for the asset-allocation / targets panel, recomputed on each
+  // price tick and sector edit (sector drives the sector-target drift).
+  const allocRows = useMemo<AllocRow[]>(
+    () =>
+      holdings.map((h) => ({
+        id: h.id,
+        ticker: h.ticker,
+        securityType: h.securityType,
+        securityName: h.securityName,
+        sectorKey: h.sectorKey,
+        sector: sectorOf(h),
+        value: effectiveValue(h, quotes),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [holdings, quotes, sectorEdits],
+  );
+
+  // Every option (OCC) leg across all holdings — drives the analytics panel.
+  const optionLegs = useMemo(
+    () => holdings.filter((h) => parseOccSymbol(h.ticker) != null),
+    [holdings],
+  );
+
   // Build the render list: regular holdings stay as single rows; option legs are
   // folded into one collapsible group per underlying. Both carry the same
   // normalized metrics and are sorted together by the chosen column, with rows
@@ -541,15 +628,27 @@ function PortfolioInner({
         onSelect={setSectorFilter}
       />
 
+      <AssetAllocation
+        rows={allocRows}
+        total={total}
+        targets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
+        knownSectors={sectorOptions}
+      />
+
       <Card className="p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <span className="eyebrow">Portfolio value</span>
           <span className="text-xs text-[var(--faint)]">reconstructed from your trades</span>
         </div>
         <div className="px-3 py-5 sm:px-5">
-          <ValueHistory data={portfolioSeries} kind="portfolio" />
+          <ValueHistory data={portfolioSeries} kind="portfolio" benchmarks={benchmarks} />
         </div>
       </Card>
+
+      <BenchmarkComparison comparison={comparison} />
+
 
       <Card className="overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
@@ -627,6 +726,7 @@ function PortfolioInner({
                   m={it.m}
                   columns={orderedCols}
                   quotes={quotes}
+                  underlyingPrices={underlyingPrices}
                 />
               ),
             )}
@@ -654,6 +754,20 @@ function PortfolioInner({
         </table>
         </div>
       </Card>
+
+      {optionLegs.length > 0 && (
+        <OptionsAnalytics
+          legs={optionLegs}
+          quotes={quotes}
+          ivByOcc={ivByOcc}
+          underlyingPrices={underlyingPrices}
+          currency={optionLegs[0]?.currency ?? "USD"}
+        />
+      )}
+
+      {dividendSummary && dividendSummary.payments.length > 0 && (
+        <DividendPanel summary={dividendSummary} calendar={dividendCalendar} />
+      )}
     </div>
   );
 }
@@ -872,20 +986,35 @@ function OptionGroupRow({
   m,
   columns,
   quotes,
+  underlyingPrices,
 }: {
   underlying: string;
   legs: HoldingRow[];
   m: RowMetrics;
   columns: ColumnDef[];
   quotes: Record<string, LiveQuote>;
+  underlyingPrices: Record<string, number>;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   const parsed = legs.map((h) => ({ h, p: parseOccSymbol(h.ticker)! }));
   const structures = classifyOptionLegs(
-    parsed.map(({ h, p }) => ({ parsed: p, quantity: h.quantity })),
+    parsed.map(({ h, p }) => ({ parsed: p, quantity: h.quantity, costBasis: h.costBasis })),
   );
   const currency = m.currency;
+
+  const underlyingPrice =
+    quotes[underlying.toUpperCase()]?.price ?? underlyingPrices[underlying] ?? null;
+
+  // Soonest expiry across this underlying's legs drives the group's DTE chip.
+  const soonestDte = Math.min(...parsed.map(({ p }) => daysToExpiry(p.expiry)));
+  const groupRisk = riskLevel(soonestDte);
+  // Any leg carrying an assignment / expiry-worthless flag surfaces on the row.
+  const flags = new Set(
+    parsed
+      .map(({ h, p }) => optionRiskFlag(p, h.quantity, underlyingPrice, daysToExpiry(p.expiry)))
+      .filter((f): f is "assignment" | "expiry" => f != null),
+  );
 
   const summary =
     structures.length === 1
@@ -904,12 +1033,34 @@ function OptionGroupRow({
           </span>
         </td>
         <td className="py-3.5 pr-3 pl-1">
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex flex-wrap items-center gap-2">
             <span className="font-medium text-[var(--brass)]">{underlying}</span>
             <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
               options
             </span>
             <span className="text-[var(--muted)]">{summary}</span>
+            {Number.isFinite(soonestDte) && (
+              <span
+                className={`mono rounded px-1.5 py-0.5 text-[10px] ${
+                  groupRisk === "expired" || groupRisk === "high"
+                    ? "bg-[var(--coral)]/15 text-[var(--coral)]"
+                    : groupRisk === "medium"
+                      ? "bg-[var(--brass)]/15 text-[var(--brass)]"
+                      : "text-[var(--faint)]"
+                }`}
+                title={`${soonestDte} days to soonest expiry`}
+              >
+                {expiryBucket(soonestDte)}
+              </span>
+            )}
+            {[...flags].map((f) => (
+              <span
+                key={f}
+                className="inline-flex items-center gap-1 rounded bg-[var(--coral)]/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--coral)]"
+              >
+                {f === "assignment" ? "Assign risk" : "Worthless risk"}
+              </span>
+            ))}
           </span>
         </td>
         <MetricCells columns={columns} m={m} />
@@ -1317,6 +1468,85 @@ function SectorAllocation({
                     {pct.toFixed(1)}%
                   </td>
                   <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{d.count}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Compact out/under-performance table: one row per time window comparing the
+ * portfolio's return to SPY and QQQ, with the delta colored jade when the
+ * portfolio outperformed and coral when it lagged. Hidden until there's at
+ * least one window's worth of comparison data.
+ */
+function BenchmarkComparison({ comparison }: { comparison: ComparisonRow[] }) {
+  if (comparison.length === 0) return null;
+
+  const pct = (v: number | null) =>
+    v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}%`;
+
+  const WINDOW_LABEL: Record<ComparisonRow["window"], string> = {
+    "1M": "1 month",
+    "3M": "3 months",
+    "6M": "6 months",
+    "1Y": "1 year",
+    YTD: "Year to date",
+  };
+
+  return (
+    <Card className="p-0">
+      <div className="flex items-center justify-between border-b border-line px-6 py-4">
+        <span className="eyebrow">Return vs benchmarks</span>
+        <span className="text-xs text-[var(--faint)]">portfolio return vs SPY &amp; QQQ</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead>
+            <tr className="border-b border-line text-left">
+              {["Window", "Portfolio", "SPY", "QQQ", "Δ vs SPY", "Δ vs QQQ"].map((h, i) => (
+                <th
+                  key={h}
+                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {comparison.map((r) => {
+              const pColor =
+                r.portfolioPct == null
+                  ? "text-[var(--faint)]"
+                  : r.portfolioPct >= 0
+                    ? "text-[var(--jade)]"
+                    : "text-[var(--coral)]";
+              const delta = (v: number | null) => (
+                <td
+                  className={`mono px-6 py-2.5 text-right ${
+                    v == null
+                      ? "text-[var(--faint)]"
+                      : v >= 0
+                        ? "text-[var(--jade)]"
+                        : "text-[var(--coral)]"
+                  }`}
+                >
+                  {pct(v)}
+                </td>
+              );
+              return (
+                <tr key={r.window} className="border-b border-line/60 last:border-0">
+                  <td className="px-6 py-2.5 text-[var(--muted)]">{WINDOW_LABEL[r.window]}</td>
+                  <td className={`mono px-6 py-2.5 text-right ${pColor}`}>{pct(r.portfolioPct)}</td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{pct(r.spyPct)}</td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{pct(r.qqqPct)}</td>
+                  {delta(r.deltaVsSpy)}
+                  {delta(r.deltaVsQqq)}
                 </tr>
               );
             })}

@@ -334,6 +334,41 @@ export const investmentSectors = sqliteTable("investment_sectors", {
 });
 
 /**
+ * User-set target allocation percentages, one row per allocation dimension.
+ * `targetKey` is namespaced so a single flat table covers every dimension the
+ * rebalancing view can drift against:
+ *  - `class:stocks` | `class:bonds` | … — the coarse asset-class mix.
+ *  - `sector:Technology` — a sector weight (mirrors investmentSectors' names).
+ *  - `ticker:NVDA` — a single-position cap (drives concentration targets).
+ * `target` is stored as a percent (0–100) so it reads the same everywhere.
+ */
+export const allocationTargets = sqliteTable("allocation_targets", {
+  targetKey: text("target_key").primaryKey(),
+  target: real("target").notNull(),
+});
+
+/**
+ * Optional per-position asset-class override, keyed exactly like
+ * investmentSectors (`sym:NVDA` / `man:<id>` via sectorKeyFor). Lets the user
+ * correct the auto-classification (securityType/OCC → stocks|bonds|cash|
+ * crypto|options) when Plaid mislabels an instrument. Absent = auto-classified.
+ */
+export const investmentAssetClasses = sqliteTable("investment_asset_classes", {
+  sectorKey: text("sector_key").primaryKey(),
+  assetClass: text("asset_class").notNull(), // stocks | bonds | cash | crypto | options
+});
+
+/**
+ * Optional per-position geography override, keyed like investmentSectors. There
+ * is no automatic geography signal, so these overrides are the sole source of
+ * the region-exposure breakdown (unset positions fall into "Unclassified").
+ */
+export const investmentGeographies = sqliteTable("investment_geographies", {
+  sectorKey: text("sector_key").primaryKey(),
+  region: text("region").notNull(),
+});
+
+/**
  * User corrections to a Plaid holding's cost basis. Kept in its own table so the
  * `holdings` sync (which overwrites cost_basis from Plaid on every run) can never
  * clobber a manual correction — e.g. after a brokerage transfer/merger (TD
@@ -352,6 +387,35 @@ export const holdingCostBasisOverrides = sqliteTable("holding_cost_basis_overrid
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Per-scope cost-basis matching method used to reconstruct realized gains from
+ * the investmentTransactions ledger. `scopeKey` is either a symbol scope
+ * (`sym:AAPL`, mirroring investmentSectors' `sym:` keys) or the global fallback
+ * `*`. Resolution order for a ticker: its `sym:` row → `*` row → FIFO default.
+ * `method` is one of FIFO | LIFO | specid.
+ */
+export const costBasisMethod = sqliteTable("cost_basis_method", {
+  scopeKey: text("scope_key").primaryKey(), // `sym:AAPL` | `*`
+  method: text("method").notNull(), // FIFO | LIFO | specid
+});
+
+/**
+ * Manual spec-ID lot matching: pins a specific sell transaction to a specific
+ * buy lot for `quantity` shares, overriding the automatic FIFO/LIFO ordering.
+ * Only consulted when the effective method for the ticker is `specid`; any
+ * quantity a sell isn't explicitly matched for falls back to FIFO.
+ */
+export const taxLotOverrides = sqliteTable(
+  "tax_lot_overrides",
+  {
+    id: text("id").primaryKey(),
+    sellTxnId: text("sell_txn_id").notNull(), // investmentTransactions.id of the sell
+    buyTxnId: text("buy_txn_id").notNull(), // investmentTransactions.id of the buy lot
+    quantity: real("quantity").notNull(), // shares from the buy lot applied to the sell
+  },
+  (t) => [index("tax_lot_overrides_sell_idx").on(t.sellTxnId)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -369,3 +433,8 @@ export type RecurringStream = typeof recurringStreams.$inferSelect;
 export type VendorGroup = typeof vendorGroups.$inferSelect;
 export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
+export type AllocationTarget = typeof allocationTargets.$inferSelect;
+export type InvestmentAssetClass = typeof investmentAssetClasses.$inferSelect;
+export type InvestmentGeography = typeof investmentGeographies.$inferSelect;
+export type CostBasisMethod = typeof costBasisMethod.$inferSelect;
+export type TaxLotOverride = typeof taxLotOverrides.$inferSelect;
