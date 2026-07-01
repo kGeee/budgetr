@@ -127,7 +127,30 @@ export const budgets = sqliteTable("budgets", {
     .unique()
     .references(() => categories.id, { onDelete: "cascade" }),
   amount: real("amount").notNull(),
+  // Envelope mode: when set, this category's unused (or overspent) balance
+  // carries forward month to month via the budget_rollovers ledger.
+  rollover: integer("rollover", { mode: "boolean" }).notNull().default(false),
 });
+
+/**
+ * Per-category, per-month carry ledger backing envelope/rollover budgets. One
+ * row records how much unused (positive) or overspent (negative) balance rolled
+ * into `month` for a category. An envelope's available = budget + carryIn −
+ * spent; carryOut = available then seeds the next month's carryIn. Persisted so
+ * the running envelope balance stays auditable rather than recomputed blindly.
+ */
+export const budgetRollovers = sqliteTable(
+  "budget_rollovers",
+  {
+    id: text("id").primaryKey(),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "cascade" }),
+    month: text("month").notNull(), // YYYY-MM
+    carryIn: real("carry_in").notNull().default(0),
+  },
+  (t) => [uniqueIndex("budget_rollover_cat_month_idx").on(t.categoryId, t.month)],
+);
 
 /** Rolling monthly budget scoped to a tag — overlaps category budgets intentionally. */
 export const tagBudgets = sqliteTable("tag_budgets", {
@@ -418,6 +441,7 @@ export type BalanceSnapshot = typeof balanceSnapshots.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
 export type Budget = typeof budgets.$inferSelect;
+export type BudgetRollover = typeof budgetRollovers.$inferSelect;
 export type TagBudget = typeof tagBudgets.$inferSelect;
 export type TagRule = typeof tagRules.$inferSelect;
 export type RecurringStream = typeof recurringStreams.$inferSelect;

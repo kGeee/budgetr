@@ -29,7 +29,7 @@ const transferPrimaries = sql`
  * category id: the user's override if set, else the category mapped to its
  * Plaid primary. Alias-parameterized so it composes inside aliased joins/subqueries.
  */
-function effectiveCatId(alias: string) {
+export function effectiveCatId(alias: string) {
   const a = sql.raw(alias);
   return sql`COALESCE(
     ${a}.user_category_id,
@@ -206,6 +206,74 @@ export function getBudgetsWithSpend(): BudgetRow[] {
         budget,
         spent,
         remaining: budget == null ? null : budget - spent,
+      };
+    });
+}
+
+/** A BudgetRow plus its envelope/rollover state for the budget month. */
+export type EnvelopeBudgetRow = BudgetRow & {
+  rollover: boolean;
+  carryIn: number; // balance carried into this month (+ unused, − overspent)
+  available: number; // budget + carryIn − spent — what's actually spendable
+  carryOut: number; // projected balance rolling into next month (= available)
+};
+
+/**
+ * Envelope view of every spending category: the plain budget/spend of
+ * getBudgetsWithSpend plus the rollover toggle and the persisted carry-in for
+ * getBudgetMonth(). available = budget + carryIn − spent; carryOut = available
+ * (what next month would inherit). Non-rollover categories read carryIn 0, so
+ * their available/carryOut collapse to the usual remaining.
+ */
+export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
+  const month = getBudgetMonth();
+  return db
+    .all<{
+      categoryId: string;
+      name: string;
+      icon: string | null;
+      budget: number | null;
+      rollover: number;
+      carryIn: number;
+      spent: number;
+    }>(
+      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
+             b.amount AS budget,
+             COALESCE(b.rollover, 0) AS rollover,
+             COALESCE((
+               SELECT r.carry_in FROM budget_rollovers r
+               WHERE r.category_id = cat.id AND r.month = ${month}
+             ), 0) AS carryIn,
+             COALESCE((
+               SELECT SUM(t.amount) FROM transactions t
+               WHERE t.pending = 0 AND t.amount > 0
+                 AND ${effectiveCatId("t")} = cat.id
+                 AND substr(t.date, 1, 7) = ${month}
+             ), 0) AS spent
+          FROM categories cat
+          LEFT JOIN budgets b ON b.category_id = cat.id
+          WHERE cat.archived = 0 AND cat."group" = 'spending'
+          ORDER BY (b.amount IS NULL), spent DESC, cat.sort_order ASC`,
+    )
+    .map((r) => {
+      const budget = r.budget == null ? null : Number(r.budget);
+      const spent = Number(r.spent);
+      const rollover = Boolean(r.rollover);
+      const carryIn = rollover ? Number(r.carryIn) : 0;
+      // available/carryOut only meaningful once a budget exists; keep them at 0
+      // for unbudgeted rows so the UI shows "No budget" as before.
+      const available = budget == null ? 0 : budget + carryIn - spent;
+      return {
+        categoryId: r.categoryId,
+        name: r.name,
+        icon: r.icon,
+        budget,
+        spent,
+        remaining: budget == null ? null : budget - spent,
+        rollover,
+        carryIn,
+        available,
+        carryOut: available,
       };
     });
 }
