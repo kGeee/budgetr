@@ -651,6 +651,66 @@ export const savedFilters = sqliteTable(
   (t) => [index("saved_filters_created_idx").on(t.createdAt)],
 );
 
+/**
+ * Cached FX pairs from the rates source (Frankfurter). One row per
+ * `base → quote` pair; `rate` is how many units of `quote` equal one unit of
+ * `base`, `asOf` is when the source last quoted it. Refreshed opportunistically
+ * (see lib/rates.ts) and read synchronously to convert any figure whose stored
+ * isoCurrencyCode differs from the chosen display currency.
+ */
+export const exchangeRates = sqliteTable(
+  "exchange_rates",
+  {
+    base: text("base").notNull(), // ISO 4217, e.g. USD
+    quote: text("quote").notNull(), // ISO 4217, e.g. EUR
+    rate: real("rate").notNull(), // 1 base = rate quote
+    asOf: integer("as_of", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.base, t.quote] })],
+);
+
+/**
+ * Generic key/value settings store. Used here for the display-currency
+ * preference (`displayCurrency`) and later for report-schedule config. Values
+ * are stored as text; callers own the (de)serialization.
+ */
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+});
+
+/**
+ * A user-created dashboard — a named, ordered collection of widgets that each
+ * render one of the app's existing charts/queries (net-worth, cashflow,
+ * spend-by-category, top vendors, daily-spend heatmap, budget summary). Isolated
+ * from the reporting/review tables so it can ship independently.
+ */
+export const dashboards = sqliteTable("dashboards", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }),
+});
+
+/**
+ * One widget on a dashboard. `type` selects which chart/query renders (see
+ * lib/queries.ts getWidgetData); `config` is opaque JSON the widget interprets
+ * (e.g. `{ "days": 30 }`, a category id, a month window).
+ */
+export const dashboardWidgets = sqliteTable(
+  "dashboard_widgets",
+  {
+    id: text("id").primaryKey(),
+    dashboardId: text("dashboard_id")
+      .notNull()
+      .references(() => dashboards.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    config: text("config"), // JSON: date range, category id, etc.
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [index("dashboard_widgets_dash_idx").on(t.dashboardId)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -683,3 +743,7 @@ export type TransactionSplit = typeof transactionSplits.$inferSelect;
 export type TransactionMatch = typeof transactionMatches.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
 export type SavedFilter = typeof savedFilters.$inferSelect;
+export type ExchangeRate = typeof exchangeRates.$inferSelect;
+export type AppSetting = typeof appSettings.$inferSelect;
+export type Dashboard = typeof dashboards.$inferSelect;
+export type DashboardWidget = typeof dashboardWidgets.$inferSelect;

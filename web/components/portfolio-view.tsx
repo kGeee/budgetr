@@ -20,7 +20,7 @@ import {
   EditManualHoldingButton,
 } from "@/components/manual-holding-dialog";
 import { setHoldingSector } from "@/lib/actions";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatMoney } from "@/lib/utils";
 import {
   classifyOptionLegs,
   daysToExpiry,
@@ -954,10 +954,10 @@ function TickerHistoryPanel({
                     {t.quantity != null ? t.quantity.toLocaleString() : "—"}
                   </td>
                   <td className="mono px-5 py-2.5 text-right">
-                    {t.price != null ? formatCurrency(t.price, t.currency ?? currency) : "—"}
+                    {t.price != null ? formatMoney(t.price, t.currency ?? currency) : "—"}
                   </td>
                   <td className="mono px-5 py-2.5 text-right">
-                    {t.amount != null ? formatCurrency(t.amount, t.currency ?? currency) : "—"}
+                    {t.amount != null ? formatMoney(t.amount, t.currency ?? currency) : "—"}
                   </td>
                 </tr>
               ))}
@@ -1085,13 +1085,13 @@ function OptionGroupRow({
                         <p className="text-xs text-[var(--muted)]">{st.detail}</p>
                       </div>
                       <div className="shrink-0 text-right">
-                        <p className="mono text-sm">{formatCurrency(stValue, currency)}</p>
+                        <p className="mono text-sm">{formatMoney(stValue, currency)}</p>
                         {stPnl != null && (
                           <p
                             className={`mono text-xs ${stPnl >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
                           >
                             {stPnl >= 0 ? "+" : "−"}
-                            {formatCurrency(Math.abs(stPnl), currency)}
+                            {formatMoney(Math.abs(stPnl), currency)}
                           </p>
                         )}
                       </div>
@@ -1113,7 +1113,7 @@ function OptionGroupRow({
                               </span>
                             </span>
                             <span className="mono shrink-0 text-[var(--paper)]">
-                              {formatCurrency(effectiveValue(h, quotes), currency)}
+                              {formatMoney(effectiveValue(h, quotes), currency)}
                             </span>
                           </li>
                         );
@@ -1156,7 +1156,7 @@ function PriceCell({ price, currency }: { price: number; currency: string }) {
     <td
       className={`mono px-3 py-3.5 text-right transition-colors duration-200 ${color}`}
     >
-      {formatCurrency(price, currency)}
+      {formatMoney(price, currency)}
     </td>
   );
 }
@@ -1240,14 +1240,14 @@ function GainBreakdownModal({
                       <span className="ml-2 text-[var(--muted)]">{h.securityName}</span>
                     </td>
                     <td className="mono px-5 py-2.5 text-right">
-                      {formatCurrency(value, h.currency ?? "USD")}
+                      {formatMoney(value, h.currency)}
                     </td>
                     <td className="mono px-5 py-2.5 text-right text-[var(--muted)]">
-                      {cost != null ? formatCurrency(cost, h.currency ?? "USD") : "—"}
+                      {cost != null ? formatMoney(cost, h.currency) : "—"}
                     </td>
                     <td className={`mono px-5 py-2.5 text-right ${pnl != null ? color : "text-[var(--faint)]"}`}>
                       {pnl != null
-                        ? `${pos ? "+" : "−"}${formatCurrency(Math.abs(pnl), h.currency ?? "USD")}`
+                        ? `${pos ? "+" : "−"}${formatMoney(Math.abs(pnl), h.currency)}`
                         : "—"}
                     </td>
                     <td className={`mono px-5 py-2.5 text-right ${pct != null ? color : "text-[var(--faint)]"}`}>
@@ -1653,19 +1653,19 @@ function MetricCells({
           case "costBasis":
             return (
               <td key={c.key} className={`${numRight} text-[var(--muted)]`}>
-                {m.costBasis != null ? formatCurrency(m.costBasis, m.currency) : "—"}
+                {m.costBasis != null ? formatMoney(m.costBasis, m.currency) : "—"}
               </td>
             );
           case "avgCost":
             return (
               <td key={c.key} className={`${numRight} text-[var(--muted)]`}>
-                {m.avgCost != null ? formatCurrency(m.avgCost, m.currency) : "—"}
+                {m.avgCost != null ? formatMoney(m.avgCost, m.currency) : "—"}
               </td>
             );
           case "value":
             return (
               <td key={c.key} className={numRight}>
-                {formatCurrency(m.value, m.currency)}
+                {formatMoney(m.value, m.currency)}
               </td>
             );
           case "weight":
@@ -1688,7 +1688,7 @@ function SignedCurrencyCell({ amount, currency }: { amount: number | null; curre
   return (
     <td className={`mono px-3 py-3.5 text-right ${color}`}>
       {positive ? "+" : "−"}
-      {formatCurrency(Math.abs(amount), currency)}
+      {formatMoney(Math.abs(amount), currency)}
     </td>
   );
 }
@@ -1813,7 +1813,7 @@ function PnlCell({
     <td className={`mono px-3 py-3.5 text-right ${color}`}>
       <div>
         {positive ? "+" : "−"}
-        {formatCurrency(Math.abs(pnl), currency)}
+        {formatMoney(Math.abs(pnl), currency)}
       </div>
       {pct != null && (
         <div className="text-xs opacity-80">

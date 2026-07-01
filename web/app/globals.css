@@ -182,3 +182,45 @@ body::after {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Print-only content is hidden on screen; shown only when printing. */
+.print-only {
+  display: none;
+}
+
+/*
+  Print / save-as-PDF. The printable /report route nests inside the app shell, so
+  when printing we strip the app chrome (sidebar, sticky header, and anything
+  tagged `.no-print`), drop page padding, and preserve the theme's colours so the
+  charts stay legible (print-color-adjust: exact keeps backgrounds from being
+  dropped by the browser). Cards avoid breaking across pages.
+*/
+@media print {
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block;
+  }
+  html,
+  body {
+    background: var(--ink);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .report-page {
+    max-width: none !important;
+  }
+  .break-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  @page {
+    margin: 14mm;
+  }
+}
