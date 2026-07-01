@@ -132,6 +132,44 @@ export function getTransactionSplits(txnId: string): TransactionSplitRow[] {
     }));
 }
 
+export type AttachmentRow = {
+  id: string;
+  transactionId: string;
+  mimeType: string | null;
+  size: number | null;
+  originalName: string | null;
+  createdAt: number; // epoch ms
+  /** True when the file is a raster/vector image (drives inline thumbnails). */
+  isImage: boolean;
+};
+
+/** Metadata for the files attached to one transaction (newest first). */
+export function getAttachments(txnId: string): AttachmentRow[] {
+  return db
+    .all<{
+      id: string;
+      transactionId: string;
+      mimeType: string | null;
+      size: number | null;
+      originalName: string | null;
+      createdAt: number;
+    }>(sql`
+      SELECT id, transaction_id AS transactionId, mime_type AS mimeType,
+             size, original_name AS originalName, created_at AS createdAt
+      FROM attachments
+      WHERE transaction_id = ${txnId}
+      ORDER BY created_at DESC, id DESC`)
+    .map((r) => ({
+      id: r.id,
+      transactionId: r.transactionId,
+      mimeType: r.mimeType,
+      size: r.size,
+      originalName: r.originalName,
+      createdAt: Number(r.createdAt) * 1000, // stored as unix seconds (timestamp mode)
+      isImage: !!r.mimeType && r.mimeType.startsWith("image/"),
+    }));
+}
+
 export type NetWorth = { assets: number; liabilities: number; net: number };
 
 export function getNetWorth(): NetWorth {
@@ -476,6 +514,8 @@ export type TransactionRow = {
   recurring: boolean;
   /** Number of category splits overlaying this transaction (0 = unsplit). */
   splitCount: number;
+  /** Number of receipt/invoice files attached (0 = none). Drives the paperclip. */
+  attachmentCount: number;
   /** True when this transaction is a leg of a confirmed refund/transfer match. */
   matched: boolean;
   tags: TxTag[];
@@ -501,6 +541,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     notes: string | null;
     recurring: number;
     splitCount: number;
+    attachmentCount: number;
     matched: number;
     tagsJson: string | null;
   }>(sql`
@@ -510,6 +551,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
            cat.id AS categoryId, cat.name AS categoryName, cat.icon AS categoryIcon,
            t.reviewed AS reviewed, t.notes AS notes,
            (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) AS splitCount,
+           (SELECT COUNT(*) FROM attachments at WHERE at.transaction_id = t.id) AS attachmentCount,
            ${isConfirmedMatch("t")} AS matched,
            EXISTS(SELECT 1 FROM recurring_streams r
                   WHERE r.is_active = 1 AND r.merchant_name IS NOT NULL
@@ -542,6 +584,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     notes: r.notes,
     recurring: !!r.recurring,
     splitCount: Number(r.splitCount),
+    attachmentCount: Number(r.attachmentCount),
     matched: !!r.matched,
     tags: r.tagsJson ? (JSON.parse(r.tagsJson) as TxTag[]) : [],
   }));

@@ -415,6 +415,30 @@ export const transactionMatches = sqliteTable(
   ],
 );
 
+/**
+ * Receipt/invoice files attached to a transaction. The bytes live on disk under
+ * ATTACHMENTS_DIR (see lib/attachments.ts) — outside public/ — with one metadata
+ * row per file here. `file_path` is the absolute on-disk path the streaming API
+ * route (app/api/attachments/[id]) reads back. Additive overlay: a transaction
+ * with no rows here behaves exactly as before. The notes half of the feature
+ * reuses the existing transactions.notes column.
+ */
+export const attachments = sqliteTable(
+  "attachments",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    filePath: text("file_path").notNull(),
+    mimeType: text("mime_type"),
+    size: integer("size"),
+    originalName: text("original_name"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("attachments_txn_idx").on(t.transactionId)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -434,3 +458,4 @@ export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
 export type TransactionSplit = typeof transactionSplits.$inferSelect;
 export type TransactionMatch = typeof transactionMatches.$inferSelect;
+export type Attachment = typeof attachments.$inferSelect;

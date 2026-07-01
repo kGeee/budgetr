@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
+  attachments,
   budgets,
   categories,
   holdingCostBasisOverrides,
@@ -22,17 +23,20 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { applyTagRules } from "@/lib/tag-rules";
 import { cleanTransactionName } from "@/lib/utils";
 import {
+  getAttachments,
   getCategoryDailySpend,
   getCategoryMonthlyBreakdown,
   getCategoryTransactions,
   getTransactionSplits,
   getTransactionsByDate,
+  type AttachmentRow,
   type CategoryDay,
   type CategoryMonth,
   type TransactionRow,
   type TransactionSplitRow,
 } from "@/lib/queries";
 import { getMatchCounterpart, type MatchCounterpart, type MatchKind } from "@/lib/matching";
+import { deleteAttachmentFile, saveAttachmentFile } from "@/lib/attachments";
 
 /**
  * Server Actions for budgetr's user overlay (categories, review status, tags,
@@ -266,6 +270,71 @@ export async function setTransactionSplits(
 /** Drop every split on a transaction; it reverts to single-category resolution. */
 export async function clearSplits(txnId: string) {
   db.delete(transactionSplits).where(eq(transactionSplits.transactionId, txnId)).run();
+  revalidateAll();
+}
+
+// ── Receipt attachments ───────────────────────────────────────────────────────
+
+/** Read-only loader so the detail drawer can lazily fetch a transaction's files. */
+export async function loadAttachments(txnId: string): Promise<AttachmentRow[]> {
+  return getAttachments(txnId);
+}
+
+/**
+ * Upload a receipt/invoice file for a transaction. The bytes are written to disk
+ * under ATTACHMENTS_DIR (outside public/) and a metadata row records where. The
+ * FormData is expected to carry `transactionId` and a `file` File. Returns a
+ * simple result the client drawer can surface without throwing.
+ */
+export async function uploadAttachment(
+  form: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const txnId = String(form.get("transactionId") ?? "");
+  const file = form.get("file");
+  if (!txnId) return { ok: false, error: "Missing transaction." };
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "Choose a file to upload." };
+  }
+  // Guard against runaway uploads (25 MB is generous for a receipt scan/PDF).
+  if (file.size > 25 * 1024 * 1024) {
+    return { ok: false, error: "File is too large (max 25 MB)." };
+  }
+
+  const txn = db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(eq(transactions.id, txnId))
+    .get();
+  if (!txn) return { ok: false, error: "Transaction not found." };
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const filePath = saveAttachmentFile(buffer, file.name);
+
+  db.insert(attachments)
+    .values({
+      id: `att_${crypto.randomUUID().slice(0, 8)}`,
+      transactionId: txnId,
+      filePath,
+      mimeType: file.type || null,
+      size: file.size,
+      originalName: file.name || null,
+      createdAt: new Date(),
+    })
+    .run();
+
+  revalidateAll();
+  return { ok: true };
+}
+
+/** Delete an attachment — remove the on-disk file, then its metadata row. */
+export async function deleteAttachment(id: string) {
+  const row = db
+    .select({ filePath: attachments.filePath })
+    .from(attachments)
+    .where(eq(attachments.id, id))
+    .get();
+  if (row) deleteAttachmentFile(row.filePath);
+  db.delete(attachments).where(eq(attachments.id, id)).run();
   revalidateAll();
 }
 

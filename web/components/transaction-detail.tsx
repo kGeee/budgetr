@@ -2,14 +2,29 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight, Check, Plus, Repeat, Split, Trash2, Unlink, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Check,
+  Download,
+  FileText,
+  Paperclip,
+  Plus,
+  Repeat,
+  Split,
+  Trash2,
+  Unlink,
+  Upload,
+  X,
+} from "lucide-react";
 import { CategoryIcon } from "@/components/category-pill";
 import {
   addTagToTransaction,
   applyCategoryToVendor,
   clearSplits,
   createTagRuleFromTransaction,
+  deleteAttachment,
   getVendorReclassCount,
+  loadAttachments,
   loadMatchCounterpart,
   loadTransactionSplits,
   removeTagFromTransaction,
@@ -18,9 +33,10 @@ import {
   setTransactionNotes,
   setTransactionSplits,
   unmatch,
+  uploadAttachment,
 } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
-import type { CategoryRow, TransactionRow } from "@/lib/queries";
+import type { AttachmentRow, CategoryRow, TransactionRow } from "@/lib/queries";
 import type { MatchCounterpart } from "@/lib/matching";
 
 export function TransactionDetail({
@@ -243,6 +259,12 @@ export function TransactionDetail({
               <Field label="Note">
                 {/* key remounts the editor per transaction → fresh initial value, no effect sync */}
                 <NotesEditor key={t.id} transaction={t} onAct={act} />
+              </Field>
+
+              {/* Receipts */}
+              <Field label="Receipts">
+                {/* key remounts per transaction → fresh load of that txn's files */}
+                <AttachmentsEditor key={t.id} transaction={t} />
               </Field>
             </div>
 
@@ -664,5 +686,167 @@ function NotesEditor({
       placeholder="Add a note…"
       className="w-full resize-none rounded-lg border border-line bg-[var(--ink)] px-3 py-2 text-sm outline-none focus:border-[var(--brass-dim)]"
     />
+  );
+}
+
+function formatBytes(bytes: number | null): string {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Upload receipt/invoice files to a transaction and list them with inline image
+ * thumbnails (served from the auth-scoped /api/attachments route), a download
+ * link, and per-file delete. Loads existing files lazily — the component is
+ * keyed by transaction id, so mount === "this txn's attachments".
+ */
+function AttachmentsEditor({ transaction }: { transaction: TransactionRow }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<AttachmentRow[]>([]);
+  const [loading, setLoading] = useState(transaction.attachmentCount > 0);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (transaction.attachmentCount === 0) {
+      setLoading(false);
+      return;
+    }
+    let alive = true;
+    loadAttachments(transaction.id).then((rows) => {
+      if (!alive) return;
+      setFiles(rows);
+      setLoading(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [transaction.id, transaction.attachmentCount]);
+
+  function upload(file: File) {
+    setError(null);
+    const form = new FormData();
+    form.set("transactionId", transaction.id);
+    form.set("file", file);
+    start(async () => {
+      const res = await uploadAttachment(form);
+      if (!res.ok) {
+        setError(res.error ?? "Upload failed.");
+        return;
+      }
+      setFiles(await loadAttachments(transaction.id));
+      router.refresh();
+    });
+  }
+
+  function remove(id: string) {
+    setError(null);
+    start(async () => {
+      await deleteAttachment(id);
+      setFiles((prev) => prev.filter((f) => f.id !== id));
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {loading ? (
+        <p className="text-xs text-[var(--muted)]">Loading receipts…</p>
+      ) : (
+        files.length > 0 && (
+          <ul className="space-y-2">
+            {files.map((f) => (
+              <li
+                key={f.id}
+                className="flex items-center gap-3 rounded-lg border border-line bg-[var(--panel-2)] p-2"
+              >
+                <a
+                  href={`/api/attachments/${f.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-md border border-line bg-[var(--ink)] text-[var(--muted)]"
+                  title="Open"
+                >
+                  {f.isImage ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`/api/attachments/${f.id}`}
+                      alt={f.originalName ?? "receipt"}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <FileText size={18} />
+                  )}
+                </a>
+                <div className="min-w-0 flex-1">
+                  <a
+                    href={`/api/attachments/${f.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block truncate text-sm hover:text-[var(--brass)]"
+                    title={f.originalName ?? "attachment"}
+                  >
+                    {f.originalName ?? "attachment"}
+                  </a>
+                  <p className="mono text-[11px] text-[var(--muted)]">
+                    {[
+                      formatBytes(f.size),
+                      new Date(f.createdAt).toLocaleDateString(),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
+                <a
+                  href={`/api/attachments/${f.id}?download=1`}
+                  aria-label="Download"
+                  className="shrink-0 rounded-md p-1.5 text-[var(--faint)] hover:text-[var(--paper)]"
+                >
+                  <Download size={15} />
+                </a>
+                <button
+                  onClick={() => remove(f.id)}
+                  disabled={pending}
+                  aria-label="Delete attachment"
+                  className="shrink-0 rounded-md p-1.5 text-[var(--faint)] hover:text-[var(--coral)]"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      )}
+
+      {!loading && files.length === 0 && (
+        <p className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+          <Paperclip size={12} /> No receipts attached yet.
+        </p>
+      )}
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) upload(file);
+          e.target.value = ""; // allow re-selecting the same file
+        }}
+      />
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={pending}
+        className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-line px-3 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--brass-dim)] hover:text-[var(--paper)] disabled:opacity-50"
+      >
+        <Upload size={13} /> {pending ? "Uploading…" : "Attach receipt"}
+      </button>
+
+      {error && <p className="text-xs text-[var(--coral)]">{error}</p>}
+    </div>
   );
 }

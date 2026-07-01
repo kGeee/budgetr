@@ -78,6 +78,13 @@
       "when": 1782886840612,
       "tag": "0010_unique_albert_cleary",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1782887200402,
+      "tag": "0011_condemned_tyrannus",
+      "breakpoints": true
     }
   ]
 }

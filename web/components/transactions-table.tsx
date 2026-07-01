@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Split } from "lucide-react";
+import { Check, Paperclip, Split } from "lucide-react";
 import { CategoryPill } from "@/components/category-pill";
 import { TransactionDetail } from "@/components/transaction-detail";
 import { setReviewed } from "@/lib/actions";
@@ -110,6 +110,15 @@ export function TransactionsTable({
                         />
                       )}
                       <span className="font-medium">{t.displayName}</span>
+                      {t.attachmentCount > 0 && (
+                        <Paperclip
+                          size={13}
+                          className="shrink-0 text-[var(--muted)]"
+                          aria-label={`${t.attachmentCount} attached ${
+                            t.attachmentCount === 1 ? "receipt" : "receipts"
+                          }`}
+                        />
+                      )}
                       {t.tags.map((tag) => (
                         <span
                           key={tag.id}
