@@ -966,18 +966,37 @@ export type TagRuleRow = {
   pattern: string;
   label: string | null;
   tagName: string;
+  matchType: string; // contains | exact | regex
+  minAmount: number | null;
+  maxAmount: number | null;
+  accountId: string | null;
+  accountName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
   matches: number;
 };
 
-/** Auto-tag rules with the count of transactions each currently matches. */
+/**
+ * Auto-tag rules with the count of transactions each currently matches. The
+ * count uses the LIKE idiom for every rule regardless of match type, so it is
+ * approximate for `regex`/`exact` rules (a cheap indicator, not the exact set).
+ */
 export function getTagRules(): TagRuleRow[] {
   return db.all<TagRuleRow>(sql`
     SELECT r.id AS id, r.pattern AS pattern, r.label AS label, tg.name AS tagName,
+      r.match_type AS matchType, r.min_amount AS minAmount, r.max_amount AS maxAmount,
+      r.account_id AS accountId, a.name AS accountName,
+      r.category_id AS categoryId, cat.name AS categoryName,
       (SELECT COUNT(*) FROM transactions t
-        WHERE lower(COALESCE(t.merchant_name,'')) LIKE '%' || r.pattern || '%'
-           OR lower(t.name) LIKE '%' || r.pattern || '%') AS matches
+        WHERE (lower(COALESCE(t.merchant_name,'')) LIKE '%' || r.pattern || '%'
+           OR lower(t.name) LIKE '%' || r.pattern || '%')
+          AND (r.account_id IS NULL OR t.account_id = r.account_id)
+          AND (r.min_amount IS NULL OR t.amount >= r.min_amount)
+          AND (r.max_amount IS NULL OR t.amount <= r.max_amount)) AS matches
     FROM tag_rules r
     JOIN tags tg ON tg.id = r.tag_id
+    LEFT JOIN accounts a ON a.id = r.account_id
+    LEFT JOIN categories cat ON cat.id = r.category_id
     ORDER BY r.created_at DESC`);
 }
 

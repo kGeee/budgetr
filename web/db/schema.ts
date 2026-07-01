@@ -140,8 +140,16 @@ export const tagBudgets = sqliteTable("tag_budgets", {
 });
 
 /**
- * Auto-tagging rule: when a transaction's merchant/name contains `pattern`
- * (stored lowercased), apply `tagId`. Applied on sync and backfilled on create.
+ * Auto-tagging rule: when a transaction matches `pattern` (per `matchType`)
+ * and every set condition (amount bounds, account scope), apply `tagId` and —
+ * when `categoryId` is set — also assign that category. Applied on sync and
+ * backfilled on create.
+ *
+ * `matchType` selects how `pattern` is tested against the merchant/name:
+ *  - `contains` (default): substring — the fast SQL LIKE path, pattern lowercased.
+ *  - `exact`: full-string equality (case-insensitive).
+ *  - `regex`: JS regular expression (SQLite can't do this, so these rules drop
+ *    to JS evaluation in applyTagRules).
  */
 export const tagRules = sqliteTable(
   "tag_rules",
@@ -152,6 +160,19 @@ export const tagRules = sqliteTable(
     tagId: text("tag_id")
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
+    // contains | exact | regex — how `pattern` is tested (see doc above).
+    matchType: text("match_type").notNull().default("contains"),
+    // Optional inclusive amount bounds (Plaid sign: positive = spending).
+    minAmount: real("min_amount"),
+    maxAmount: real("max_amount"),
+    // Optional scope: only transactions in this account.
+    accountId: text("account_id").references(() => accounts.id, {
+      onDelete: "set null",
+    }),
+    // Optional: also assign this category to matching transactions.
+    categoryId: text("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
   (t) => [index("tag_rules_tag_idx").on(t.tagId)],

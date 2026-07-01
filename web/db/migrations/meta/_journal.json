@@ -92,6 +92,13 @@
       "when": 1782887656300,
       "tag": "0012_melted_shatterstar",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1782887948622,
+      "tag": "0013_bored_shatterstar",
+      "breakpoints": true
     }
   ]
 }

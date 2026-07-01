@@ -462,14 +462,77 @@ export async function createTagRuleFromTransaction(txnId: string, tagName: strin
   revalidateAll();
 }
 
-/** Manually create a rule: when merchant/name contains `pattern`, apply `tagName`. */
-export async function createTagRule(pattern: string, tagName: string) {
-  const p = pattern.trim().toLowerCase();
+/** Optional conditions layered on top of the pattern/tag of a rule. */
+export type TagRuleOptions = {
+  matchType?: "contains" | "exact" | "regex";
+  minAmount?: number | null;
+  maxAmount?: number | null;
+  accountId?: string | null;
+  categoryId?: string | null;
+};
+
+// `contains`/`exact` match on the lowercased vendor signal, so store the pattern
+// lowercased; `regex` is tested case-insensitively in JS, so keep it verbatim.
+function normalizePattern(pattern: string, matchType: string): string {
+  return matchType === "regex" ? pattern.trim() : pattern.trim().toLowerCase();
+}
+
+/**
+ * Manually create a rule: when a transaction matches `pattern` (per matchType)
+ * and every set condition, apply `tagName` (and optionally a category).
+ */
+export async function createTagRule(
+  pattern: string,
+  tagName: string,
+  opts: TagRuleOptions = {},
+) {
+  const matchType = opts.matchType ?? "contains";
+  const p = normalizePattern(pattern, matchType);
   const t = tagName.trim();
   if (!p || !t) return;
   const tagId = ensureTag(t);
   db.insert(tagRules)
-    .values({ id: `rule_${crypto.randomUUID().slice(0, 8)}`, pattern: p, label: pattern.trim(), tagId, createdAt: new Date() })
+    .values({
+      id: `rule_${crypto.randomUUID().slice(0, 8)}`,
+      pattern: p,
+      label: pattern.trim(),
+      tagId,
+      matchType,
+      minAmount: opts.minAmount ?? null,
+      maxAmount: opts.maxAmount ?? null,
+      accountId: opts.accountId ?? null,
+      categoryId: opts.categoryId ?? null,
+      createdAt: new Date(),
+    })
+    .run();
+  applyTagRules();
+  revalidateAll();
+}
+
+/** Edit an existing rule's pattern, tag, and conditions, then re-backfill. */
+export async function updateTagRule(
+  id: string,
+  pattern: string,
+  tagName: string,
+  opts: TagRuleOptions = {},
+) {
+  const matchType = opts.matchType ?? "contains";
+  const p = normalizePattern(pattern, matchType);
+  const t = tagName.trim();
+  if (!p || !t) return;
+  const tagId = ensureTag(t);
+  db.update(tagRules)
+    .set({
+      pattern: p,
+      label: pattern.trim(),
+      tagId,
+      matchType,
+      minAmount: opts.minAmount ?? null,
+      maxAmount: opts.maxAmount ?? null,
+      accountId: opts.accountId ?? null,
+      categoryId: opts.categoryId ?? null,
+    })
+    .where(eq(tagRules.id, id))
     .run();
   applyTagRules();
   revalidateAll();
