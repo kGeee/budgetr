@@ -822,6 +822,105 @@ export function getTransactionsToReview(limit = 100): TransactionRow[] {
   return selectTransactions(sql`t.reviewed = 0 AND t.pending = 0`, limit);
 }
 
+// ── History-based suggestions ───────────────────────────────────────────────────
+
+/**
+ * Group-aware vendor match for a *single* transaction id — mirrors the logic in
+ * getVendorReclassCount. Resolves the transaction's vendor key, expands it to
+ * the whole vendor group when it belongs to one, and returns a `t.`-aliased SQL
+ * predicate matching every transaction from that vendor. Returns null when the
+ * transaction doesn't exist. The predicate reuses `vendorKeyExpr` (alias `t`),
+ * so splice it into a query that aliases the transactions table as `t`.
+ */
+function vendorMatchForTxn(
+  txnId: string,
+): { match: ReturnType<typeof sql>; vendorKey: string } | null {
+  const tx = db.get<{ vendorKey: string }>(
+    sql`SELECT COALESCE(NULLIF(merchant_name, ''), name) AS vendorKey
+        FROM transactions WHERE id = ${txnId}`,
+  );
+  if (!tx) return null;
+
+  const grp = db.get<{ groupId: string }>(
+    sql`SELECT group_id AS groupId FROM vendor_group_members WHERE vendor_key = ${tx.vendorKey}`,
+  );
+  const match = grp
+    ? sql`${vendorKeyExpr} IN (SELECT vendor_key FROM vendor_group_members WHERE group_id = ${grp.groupId})`
+    : sql`${vendorKeyExpr} = ${tx.vendorKey}`;
+  return { match, vendorKey: tx.vendorKey };
+}
+
+export type CategorySuggestion = {
+  categoryId: string;
+  categoryName: string;
+  icon: string | null;
+  /** How many of this vendor's other transactions the user filed under it. */
+  count: number;
+  /** Share of this vendor's user-classified history that used it (0–1). */
+  confidence: number;
+};
+
+/**
+ * ML-lite category suggestion: how did the user previously classify this vendor?
+ * Counts the *explicit* user category overrides on this vendor's OTHER (group-aware)
+ * transactions and returns the most frequent one with its count and confidence
+ * (its share of all this vendor's classified history), or null when there's no
+ * history to learn from. Pure read-model over the existing overlay — no schema.
+ */
+export function getCategorySuggestion(txnId: string): CategorySuggestion | null {
+  const v = vendorMatchForTxn(txnId);
+  if (!v) return null;
+
+  const rows = db.all<{ categoryId: string; categoryName: string; icon: string | null; n: number }>(
+    sql`SELECT t.user_category_id AS categoryId, cat.name AS categoryName, cat.icon AS icon,
+               COUNT(*) AS n
+        FROM transactions t
+        JOIN categories cat ON cat.id = t.user_category_id
+        WHERE t.id != ${txnId} AND t.pending = 0 AND cat.archived = 0 AND ${v.match}
+        GROUP BY t.user_category_id
+        ORDER BY n DESC, categoryName ASC`,
+  );
+  if (rows.length === 0) return null;
+
+  const total = rows.reduce((a, r) => a + Number(r.n), 0);
+  const top = rows[0];
+  const count = Number(top.n);
+  return {
+    categoryId: top.categoryId,
+    categoryName: top.categoryName,
+    icon: top.icon,
+    count,
+    confidence: count / total,
+  };
+}
+
+export type TagSuggestion = { id: string; name: string; color: string | null; count: number };
+
+/**
+ * The tags most frequently applied to this vendor's past (group-aware)
+ * transactions, excluding any already on this transaction — the top `limit`,
+ * most-used first. Empty when the vendor has no tag history left to suggest.
+ */
+export function getTagSuggestions(txnId: string, limit = 4): TagSuggestion[] {
+  const v = vendorMatchForTxn(txnId);
+  if (!v) return [];
+
+  return db
+    .all<{ id: string; name: string; color: string | null; count: number }>(
+      sql`SELECT tg.id AS id, tg.name AS name, tg.color AS color, COUNT(*) AS count
+          FROM transactions t
+          JOIN transaction_tags tt ON tt.transaction_id = t.id
+          JOIN tags tg ON tg.id = tt.tag_id
+          WHERE t.id != ${txnId} AND ${v.match}
+            AND tt.tag_id NOT IN
+              (SELECT tag_id FROM transaction_tags WHERE transaction_id = ${txnId})
+          GROUP BY tg.id
+          ORDER BY count DESC, tg.name ASC
+          LIMIT ${limit}`,
+    )
+    .map((r) => ({ id: r.id, name: r.name, color: r.color, count: Number(r.count) }));
+}
+
 // ── Category drill-down ───────────────────────────────────────────────────────
 
 /** Archived categories (for the restore UI), grouped then alphabetical. */

@@ -10,6 +10,7 @@ import {
   Paperclip,
   Plus,
   Repeat,
+  Sparkles,
   Split,
   Trash2,
   Unlink,
@@ -32,11 +33,18 @@ import {
   setTransactionCategory,
   setTransactionNotes,
   setTransactionSplits,
+  suggestForTransaction,
   unmatch,
   uploadAttachment,
 } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
-import type { AttachmentRow, CategoryRow, TransactionRow } from "@/lib/queries";
+import type {
+  AttachmentRow,
+  CategoryRow,
+  CategorySuggestion,
+  TagSuggestion,
+  TransactionRow,
+} from "@/lib/queries";
 import type { MatchCounterpart } from "@/lib/matching";
 
 export function TransactionDetail({
@@ -65,6 +73,25 @@ export function TransactionDetail({
     setOfferTxnId(t?.id);
     setCatOffer(null);
   }
+
+  // History-based category/tag suggestions, fetched lazily when a txn opens.
+  const txnId = t?.id;
+  const [catSuggestion, setCatSuggestion] = useState<CategorySuggestion | null>(null);
+  const [tagSuggestions, setTagSuggestions] = useState<TagSuggestion[]>([]);
+  useEffect(() => {
+    if (!txnId) return;
+    let alive = true;
+    setCatSuggestion(null);
+    setTagSuggestions([]);
+    suggestForTransaction(txnId).then((s) => {
+      if (!alive) return;
+      setCatSuggestion(s.category);
+      setTagSuggestions(s.tags);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [txnId]);
 
   // Close on Escape.
   useEffect(() => {
@@ -160,6 +187,34 @@ export function TransactionDetail({
               {/* Category */}
               <Field label="Category">
                 <div className="space-y-2.5">
+                  {catSuggestion &&
+                    catSuggestion.categoryId !== t.categoryId &&
+                    t.splitCount === 0 && (
+                      <button
+                        disabled={pending}
+                        onClick={() => {
+                          setCatSuggestion(null);
+                          changeCategory(catSuggestion.categoryId);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-3 py-2 text-left text-xs transition hover:brightness-110 disabled:opacity-50"
+                      >
+                        <Sparkles size={13} className="shrink-0 text-[var(--brass)]" />
+                        <span className="min-w-0 flex-1 text-[var(--muted)]">
+                          Suggested:{" "}
+                          <span className="font-medium text-[var(--paper)]">
+                            {catSuggestion.categoryName}
+                          </span>{" "}
+                          <span className="text-[var(--faint)]">
+                            ({Math.round(catSuggestion.confidence * 100)}% of{" "}
+                            {catSuggestion.count} past)
+                          </span>
+                        </span>
+                        <span className="shrink-0 rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[#1a1505]">
+                          Apply
+                        </span>
+                      </button>
+                    )}
+
                   <div className="flex items-center gap-2">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--brass)]">
                       <CategoryIcon icon={t.categoryIcon} size={15} />
@@ -252,7 +307,12 @@ export function TransactionDetail({
 
               {/* Tags */}
               <Field label="Tags">
-                <TagEditor transaction={t} disabled={pending} onAct={act} />
+                <TagEditor
+                  transaction={t}
+                  disabled={pending}
+                  onAct={act}
+                  suggestions={tagSuggestions}
+                />
               </Field>
 
               {/* Notes */}
@@ -303,15 +363,22 @@ function TagEditor({
   transaction,
   disabled,
   onAct,
+  suggestions = [],
 }: {
   transaction: TransactionRow;
   disabled: boolean;
   onAct: (fn: () => Promise<unknown>) => void;
+  suggestions?: TagSuggestion[];
 }) {
   const [adding, setAdding] = useState(false);
   const [value, setValue] = useState("");
   // After adding a tag, offer to turn it into an always-tag-this-vendor rule.
   const [ruleOffer, setRuleOffer] = useState<string | null>(null);
+
+  // Hide suggestions already present on the txn (query excludes them too, but the
+  // list is fetched once so filter locally to reflect just-added tags instantly).
+  const applied = new Set(transaction.tags.map((tg) => tg.id));
+  const fresh = suggestions.filter((s) => !applied.has(s.id));
 
   function add() {
     const v = value.trim();
@@ -367,6 +434,24 @@ function TagEditor({
         </button>
       )}
     </div>
+
+    {fresh.length > 0 && (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1 text-[11px] text-[var(--faint)]">
+          <Sparkles size={11} className="text-[var(--brass)]" /> Suggested
+        </span>
+        {fresh.map((s) => (
+          <button
+            key={s.id}
+            disabled={disabled}
+            onClick={() => onAct(() => addTagToTransaction(transaction.id, s.name))}
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--brass-dim)] px-2.5 py-1 text-xs text-[var(--muted)] transition hover:bg-[color-mix(in_srgb,var(--brass)_10%,transparent)] hover:text-[var(--paper)] disabled:opacity-50"
+          >
+            <Plus size={12} /> {s.name}
+          </button>
+        ))}
+      </div>
+    )}
 
     {ruleOffer && (
       <div className="flex items-center justify-between gap-2 rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-3 py-2 text-xs">

@@ -27,12 +27,16 @@ import {
   getAttachments,
   getCategoryDailySpend,
   getCategoryMonthlyBreakdown,
+  getCategorySuggestion,
   getCategoryTransactions,
+  getTagSuggestions,
   getTransactionSplits,
   getTransactionsByDate,
   type AttachmentRow,
   type CategoryDay,
   type CategoryMonth,
+  type CategorySuggestion,
+  type TagSuggestion,
   type TransactionRow,
   type TransactionSplitRow,
   type TxnCriteria,
@@ -431,6 +435,19 @@ export async function removeTagFromTransaction(txnId: string, tagId: string) {
     .where(and(eq(transactionTags.transactionId, txnId), eq(transactionTags.tagId, tagId)))
     .run();
   revalidateAll();
+}
+
+// ── History-based suggestions ───────────────────────────────────────────────────
+
+export type TxnSuggestion = { category: CategorySuggestion | null; tags: TagSuggestion[] };
+
+/**
+ * Read-only loader wrapping the history-based category + tag suggestions so
+ * client components (the detail drawer, the review inbox) can fetch on open —
+ * the same lazy pattern as getVendorReclassCount. Nothing is mutated here.
+ */
+export async function suggestForTransaction(txnId: string): Promise<TxnSuggestion> {
+  return { category: getCategorySuggestion(txnId), tags: getTagSuggestions(txnId) };
 }
 
 // ── Auto-tag rules ────────────────────────────────────────────────────────────
