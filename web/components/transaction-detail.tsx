@@ -2,17 +2,20 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Plus, Repeat, X } from "lucide-react";
+import { Check, Plus, Repeat, Split, Trash2, X } from "lucide-react";
 import { CategoryIcon } from "@/components/category-pill";
 import {
   addTagToTransaction,
   applyCategoryToVendor,
+  clearSplits,
   createTagRuleFromTransaction,
   getVendorReclassCount,
+  loadTransactionSplits,
   removeTagFromTransaction,
   setReviewed,
   setTransactionCategory,
   setTransactionNotes,
+  setTransactionSplits,
 } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 import type { CategoryRow, TransactionRow } from "@/lib/queries";
@@ -144,9 +147,9 @@ export function TransactionDetail({
                     </span>
                     <select
                       value={t.categoryId ?? ""}
-                      disabled={pending}
+                      disabled={pending || t.splitCount > 0}
                       onChange={(e) => changeCategory(e.target.value || null)}
-                      className="min-w-0 flex-1 rounded-lg border border-line bg-[var(--ink)] px-3 py-2 text-sm outline-none focus:border-[var(--brass-dim)]"
+                      className="min-w-0 flex-1 rounded-lg border border-line bg-[var(--ink)] px-3 py-2 text-sm outline-none focus:border-[var(--brass-dim)] disabled:opacity-50"
                     >
                       <option value="">Auto (from Plaid)</option>
                       {categories.map((c) => (
@@ -156,6 +159,12 @@ export function TransactionDetail({
                       ))}
                     </select>
                   </div>
+
+                  {t.splitCount > 0 && (
+                    <p className="text-xs text-[var(--muted)]">
+                      Category is managed by the {t.splitCount} splits below.
+                    </p>
+                  )}
 
                   {catOffer && (
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-3 py-2 text-xs">
@@ -194,6 +203,12 @@ export function TransactionDetail({
                     </div>
                   )}
                 </div>
+              </Field>
+
+              {/* Split */}
+              <Field label="Split">
+                {/* key remounts per transaction → fresh load of that txn's splits */}
+                <SplitEditor key={t.id} transaction={t} categories={categories} />
               </Field>
 
               {/* Recurring */}
@@ -349,6 +364,199 @@ function TagEditor({
         </div>
       </div>
     )}
+    </div>
+  );
+}
+
+type SplitRow = { categoryId: string; amount: string };
+
+/**
+ * Divide one transaction's amount across categories. Works in absolute values
+ * (the parent transaction's sign is reapplied on save) with a live remainder so
+ * splits are only saveable once they reconcile to the full amount.
+ */
+function SplitEditor({
+  transaction,
+  categories,
+}: {
+  transaction: TransactionRow;
+  categories: CategoryRow[];
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [rows, setRows] = useState<SplitRow[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const total = Math.abs(transaction.amount);
+  const sign = transaction.amount < 0 ? -1 : 1;
+  const currency = transaction.currency ?? "USD";
+
+  // Load existing splits on mount (component is keyed by transaction id).
+  useEffect(() => {
+    if (transaction.splitCount === 0) return;
+    let alive = true;
+    loadTransactionSplits(transaction.id).then((splits) => {
+      if (!alive) return;
+      setRows(splits.map((s) => ({ categoryId: s.categoryId ?? "", amount: String(Math.abs(s.amount)) })));
+      setEditing(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [transaction.id, transaction.splitCount]);
+
+  const allocated = rows.reduce((a, r) => a + (parseFloat(r.amount) || 0), 0);
+  const remainder = Math.round((total - allocated) * 100) / 100;
+  const balanced = Math.abs(remainder) < 0.01;
+
+  function startSplit() {
+    setError(null);
+    // Seed with the current category taking the whole amount, plus an empty row.
+    setRows([
+      { categoryId: transaction.categoryId ?? "", amount: total.toFixed(2) },
+      { categoryId: "", amount: "" },
+    ]);
+    setEditing(true);
+  }
+
+  function update(i: number, patch: Partial<SplitRow>) {
+    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  }
+
+  function addRow() {
+    // Default the new row's amount to whatever's left to allocate.
+    const left = remainder > 0 ? remainder.toFixed(2) : "";
+    setRows((prev) => [...prev, { categoryId: "", amount: left }]);
+  }
+
+  function removeRow(i: number) {
+    setRows((prev) => prev.filter((_, j) => j !== i));
+  }
+
+  function save() {
+    setError(null);
+    const splits = rows
+      .filter((r) => (parseFloat(r.amount) || 0) !== 0)
+      .map((r) => ({
+        categoryId: r.categoryId || null,
+        amount: sign * (parseFloat(r.amount) || 0),
+      }));
+    if (splits.length === 0) {
+      setError("Add at least one split with an amount.");
+      return;
+    }
+    start(async () => {
+      const res = await setTransactionSplits(transaction.id, splits);
+      if (!res.ok) {
+        setError(res.error ?? "Could not save splits.");
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function stopSplitting() {
+    setError(null);
+    if (transaction.splitCount > 0) {
+      // Persisted splits — clear them in the DB.
+      start(async () => {
+        await clearSplits(transaction.id);
+        setRows([]);
+        setEditing(false);
+        router.refresh();
+      });
+    } else {
+      // Never saved — just drop the local draft.
+      setRows([]);
+      setEditing(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={startSplit}
+        className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-line px-3 py-1.5 text-xs text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+      >
+        <Split size={13} /> Split across categories
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-2.5">
+      <div className="space-y-2">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <select
+              value={r.categoryId}
+              disabled={pending}
+              onChange={(e) => update(i, { categoryId: e.target.value })}
+              className="min-w-0 flex-1 rounded-lg border border-line bg-[var(--ink)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--brass-dim)]"
+            >
+              <option value="">Uncategorized</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <input
+              value={r.amount}
+              disabled={pending}
+              inputMode="decimal"
+              onChange={(e) => update(i, { amount: e.target.value.replace(/[^0-9.]/g, "") })}
+              placeholder="0.00"
+              className="w-24 rounded-lg border border-line bg-[var(--ink)] px-2.5 py-1.5 text-right text-sm tabular outline-none focus:border-[var(--brass-dim)]"
+            />
+            <button
+              onClick={() => removeRow(i)}
+              disabled={pending}
+              aria-label="Remove split"
+              className="shrink-0 rounded-md p-1 text-[var(--faint)] hover:text-[var(--coral)]"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <button
+          onClick={addRow}
+          disabled={pending}
+          className="inline-flex items-center gap-1 rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+        >
+          <Plus size={12} /> Add split
+        </button>
+        <span
+          className={`text-xs tabular ${balanced ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
+        >
+          {balanced
+            ? `Balanced · ${formatCurrency(total, currency)}`
+            : `${formatCurrency(Math.abs(remainder), currency)} ${remainder > 0 ? "left" : "over"}`}
+        </span>
+      </div>
+
+      {error && <p className="text-xs text-[var(--coral)]">{error}</p>}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={save}
+          disabled={pending || !balanced}
+          className="flex-1 rounded-full bg-[var(--brass)] px-3 py-1.5 text-xs font-medium text-[#1a1505] transition hover:brightness-105 disabled:opacity-40"
+        >
+          Save splits
+        </button>
+        <button
+          onClick={stopSplitting}
+          disabled={pending}
+          className="rounded-full border border-line px-3 py-1.5 text-xs text-[var(--muted)] hover:text-[var(--paper)]"
+        >
+          {transaction.splitCount > 0 ? "Remove splits" : "Cancel"}
+        </button>
+      </div>
     </div>
   );
 }

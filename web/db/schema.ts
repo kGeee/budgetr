@@ -352,6 +352,35 @@ export const holdingCostBasisOverrides = sqliteTable("holding_cost_basis_overrid
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Overlay that divides one transaction's amount across several categories. Purely
+ * additive: a transaction with no rows here still resolves through
+ * effectiveCatId() exactly as before; once it has splits, each split's `amount`
+ * lands in its own category for category/budget reporting instead of the whole
+ * amount landing in one. Split amounts are expected to sum to the parent
+ * transaction's signed amount — enforced in the setTransactionSplits action.
+ */
+export const transactionSplits = sqliteTable(
+  "transaction_splits",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    // Null (or an archived category) simply reports as Uncategorized; the FK
+    // clears rather than blocking a category delete.
+    categoryId: text("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    amount: real("amount").notNull(), // same sign convention as transactions.amount
+    note: text("note"),
+  },
+  (t) => [
+    index("tx_splits_txn_idx").on(t.transactionId),
+    index("tx_splits_category_idx").on(t.categoryId),
+  ],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -369,3 +398,4 @@ export type RecurringStream = typeof recurringStreams.$inferSelect;
 export type VendorGroup = typeof vendorGroups.$inferSelect;
 export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
+export type TransactionSplit = typeof transactionSplits.$inferSelect;

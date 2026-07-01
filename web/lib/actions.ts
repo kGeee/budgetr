@@ -11,6 +11,7 @@ import {
   tagBudgets,
   tagRules,
   tags,
+  transactionSplits,
   transactionTags,
   transactions,
   vendorGroupMembers,
@@ -23,10 +24,12 @@ import {
   getCategoryDailySpend,
   getCategoryMonthlyBreakdown,
   getCategoryTransactions,
+  getTransactionSplits,
   getTransactionsByDate,
   type CategoryDay,
   type CategoryMonth,
   type TransactionRow,
+  type TransactionSplitRow,
 } from "@/lib/queries";
 
 /**
@@ -195,6 +198,72 @@ export async function setTransactionNotes(txnId: string, notes: string) {
     .set({ notes: trimmed || null })
     .where(eq(transactions.id, txnId))
     .run();
+  revalidateAll();
+}
+
+// ── Transaction splits ────────────────────────────────────────────────────────
+
+export type SplitInput = { categoryId: string | null; amount: number; note?: string | null };
+
+/** Read-only loader so the detail drawer can lazily fetch a transaction's splits. */
+export async function loadTransactionSplits(txnId: string): Promise<TransactionSplitRow[]> {
+  return getTransactionSplits(txnId);
+}
+
+/**
+ * Replace a transaction's category splits (delete-then-insert in one pass). The
+ * split amounts must sum to the transaction's own amount — reject otherwise, so
+ * category/budget reporting can never over- or under-count. An empty array clears
+ * the splits (the transaction reverts to resolving through effectiveCatId).
+ */
+export async function setTransactionSplits(
+  txnId: string,
+  splits: SplitInput[],
+): Promise<{ ok: boolean; error?: string }> {
+  const tx = db
+    .select({ amount: transactions.amount })
+    .from(transactions)
+    .where(eq(transactions.id, txnId))
+    .get();
+  if (!tx) return { ok: false, error: "Transaction not found." };
+
+  const clean = splits.filter((s) => Number.isFinite(s.amount) && s.amount !== 0);
+  if (clean.length === 0) {
+    db.delete(transactionSplits).where(eq(transactionSplits.transactionId, txnId)).run();
+    revalidateAll();
+    return { ok: true };
+  }
+
+  // Split amounts must reconcile to the parent amount (allow a cent of rounding).
+  const sum = clean.reduce((a, s) => a + s.amount, 0);
+  if (Math.abs(sum - tx.amount) > 0.01) {
+    return {
+      ok: false,
+      error: `Splits must add up to ${tx.amount.toFixed(2)} (currently ${sum.toFixed(2)}).`,
+    };
+  }
+
+  db.transaction((t) => {
+    t.delete(transactionSplits).where(eq(transactionSplits.transactionId, txnId)).run();
+    for (const s of clean) {
+      t.insert(transactionSplits)
+        .values({
+          id: `split_${crypto.randomUUID().slice(0, 8)}`,
+          transactionId: txnId,
+          categoryId: s.categoryId,
+          amount: s.amount,
+          note: s.note?.trim() || null,
+        })
+        .run();
+    }
+  });
+  revalidateAll();
+  return { ok: true };
+}
+
+/** Drop every split on a transaction; it reverts to single-category resolution. */
+export async function clearSplits(txnId: string) {
+  db.delete(transactionSplits).where(eq(transactionSplits.transactionId, txnId)).run();
   revalidateAll();
 }
 

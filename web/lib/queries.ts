@@ -35,6 +35,86 @@ function effectiveCatId(alias: string) {
   )`;
 }
 
+/**
+ * A CTE named `spend_rows` that flattens every transaction into one or more
+ * category-attributed rows, so category/budget reporting stays correct when a
+ * transaction is split (see the transaction_splits overlay):
+ *  - Unsplit transactions contribute a single row carrying the full amount at
+ *    their effective category (effectiveCatId).
+ *  - Split transactions contribute one row per split — the split's amount at the
+ *    split's category — and never the parent amount, so nothing double-counts.
+ *
+ * Each row exposes (txn_id, date, pending, amount, category_id) with the same
+ * sign convention as transactions.amount. Splice into a query with
+ * `sql`WITH ${spendRowsCte} SELECT ... FROM spend_rows sr ...``.
+ */
+const spendRowsCte = sql`spend_rows AS (
+  SELECT t.id AS txn_id, t.date AS date, t.pending AS pending, t.amount AS amount,
+         ${effectiveCatId("t")} AS category_id
+  FROM transactions t
+  WHERE NOT EXISTS (SELECT 1 FROM transaction_splits s WHERE s.transaction_id = t.id)
+  UNION ALL
+  SELECT t.id AS txn_id, t.date AS date, t.pending AS pending, s.amount AS amount,
+         s.category_id AS category_id
+  FROM transactions t
+  JOIN transaction_splits s ON s.transaction_id = t.id
+)`;
+
+/**
+ * SQL matching transactions (alias `t`) that roll up to category `id`: either an
+ * unsplit transaction whose effective category is `id`, or a split transaction
+ * with at least one split in `id`. The full transaction is returned, so a split
+ * transaction can legitimately appear under more than one category.
+ */
+function txnInCategory(id: string): ReturnType<typeof sql> {
+  return sql`(
+    (NOT EXISTS (SELECT 1 FROM transaction_splits s WHERE s.transaction_id = t.id)
+      AND ${effectiveCatId("t")} = ${id})
+    OR EXISTS (SELECT 1 FROM transaction_splits s
+               WHERE s.transaction_id = t.id AND s.category_id = ${id})
+  )`;
+}
+
+export type TransactionSplitRow = {
+  id: string;
+  transactionId: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryIcon: string | null;
+  amount: number;
+  note: string | null;
+};
+
+/** The splits overlaying one transaction, joined to their category name/icon. */
+export function getTransactionSplits(txnId: string): TransactionSplitRow[] {
+  return db
+    .all<{
+      id: string;
+      transactionId: string;
+      categoryId: string | null;
+      categoryName: string | null;
+      categoryIcon: string | null;
+      amount: number;
+      note: string | null;
+    }>(sql`
+      SELECT s.id AS id, s.transaction_id AS transactionId, s.category_id AS categoryId,
+             cat.name AS categoryName, cat.icon AS categoryIcon,
+             s.amount AS amount, s.note AS note
+      FROM transaction_splits s
+      LEFT JOIN categories cat ON cat.id = s.category_id
+      WHERE s.transaction_id = ${txnId}
+      ORDER BY s.rowid ASC`)
+    .map((r) => ({
+      id: r.id,
+      transactionId: r.transactionId,
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      categoryIcon: r.categoryIcon,
+      amount: Number(r.amount),
+      note: r.note,
+    }));
+}
+
 export type NetWorth = { assets: number; liabilities: number; net: number };
 
 export function getNetWorth(): NetWorth {
@@ -95,12 +175,13 @@ export type CategorySpend = {
 export function getSpendingByCategory(days = 30): CategorySpend[] {
   return db
     .all<{ categoryId: string | null; name: string | null; icon: string | null; total: number }>(
-      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon, SUM(t.amount) AS total
-          FROM transactions t
-          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
-          WHERE t.pending = 0 AND t.amount > 0
+      sql`WITH ${spendRowsCte}
+          SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon, SUM(sr.amount) AS total
+          FROM spend_rows sr
+          LEFT JOIN categories cat ON cat.id = sr.category_id
+          WHERE sr.pending = 0 AND sr.amount > 0
             AND (cat."group" IS NULL OR cat."group" != 'transfer')
-            AND t.date >= date('now', ${"-" + days + " days"})
+            AND sr.date >= date('now', ${"-" + days + " days"})
           GROUP BY cat.id
           ORDER BY total DESC`,
     )
@@ -181,13 +262,14 @@ export function getBudgetsWithSpend(): BudgetRow[] {
       budget: number | null;
       spent: number;
     }>(
-      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
+      sql`WITH ${spendRowsCte}
+          SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
              b.amount AS budget,
              COALESCE((
-               SELECT SUM(t.amount) FROM transactions t
-               WHERE t.pending = 0 AND t.amount > 0
-                 AND ${effectiveCatId("t")} = cat.id
-                 AND substr(t.date, 1, 7) = ${month}
+               SELECT SUM(sr.amount) FROM spend_rows sr
+               WHERE sr.pending = 0 AND sr.amount > 0
+                 AND sr.category_id = cat.id
+                 AND substr(sr.date, 1, 7) = ${month}
              ), 0) AS spent
           FROM categories cat
           LEFT JOIN budgets b ON b.category_id = cat.id
@@ -374,6 +456,8 @@ export type TransactionRow = {
   reviewed: boolean;
   notes: string | null;
   recurring: boolean;
+  /** Number of category splits overlaying this transaction (0 = unsplit). */
+  splitCount: number;
   tags: TxTag[];
 };
 
@@ -396,6 +480,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     reviewed: number;
     notes: string | null;
     recurring: number;
+    splitCount: number;
     tagsJson: string | null;
   }>(sql`
     SELECT t.id AS id, t.date AS date, t.name AS name, t.merchant_name AS merchantName,
@@ -403,6 +488,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
            t.pending AS pending, t.category AS plaidCategory,
            cat.id AS categoryId, cat.name AS categoryName, cat.icon AS categoryIcon,
            t.reviewed AS reviewed, t.notes AS notes,
+           (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) AS splitCount,
            EXISTS(SELECT 1 FROM recurring_streams r
                   WHERE r.is_active = 1 AND r.merchant_name IS NOT NULL
                     AND r.merchant_name = t.merchant_name) AS recurring,
@@ -433,6 +519,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     reviewed: !!r.reviewed,
     notes: r.notes,
     recurring: !!r.recurring,
+    splitCount: Number(r.splitCount),
     tags: r.tagsJson ? (JSON.parse(r.tagsJson) as TxTag[]) : [],
   }));
 }
@@ -677,7 +764,7 @@ export function getCategoryById(id: string): CategoryDetail | null {
 
 /** Every (non-pending) transaction that rolls up to this category, newest first. */
 export function getCategoryTransactions(id: string, limit = 500): TransactionRow[] {
-  return selectTransactions(sql`t.pending = 0 AND ${effectiveCatId("t")} = ${id}`, limit);
+  return selectTransactions(sql`t.pending = 0 AND ${txnInCategory(id)}`, limit);
 }
 
 export function getTransactionsByDate(date: string): TransactionRow[] {
@@ -725,12 +812,13 @@ export type CategoryMonth = { month: string; spent: number; received: number; co
 export function getCategoryMonthlyBreakdown(id: string, months = 12): CategoryMonth[] {
   return db
     .all<{ month: string; spent: number; received: number; count: number }>(sql`
-      SELECT substr(t.date, 1, 7) AS month,
-             SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS spent,
-             SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END) AS received,
+      WITH ${spendRowsCte}
+      SELECT substr(sr.date, 1, 7) AS month,
+             SUM(CASE WHEN sr.amount > 0 THEN sr.amount ELSE 0 END) AS spent,
+             SUM(CASE WHEN sr.amount < 0 THEN -sr.amount ELSE 0 END) AS received,
              COUNT(*) AS count
-      FROM transactions t
-      WHERE t.pending = 0 AND ${effectiveCatId("t")} = ${id}
+      FROM spend_rows sr
+      WHERE sr.pending = 0 AND sr.category_id = ${id}
       GROUP BY month
       ORDER BY month DESC
       LIMIT ${months}`)
