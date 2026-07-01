@@ -71,6 +71,13 @@
       "when": 1782886420323,
       "tag": "0009_short_roland_deschain",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1782887446609,
+      "tag": "0010_lean_nekra",
+      "breakpoints": true
     }
   ]
 }

@@ -380,6 +380,38 @@ export const appSettings = sqliteTable("app_settings", {
   value: text("value"),
 });
 
+/**
+ * A user-created dashboard — a named, ordered collection of widgets that each
+ * render one of the app's existing charts/queries (net-worth, cashflow,
+ * spend-by-category, top vendors, daily-spend heatmap, budget summary). Isolated
+ * from the reporting/review tables so it can ship independently.
+ */
+export const dashboards = sqliteTable("dashboards", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }),
+});
+
+/**
+ * One widget on a dashboard. `type` selects which chart/query renders (see
+ * lib/queries.ts getWidgetData); `config` is opaque JSON the widget interprets
+ * (e.g. `{ "days": 30 }`, a category id, a month window).
+ */
+export const dashboardWidgets = sqliteTable(
+  "dashboard_widgets",
+  {
+    id: text("id").primaryKey(),
+    dashboardId: text("dashboard_id")
+      .notNull()
+      .references(() => dashboards.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    config: text("config"), // JSON: date range, category id, etc.
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [index("dashboard_widgets_dash_idx").on(t.dashboardId)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -399,3 +431,5 @@ export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
 export type ExchangeRate = typeof exchangeRates.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
+export type Dashboard = typeof dashboards.$inferSelect;
+export type DashboardWidget = typeof dashboardWidgets.$inferSelect;

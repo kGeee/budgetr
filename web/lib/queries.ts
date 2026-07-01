@@ -2,6 +2,8 @@ import { db } from "@/db";
 import {
   accounts,
   appSettings,
+  dashboardWidgets,
+  dashboards,
   exchangeRates,
   holdingCostBasisOverrides,
   holdings,
@@ -13,7 +15,8 @@ import {
   vendorGroupMembers,
   vendorGroups,
 } from "@/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import type { Dashboard, DashboardWidget } from "@/db/schema";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 
 // Plaid primaries that resolve to a `transfer` category are internal money
@@ -1217,4 +1220,124 @@ export function getMonthlySpendForYear(year: number): { month: string; spent: nu
     const month = `${year}-${String(i + 1).padStart(2, "0")}`;
     return { month, spent: byMonth.get(month) ?? 0 };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Custom dashboards
+//
+// A dashboard is an ordered set of widgets; each widget names a `type` that maps
+// to one of the existing query fns above and carries opaque JSON `config` (a day
+// window, a limit, etc.). getWidgetData is the single dispatcher the server
+// component uses to resolve every widget's data before handing it to the client
+// grid, so the widget renderers stay dumb and fully serializable.
+// ---------------------------------------------------------------------------
+
+/** The widget kinds a dashboard can render. Shared by the query dispatcher, the picker, and the renderer. */
+export type WidgetType =
+  | "net-worth"
+  | "cashflow"
+  | "spend-by-category"
+  | "top-vendors"
+  | "daily-spend"
+  | "budget-summary";
+
+/** Free-form per-widget settings. All optional — each widget falls back to sensible defaults. */
+export type WidgetConfig = {
+  /** Trailing-day window (spend-by-category, top-vendors). */
+  days?: number;
+  /** Month count (cashflow). */
+  months?: number;
+  /** Row cap (top-vendors). */
+  limit?: number;
+};
+
+export type DashboardListItem = Dashboard & { widgetCount: number };
+
+/** All dashboards, ordered for the sidebar/index, each with its widget count. */
+export function getDashboards(): DashboardListItem[] {
+  const rows = db
+    .select({
+      id: dashboards.id,
+      name: dashboards.name,
+      sortOrder: dashboards.sortOrder,
+      createdAt: dashboards.createdAt,
+      widgetCount: sql<number>`(
+        SELECT COUNT(*) FROM ${dashboardWidgets}
+        WHERE ${dashboardWidgets.dashboardId} = ${dashboards.id}
+      )`,
+    })
+    .from(dashboards)
+    .orderBy(asc(dashboards.sortOrder), asc(dashboards.createdAt))
+    .all();
+  return rows.map((r) => ({ ...r, widgetCount: Number(r.widgetCount) }));
+}
+
+/** A single dashboard plus its widgets in display order, or null if it doesn't exist. */
+export function getDashboardWithWidgets(
+  id: string,
+): { dashboard: Dashboard; widgets: DashboardWidget[] } | null {
+  const dashboard = db.select().from(dashboards).where(eq(dashboards.id, id)).get();
+  if (!dashboard) return null;
+  const widgets = db
+    .select()
+    .from(dashboardWidgets)
+    .where(eq(dashboardWidgets.dashboardId, id))
+    .orderBy(asc(dashboardWidgets.sortOrder))
+    .all();
+  return { dashboard, widgets };
+}
+
+/**
+ * Resolved data for one widget — a discriminated union keyed by `type` so the
+ * client renderer can switch exhaustively. `daily-spend` carries its window so
+ * the heatmap can align its week grid.
+ */
+export type WidgetData =
+  | { type: "net-worth"; series: { date: string; netWorth: number }[] }
+  | { type: "cashflow"; series: { month: string; income: number; expenses: number }[] }
+  | { type: "spend-by-category"; series: CategorySpend[] }
+  | { type: "top-vendors"; merchants: TopMerchant[] }
+  | { type: "daily-spend"; series: { date: string; spent: number }[]; start: string; end: string }
+  | { type: "budget-summary"; summary: BudgetSummary };
+
+/**
+ * Resolve a widget's `type` + `config` to its render-ready data by delegating to
+ * the existing query functions. Unknown types are coerced to a spend-by-category
+ * fallback so a stale/hand-edited row never crashes a whole dashboard.
+ */
+export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetData {
+  switch (type) {
+    case "net-worth":
+      return { type: "net-worth", series: getNetWorthSeries() };
+    case "cashflow":
+      return { type: "cashflow", series: getMonthlyCashflow(config.months ?? 6) };
+    case "top-vendors":
+      return {
+        type: "top-vendors",
+        merchants: getTopMerchants(config.days ?? 90, config.limit ?? 8),
+      };
+    case "daily-spend": {
+      // Trailing ~53 weeks, snapped back to a Sunday so the heatmap grid is
+      // whole week-columns — mirrors the /review calendar window.
+      const end = new Date();
+      const startDate = new Date(end);
+      startDate.setDate(startDate.getDate() - 364);
+      // Back up to the preceding Sunday.
+      startDate.setDate(startDate.getDate() - startDate.getDay());
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      const start = iso(startDate);
+      const endStr = iso(end);
+      return {
+        type: "daily-spend",
+        series: getDailySpendRange(start, endStr),
+        start,
+        end: endStr,
+      };
+    }
+    case "budget-summary":
+      return { type: "budget-summary", summary: getMonthlyBudgetSummary() };
+    case "spend-by-category":
+    default:
+      return { type: "spend-by-category", series: getSpendingByCategory(config.days ?? 30) };
+  }
 }

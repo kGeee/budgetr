@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
+  LayoutGrid,
   ArrowLeftRight,
   LineChart,
   Landmark,
@@ -18,6 +19,7 @@ import {
 
 const nav: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboards", label: "Dashboards", icon: LayoutGrid },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/vendors", label: "Vendors", icon: Store },
