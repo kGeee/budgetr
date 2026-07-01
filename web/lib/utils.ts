@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { scaleForDisplay } from "./scale";
+import { convertToDisplay, getDisplayCurrency } from "./currency";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -17,6 +18,26 @@ export function formatCurrency(
     maximumFractionDigits: 2,
     ...opts,
   }).format(scaleForDisplay(amount));
+}
+
+/**
+ * Convert-aware currency formatter. Takes an `amount` in its *source* currency
+ * (`fromCurrency`, whatever Plaid / the brokerage reported), converts it to the
+ * user's chosen display currency via the cached FX rates, then formats it — so a
+ * €-denominated account and a $-denominated one read in one consistent unit.
+ *
+ * Falls back to identity conversion when rates are missing (see convertToDisplay)
+ * and leaves the underlying `formatCurrency` (and its privacy-mode scaling)
+ * untouched. Use this wherever a figure's isoCurrencyCode can vary (accounts,
+ * holdings); pure USD-only figures can keep using formatCurrency directly.
+ */
+export function formatMoney(
+  amount: number,
+  fromCurrency: string | null | undefined,
+  opts: Intl.NumberFormatOptions = {},
+): string {
+  const display = getDisplayCurrency();
+  return formatCurrency(convertToDisplay(amount, fromCurrency), display, opts);
 }
 
 export function formatCompactCurrency(amount: number, currency = "USD"): string {

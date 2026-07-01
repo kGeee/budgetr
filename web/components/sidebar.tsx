@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
+  LayoutGrid,
   ArrowLeftRight,
   LineChart,
   Landmark,
@@ -12,19 +13,22 @@ import {
   PiggyBank,
   Repeat,
   Receipt,
+  Sparkles,
   Store,
   TrendingUp,
   Wand2,
-  Sparkles,
   Flame,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 
 const nav: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboards", label: "Dashboards", icon: LayoutGrid },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/vendors", label: "Vendors", icon: Store },
+  { href: "/review", label: "Review", icon: Sparkles },
   { href: "/investments", label: "Investments", icon: LineChart },
   { href: "/realized-gains", label: "Realized gains", icon: Receipt },
   { href: "/categories", label: "Categories", icon: Shapes },
@@ -35,6 +39,7 @@ const nav: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/insights", label: "Insights", icon: Sparkles },
   { href: "/recurring", label: "Recurring", icon: Repeat },
   { href: "/rules", label: "Auto-tag rules", icon: Wand2 },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string, href: string) {

@@ -2,7 +2,8 @@ import { Card } from "@/components/ui/card";
 import { PlaidLink } from "@/components/plaid-link";
 import { PageHead } from "@/components/page-head";
 import { getAccounts } from "@/lib/queries";
-import { formatCurrency, isLiability, signedBalance } from "@/lib/utils";
+import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
+import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
 
 export const dynamic = "force-dynamic";
 
@@ -23,14 +24,22 @@ export default function AccountsPage() {
     byInstitution.get(key)!.push(a);
   }
 
-  const net = accounts.reduce((s, a) => s + signedBalance(a.type, a.currentBalance), 0);
+  // Mixed source currencies — convert each account into the display currency
+  // before summing so the total is meaningful.
+  const displayCurrency = getDisplayCurrency();
+  const net = accounts.reduce(
+    (s, a) => s + convertToDisplay(signedBalance(a.type, a.currentBalance), a.currency),
+    0,
+  );
 
   return (
     <div className="space-y-7">
       <PageHead title="Accounts" action={<PlaidLink />} />
 
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="font-display text-3xl tabular">{formatCurrency(net)}</span>
+        <span className="font-display text-3xl tabular">
+          {formatCurrency(net, displayCurrency)}
+        </span>
         <span className="text-sm text-[var(--muted)]">
           net across {accounts.length} {accounts.length === 1 ? "account" : "accounts"}
         </span>
@@ -47,7 +56,7 @@ export default function AccountsPage() {
       <div className="space-y-5">
         {[...byInstitution.entries()].map(([institution, accts]) => {
           const subtotal = accts.reduce(
-            (s, a) => s + signedBalance(a.type, a.currentBalance),
+            (s, a) => s + convertToDisplay(signedBalance(a.type, a.currentBalance), a.currency),
             0,
           );
           return (
@@ -59,7 +68,9 @@ export default function AccountsPage() {
                   </span>
                   <span className="font-medium">{institution}</span>
                 </div>
-                <span className="mono text-sm text-[var(--muted)]">{formatCurrency(subtotal)}</span>
+                <span className="mono text-sm text-[var(--muted)]">
+                  {formatCurrency(subtotal, displayCurrency)}
+                </span>
               </div>
               <ul>
                 {accts.map((a) => (
@@ -86,7 +97,7 @@ export default function AccountsPage() {
                         isLiability(a.type) ? "text-[var(--coral)]" : "text-[var(--paper)]"
                       }`}
                     >
-                      {formatCurrency(a.currentBalance ?? 0, a.currency ?? "USD")}
+                      {formatMoney(a.currentBalance ?? 0, a.currency)}
                     </span>
                   </li>
                 ))}

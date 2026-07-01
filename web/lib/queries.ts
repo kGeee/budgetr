@@ -2,7 +2,11 @@ import { db } from "@/db";
 import {
   accounts,
   allocationTargets,
+  appSettings,
   costBasisMethod,
+  dashboardWidgets,
+  dashboards,
+  exchangeRates,
   holdingCostBasisOverrides,
   holdings,
   investmentAssetClasses,
@@ -19,8 +23,8 @@ import {
   vendorGroups,
   type SavedFilter,
 } from "@/db/schema";
-import type { SavingsContribution } from "@/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import type { SavingsContribution, Dashboard, DashboardWidget } from "@/db/schema";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 import {
   computeRealizedLots,
@@ -1104,6 +1108,32 @@ export function getDailySpend(days = 30): { date: string; spent: number }[] {
     .map((r) => ({ date: r.date, spent: Number(r.spent) }));
 }
 
+/**
+ * Day-by-day total spending across all spending categories between two ISO
+ * dates (inclusive), oldest first. Same spending-only / transfer-excluded WHERE
+ * as {@link getDailySpend}, but over an explicit window (e.g. a trailing year
+ * for the contribution-graph heatmap). Days with no spend are simply absent.
+ */
+export function getDailySpendRange(
+  start: string,
+  end: string,
+): { date: string; spent: number }[] {
+  return db
+    .all<{ date: string; spent: number }>(sql`
+      SELECT t.date AS date,
+             SUM(t.amount) AS spent
+      FROM transactions t
+      JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+      WHERE t.pending = 0
+        AND t.amount > 0
+        AND cat."group" = 'spending'
+        AND t.date >= ${start}
+        AND t.date <= ${end}
+      GROUP BY t.date
+      ORDER BY t.date ASC`)
+    .map((r) => ({ date: r.date, spent: Number(r.spent) }));
+}
+
 /** Day-by-day breakdown for a category over the last N days, oldest first. */
 export function getCategoryDailySpend(id: string, days = 30): CategoryDay[] {
   return db
@@ -1543,6 +1573,45 @@ export function getDividendSummary(): DividendSummary {
   return buildDividendSummary(txns, positions);
 }
 
+// ── App settings & FX rates ───────────────────────────────────────────────────
+
+/** Read a single generic app setting (e.g. `displayCurrency`), or null. */
+export function getAppSetting(key: string): string | null {
+  const row = db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, key))
+    .get();
+  return row?.value ?? null;
+}
+
+/**
+ * The user's chosen display currency (from app settings), defaulting to USD.
+ * Kept here so server components can read the persisted preference without
+ * touching the cookie-backed module state in lib/currency.ts.
+ */
+export function getDisplayCurrencySetting(): string {
+  return getAppSetting("displayCurrency") ?? "USD";
+}
+
+/**
+ * The cached USD-based FX rate map (quote → units per 1 USD) used to convert
+ * source-currency figures into the display currency. Empty until the first
+ * refresh; callers treat a missing rate as identity.
+ */
+export function getDisplayCurrencyRates(base = "USD"): Record<string, number> {
+  const from = base.trim().toUpperCase();
+  const rows = db
+    .select({ quote: exchangeRates.quote, rate: exchangeRates.rate })
+    .from(exchangeRates)
+    .where(eq(exchangeRates.base, from))
+    .all();
+
+  const out: Record<string, number> = { [from]: 1 };
+  for (const r of rows) out[r.quote.toUpperCase()] = r.rate;
+  return out;
+}
+
 export function prettyCategory(c: string | null): string {
   if (!c) return "Uncategorized";
   return c
@@ -1625,4 +1694,271 @@ export function getSavingsGoalContributions(goalId: string): SavingsContribution
     .where(eq(savingsContributions.goalId, goalId))
     .orderBy(desc(savingsContributions.date), desc(savingsContributions.createdAt))
     .all();
+}
+
+// ── Period-scoped review queries ──────────────────────────────────────────────
+// Explicit [start, end] date bounds ('YYYY-MM-DD', both inclusive) rather than
+// the budget month, so /review can summarize any month or year. All exclude
+// internal transfers the same way the dashboard does, and stay synchronous.
+
+export type PeriodTotals = {
+  income: number;
+  expenses: number;
+  net: number;
+  txCount: number;
+};
+
+/**
+ * Income / expense / net / count for an arbitrary date window — the review
+ * hero numbers. Mirrors getMonthlyCashflow's transfer exclusion via the
+ * transferPrimaries subquery (income = inflows, expenses = outflows).
+ */
+export function getPeriodTotals(start: string, end: string): PeriodTotals {
+  const row = db.get<{ income: number; expenses: number; txCount: number }>(
+    sql`SELECT
+          SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS income,
+          SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS expenses,
+          COUNT(*) AS txCount
+        FROM transactions
+        WHERE pending = 0
+          AND (category IS NULL OR category NOT IN (${transferPrimaries}))
+          AND date >= ${start} AND date <= ${end}`,
+  );
+  const income = Number(row?.income ?? 0);
+  const expenses = Number(row?.expenses ?? 0);
+  return { income, expenses, net: income - expenses, txCount: Number(row?.txCount ?? 0) };
+}
+
+/** getTopMerchants, but over an explicit [start, end] window instead of `days`. */
+export function getTopMerchantsForPeriod(
+  start: string,
+  end: string,
+  limit = 8,
+): TopMerchant[] {
+  return db
+    .all<{ vendor: string | null; total: number; count: number }>(
+      sql`SELECT COALESCE(t.merchant_name, t.name) AS vendor,
+             SUM(t.amount) AS total, COUNT(*) AS count
+          FROM transactions t
+          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          WHERE t.pending = 0 AND t.amount > 0
+            AND (cat."group" IS NULL OR cat."group" != 'transfer')
+            AND t.date >= ${start} AND t.date <= ${end}
+          GROUP BY vendor
+          ORDER BY total DESC
+          LIMIT ${limit}`,
+    )
+    .map((r) => ({
+      vendor: cleanTransactionName(r.vendor ?? "Unknown", null),
+      total: Number(r.total),
+      count: Number(r.count),
+    }));
+}
+
+/** getSpendingByCategory, but over an explicit [start, end] window. */
+export function getCategorySpendForPeriod(start: string, end: string): CategorySpend[] {
+  return db
+    .all<{ categoryId: string | null; name: string | null; icon: string | null; total: number }>(
+      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon, SUM(t.amount) AS total
+          FROM transactions t
+          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          WHERE t.pending = 0 AND t.amount > 0
+            AND (cat."group" IS NULL OR cat."group" != 'transfer')
+            AND t.date >= ${start} AND t.date <= ${end}
+          GROUP BY cat.id
+          ORDER BY total DESC`,
+    )
+    .map((r) => ({
+      categoryId: r.categoryId,
+      category: r.name ?? "Uncategorized",
+      icon: r.icon,
+      total: Number(r.total),
+    }));
+}
+
+export type BiggestPurchase = {
+  id: string;
+  date: string;
+  vendor: string;
+  amount: number;
+  categoryName: string;
+  categoryIcon: string | null;
+};
+
+/** The single largest outflows (positive amounts) in the window, transfers excluded. */
+export function getBiggestPurchases(
+  start: string,
+  end: string,
+  limit = 6,
+): BiggestPurchase[] {
+  return db
+    .all<{
+      id: string;
+      date: string;
+      name: string;
+      merchantName: string | null;
+      amount: number;
+      categoryName: string | null;
+      categoryIcon: string | null;
+    }>(
+      sql`SELECT t.id AS id, t.date AS date, t.name AS name, t.merchant_name AS merchantName,
+             t.amount AS amount, cat.name AS categoryName, cat.icon AS categoryIcon
+          FROM transactions t
+          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          WHERE t.pending = 0 AND t.amount > 0
+            AND (cat."group" IS NULL OR cat."group" != 'transfer')
+            AND t.date >= ${start} AND t.date <= ${end}
+          ORDER BY t.amount DESC
+          LIMIT ${limit}`,
+    )
+    .map((r) => ({
+      id: r.id,
+      date: r.date,
+      vendor: cleanTransactionName(r.name, r.merchantName),
+      amount: Number(r.amount),
+      categoryName: r.categoryName ?? "Uncategorized",
+      categoryIcon: r.categoryIcon,
+    }));
+}
+
+/**
+ * Total spend per calendar month for `year` ('YYYY'), transfers excluded —
+ * feeds the month-by-month review bar. Returns all 12 months (0 for empty
+ * ones) so the chart reads as a full year even before it fills in.
+ */
+export function getMonthlySpendForYear(year: number): { month: string; spent: number }[] {
+  const rows = db.all<{ month: string; spent: number }>(
+    sql`SELECT substr(date,1,7) AS month,
+          SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS spent
+        FROM transactions
+        WHERE pending = 0
+          AND (category IS NULL OR category NOT IN (${transferPrimaries}))
+          AND substr(date,1,4) = ${String(year)}
+        GROUP BY month`,
+  );
+  const byMonth = new Map(rows.map((r) => [r.month, Number(r.spent)]));
+  return Array.from({ length: 12 }, (_, i) => {
+    const month = `${year}-${String(i + 1).padStart(2, "0")}`;
+    return { month, spent: byMonth.get(month) ?? 0 };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Custom dashboards
+//
+// A dashboard is an ordered set of widgets; each widget names a `type` that maps
+// to one of the existing query fns above and carries opaque JSON `config` (a day
+// window, a limit, etc.). getWidgetData is the single dispatcher the server
+// component uses to resolve every widget's data before handing it to the client
+// grid, so the widget renderers stay dumb and fully serializable.
+// ---------------------------------------------------------------------------
+
+/** The widget kinds a dashboard can render. Shared by the query dispatcher, the picker, and the renderer. */
+export type WidgetType =
+  | "net-worth"
+  | "cashflow"
+  | "spend-by-category"
+  | "top-vendors"
+  | "daily-spend"
+  | "budget-summary";
+
+/** Free-form per-widget settings. All optional — each widget falls back to sensible defaults. */
+export type WidgetConfig = {
+  /** Trailing-day window (spend-by-category, top-vendors). */
+  days?: number;
+  /** Month count (cashflow). */
+  months?: number;
+  /** Row cap (top-vendors). */
+  limit?: number;
+};
+
+export type DashboardListItem = Dashboard & { widgetCount: number };
+
+/** All dashboards, ordered for the sidebar/index, each with its widget count. */
+export function getDashboards(): DashboardListItem[] {
+  const rows = db
+    .select({
+      id: dashboards.id,
+      name: dashboards.name,
+      sortOrder: dashboards.sortOrder,
+      createdAt: dashboards.createdAt,
+      widgetCount: sql<number>`(
+        SELECT COUNT(*) FROM ${dashboardWidgets}
+        WHERE ${dashboardWidgets.dashboardId} = ${dashboards.id}
+      )`,
+    })
+    .from(dashboards)
+    .orderBy(asc(dashboards.sortOrder), asc(dashboards.createdAt))
+    .all();
+  return rows.map((r) => ({ ...r, widgetCount: Number(r.widgetCount) }));
+}
+
+/** A single dashboard plus its widgets in display order, or null if it doesn't exist. */
+export function getDashboardWithWidgets(
+  id: string,
+): { dashboard: Dashboard; widgets: DashboardWidget[] } | null {
+  const dashboard = db.select().from(dashboards).where(eq(dashboards.id, id)).get();
+  if (!dashboard) return null;
+  const widgets = db
+    .select()
+    .from(dashboardWidgets)
+    .where(eq(dashboardWidgets.dashboardId, id))
+    .orderBy(asc(dashboardWidgets.sortOrder))
+    .all();
+  return { dashboard, widgets };
+}
+
+/**
+ * Resolved data for one widget — a discriminated union keyed by `type` so the
+ * client renderer can switch exhaustively. `daily-spend` carries its window so
+ * the heatmap can align its week grid.
+ */
+export type WidgetData =
+  | { type: "net-worth"; series: { date: string; netWorth: number }[] }
+  | { type: "cashflow"; series: { month: string; income: number; expenses: number }[] }
+  | { type: "spend-by-category"; series: CategorySpend[] }
+  | { type: "top-vendors"; merchants: TopMerchant[] }
+  | { type: "daily-spend"; series: { date: string; spent: number }[]; start: string; end: string }
+  | { type: "budget-summary"; summary: BudgetSummary };
+
+/**
+ * Resolve a widget's `type` + `config` to its render-ready data by delegating to
+ * the existing query functions. Unknown types are coerced to a spend-by-category
+ * fallback so a stale/hand-edited row never crashes a whole dashboard.
+ */
+export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetData {
+  switch (type) {
+    case "net-worth":
+      return { type: "net-worth", series: getNetWorthSeries() };
+    case "cashflow":
+      return { type: "cashflow", series: getMonthlyCashflow(config.months ?? 6) };
+    case "top-vendors":
+      return {
+        type: "top-vendors",
+        merchants: getTopMerchants(config.days ?? 90, config.limit ?? 8),
+      };
+    case "daily-spend": {
+      // Trailing ~53 weeks, snapped back to a Sunday so the heatmap grid is
+      // whole week-columns — mirrors the /review calendar window.
+      const end = new Date();
+      const startDate = new Date(end);
+      startDate.setDate(startDate.getDate() - 364);
+      // Back up to the preceding Sunday.
+      startDate.setDate(startDate.getDate() - startDate.getDay());
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      const start = iso(startDate);
+      const endStr = iso(end);
+      return {
+        type: "daily-spend",
+        series: getDailySpendRange(start, endStr),
+        start,
+        end: endStr,
+      };
+    }
+    case "budget-summary":
+      return { type: "budget-summary", summary: getMonthlyBudgetSummary() };
+    case "spend-by-category":
+    default:
+      return { type: "spend-by-category", series: getSpendingByCategory(config.days ?? 30) };
+  }
 }
