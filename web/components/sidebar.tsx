@@ -13,6 +13,7 @@ import {
   Store,
   TrendingUp,
   Wand2,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,6 +26,7 @@ const nav: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/categories", label: "Categories", icon: Shapes },
   { href: "/budgets", label: "Budgets", icon: Wallet },
   { href: "/cashflow", label: "Cashflow", icon: TrendingUp },
+  { href: "/insights", label: "Insights", icon: Sparkles },
   { href: "/recurring", label: "Recurring", icon: Repeat },
   { href: "/rules", label: "Auto-tag rules", icon: Wand2 },
 ];

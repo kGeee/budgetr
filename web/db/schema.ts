@@ -352,6 +352,24 @@ export const holdingCostBasisOverrides = sqliteTable("holding_cost_basis_overrid
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * User dismissals / snoozes for the anomaly-detection alerts (lib/anomalies.ts).
+ * Alerts themselves are derived on the fly from transactions + recurring_streams,
+ * so we only persist the user's action against a deterministic `alertKey`.
+ *  - `snoozeUntil` null  → permanently dismissed.
+ *  - `snoozeUntil` set   → hidden until that YYYY-MM-DD, then re-surfaces.
+ */
+export const dismissedAlerts = sqliteTable(
+  "dismissed_alerts",
+  {
+    id: text("id").primaryKey(),
+    alertKey: text("alert_key").notNull(),
+    dismissedAt: integer("dismissed_at", { mode: "timestamp" }).notNull(),
+    snoozeUntil: text("snooze_until"), // YYYY-MM-DD, null = dismissed for good
+  },
+  (t) => [uniqueIndex("dismissed_alert_key_idx").on(t.alertKey)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -369,3 +387,4 @@ export type RecurringStream = typeof recurringStreams.$inferSelect;
 export type VendorGroup = typeof vendorGroups.$inferSelect;
 export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
+export type DismissedAlert = typeof dismissedAlerts.$inferSelect;
