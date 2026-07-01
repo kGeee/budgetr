@@ -36,6 +36,21 @@ function effectiveCatId(alias: string) {
 }
 
 /**
+ * SQL predicate: the transaction under alias `alias` is a leg of a *confirmed*
+ * refund/transfer match. Such transactions are internal money movement (a
+ * transfer to yourself) or a reversal (a refund), so excluding both legs keeps
+ * cashflow and category spend from double-counting. Alias-parameterized to
+ * compose inside aliased joins/subqueries.
+ */
+function isConfirmedMatch(alias: string) {
+  const a = sql.raw(alias);
+  return sql`EXISTS (
+    SELECT 1 FROM transaction_matches m
+    WHERE m.status = 'confirmed' AND (m.txn_a_id = ${a}.id OR m.txn_b_id = ${a}.id)
+  )`;
+}
+
+/**
  * A CTE named `spend_rows` that flattens every transaction into one or more
  * category-attributed rows, so category/budget reporting stays correct when a
  * transaction is split (see the transaction_splits overlay):
@@ -53,11 +68,13 @@ const spendRowsCte = sql`spend_rows AS (
          ${effectiveCatId("t")} AS category_id
   FROM transactions t
   WHERE NOT EXISTS (SELECT 1 FROM transaction_splits s WHERE s.transaction_id = t.id)
+    AND NOT ${isConfirmedMatch("t")}
   UNION ALL
   SELECT t.id AS txn_id, t.date AS date, t.pending AS pending, s.amount AS amount,
          s.category_id AS category_id
   FROM transactions t
   JOIN transaction_splits s ON s.transaction_id = t.id
+  WHERE NOT ${isConfirmedMatch("t")}
 )`;
 
 /**
@@ -153,9 +170,10 @@ export function getMonthlyCashflow(months = 6): {
     sql`SELECT substr(date,1,7) AS month,
           SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS income,
           SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS expenses
-        FROM transactions
+        FROM transactions t
         WHERE pending = 0
           AND (category IS NULL OR category NOT IN (${transferPrimaries}))
+          AND NOT ${isConfirmedMatch("t")}
         GROUP BY month
         ORDER BY month DESC
         LIMIT ${months}`,
@@ -458,6 +476,8 @@ export type TransactionRow = {
   recurring: boolean;
   /** Number of category splits overlaying this transaction (0 = unsplit). */
   splitCount: number;
+  /** True when this transaction is a leg of a confirmed refund/transfer match. */
+  matched: boolean;
   tags: TxTag[];
 };
 
@@ -481,6 +501,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     notes: string | null;
     recurring: number;
     splitCount: number;
+    matched: number;
     tagsJson: string | null;
   }>(sql`
     SELECT t.id AS id, t.date AS date, t.name AS name, t.merchant_name AS merchantName,
@@ -489,6 +510,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
            cat.id AS categoryId, cat.name AS categoryName, cat.icon AS categoryIcon,
            t.reviewed AS reviewed, t.notes AS notes,
            (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) AS splitCount,
+           ${isConfirmedMatch("t")} AS matched,
            EXISTS(SELECT 1 FROM recurring_streams r
                   WHERE r.is_active = 1 AND r.merchant_name IS NOT NULL
                     AND r.merchant_name = t.merchant_name) AS recurring,
@@ -520,6 +542,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     notes: r.notes,
     recurring: !!r.recurring,
     splitCount: Number(r.splitCount),
+    matched: !!r.matched,
     tags: r.tagsJson ? (JSON.parse(r.tagsJson) as TxTag[]) : [],
   }));
 }

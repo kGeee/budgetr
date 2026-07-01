@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Plus, Repeat, Split, Trash2, X } from "lucide-react";
+import { ArrowLeftRight, Check, Plus, Repeat, Split, Trash2, Unlink, X } from "lucide-react";
 import { CategoryIcon } from "@/components/category-pill";
 import {
   addTagToTransaction,
@@ -10,15 +10,18 @@ import {
   clearSplits,
   createTagRuleFromTransaction,
   getVendorReclassCount,
+  loadMatchCounterpart,
   loadTransactionSplits,
   removeTagFromTransaction,
   setReviewed,
   setTransactionCategory,
   setTransactionNotes,
   setTransactionSplits,
+  unmatch,
 } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 import type { CategoryRow, TransactionRow } from "@/lib/queries";
+import type { MatchCounterpart } from "@/lib/matching";
 
 export function TransactionDetail({
   transaction,
@@ -223,6 +226,14 @@ export function TransactionDetail({
                 </Field>
               )}
 
+              {/* Matched refund/transfer counterpart */}
+              {t.matched && (
+                <Field label="Matched">
+                  {/* key remounts per transaction → fresh load of the counterpart */}
+                  <MatchInfo key={t.id} transaction={t} onAct={act} />
+                </Field>
+              )}
+
               {/* Tags */}
               <Field label="Tags">
                 <TagEditor transaction={t} disabled={pending} onAct={act} />
@@ -364,6 +375,72 @@ function TagEditor({
         </div>
       </div>
     )}
+    </div>
+  );
+}
+
+/**
+ * Shows the confirmed refund/transfer counterpart of a matched transaction and an
+ * Unmatch control. Loads the counterpart lazily (component is keyed by txn id) so
+ * the drawer stays cheap for the common unmatched case.
+ */
+function MatchInfo({
+  transaction,
+  onAct,
+}: {
+  transaction: TransactionRow;
+  onAct: (fn: () => Promise<unknown>) => void;
+}) {
+  const [counterpart, setCounterpart] = useState<MatchCounterpart | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    loadMatchCounterpart(transaction.id).then((c) => {
+      if (!alive) return;
+      setCounterpart(c);
+      setLoading(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [transaction.id]);
+
+  if (loading) {
+    return <p className="text-xs text-[var(--muted)]">Loading linked transaction…</p>;
+  }
+  if (!counterpart) {
+    return <p className="text-xs text-[var(--muted)]">This match was removed.</p>;
+  }
+
+  const income = counterpart.amount < 0;
+  return (
+    <div className="space-y-2.5 rounded-lg border border-line bg-[var(--panel-2)] p-3">
+      <p className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+        <ArrowLeftRight size={12} className="text-[var(--brass)]" />
+        Linked as a <span className="font-medium text-[var(--paper)]">{counterpart.kind}</span> —
+        excluded from cashflow &amp; spend
+      </p>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate">
+          <span className="font-medium">{counterpart.displayName}</span>
+          <span className="block text-xs text-[var(--muted)]">
+            {counterpart.accountName ?? "—"} · {counterpart.date}
+          </span>
+        </span>
+        <span
+          className={`mono shrink-0 tabular ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
+        >
+          {income ? "+" : "−"}
+          {formatCurrency(Math.abs(counterpart.amount), counterpart.currency ?? "USD")}
+        </span>
+      </div>
+      <button
+        onClick={() => onAct(() => unmatch(counterpart.matchId))}
+        className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--coral)] hover:text-[var(--coral)]"
+      >
+        <Unlink size={13} /> Unmatch
+      </button>
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   tagBudgets,
   tagRules,
   tags,
+  transactionMatches,
   transactionSplits,
   transactionTags,
   transactions,
@@ -31,6 +32,7 @@ import {
   type TransactionRow,
   type TransactionSplitRow,
 } from "@/lib/queries";
+import { getMatchCounterpart, type MatchCounterpart, type MatchKind } from "@/lib/matching";
 
 /**
  * Server Actions for budgetr's user overlay (categories, review status, tags,
@@ -264,6 +266,67 @@ export async function setTransactionSplits(
 /** Drop every split on a transaction; it reverts to single-category resolution. */
 export async function clearSplits(txnId: string) {
   db.delete(transactionSplits).where(eq(transactionSplits.transactionId, txnId)).run();
+  revalidateAll();
+}
+
+// ── Refund & transfer matching ──────────────────────────────────────────────
+
+/** Read-only loader so the detail drawer can lazily fetch a txn's match counterpart. */
+export async function loadMatchCounterpart(txnId: string): Promise<MatchCounterpart | null> {
+  return getMatchCounterpart(txnId);
+}
+
+/**
+ * Link two offsetting transactions as a confirmed match, so both legs drop out of
+ * cashflow and category spend. Idempotent — re-confirming (or flipping a prior
+ * dismissal) just sets the pair back to `confirmed`.
+ */
+export async function confirmMatch(aId: string, bId: string, kind: MatchKind) {
+  if (!aId || !bId || aId === bId) return;
+  db.insert(transactionMatches)
+    .values({
+      id: `match_${crypto.randomUUID().slice(0, 8)}`,
+      txnAId: aId,
+      txnBId: bId,
+      kind,
+      status: "confirmed",
+      createdAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [transactionMatches.txnAId, transactionMatches.txnBId],
+      set: { status: "confirmed", kind },
+    })
+    .run();
+  revalidateAll();
+}
+
+/**
+ * Record a `dismissed` tombstone for a suggested pair so it's never re-suggested,
+ * without excluding either transaction from reporting.
+ */
+export async function dismissMatch(aId: string, bId: string) {
+  if (!aId || !bId || aId === bId) return;
+  db.insert(transactionMatches)
+    .values({
+      id: `match_${crypto.randomUUID().slice(0, 8)}`,
+      txnAId: aId,
+      txnBId: bId,
+      kind: "transfer",
+      status: "dismissed",
+      createdAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [transactionMatches.txnAId, transactionMatches.txnBId],
+      set: { status: "dismissed" },
+    })
+    .run();
+  revalidateAll();
+}
+
+/** Remove a match link entirely (both legs return to normal reporting). */
+export async function unmatch(id: string) {
+  if (!id) return;
+  db.delete(transactionMatches).where(eq(transactionMatches.id, id)).run();
   revalidateAll();
 }
 

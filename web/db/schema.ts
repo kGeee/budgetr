@@ -381,6 +381,40 @@ export const transactionSplits = sqliteTable(
   ],
 );
 
+/**
+ * Links two offsetting transactions so they can be excluded from cashflow and
+ * category spend (avoiding double-counting). Two flavours by `kind`:
+ *  - `transfer`: a transfer out of one account matched to the transfer in on
+ *    another (different accounts, opposite signs, equal magnitude).
+ *  - `refund`: a purchase matched to its later refund (same account).
+ *
+ * Suggestions are computed in lib/matching.ts; the user confirms or dismisses
+ * each. A `dismissed` row is a tombstone — it suppresses the pair from ever
+ * being re-suggested without excluding the transactions from reporting. Only
+ * `confirmed` rows drive the exclusion. Additive overlay: transactions with no
+ * row here report exactly as before.
+ */
+export const transactionMatches = sqliteTable(
+  "transaction_matches",
+  {
+    id: text("id").primaryKey(),
+    txnAId: text("txn_a_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    txnBId: text("txn_b_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // refund | transfer
+    status: text("status").notNull().default("confirmed"), // confirmed | dismissed
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("txn_matches_pair_idx").on(t.txnAId, t.txnBId),
+    index("txn_matches_a_idx").on(t.txnAId),
+    index("txn_matches_b_idx").on(t.txnBId),
+  ],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -399,3 +433,4 @@ export type VendorGroup = typeof vendorGroups.$inferSelect;
 export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
 export type TransactionSplit = typeof transactionSplits.$inferSelect;
+export type TransactionMatch = typeof transactionMatches.$inferSelect;
