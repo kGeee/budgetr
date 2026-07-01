@@ -5,8 +5,16 @@ import { Sidebar, MobileNav } from "@/components/sidebar";
 import { SyncButton } from "@/components/sync-button";
 import { RegisterSW } from "@/components/register-sw";
 import { ScaleInit, ObfuscationToggle } from "@/components/obfuscation";
-import { getAccounts } from "@/lib/queries";
+import { CurrencyInit, CurrencySwitcher } from "@/components/currency-switcher";
+import { getAccounts, getDisplayCurrencyRates } from "@/lib/queries";
 import { OBF_COOKIE, factorFromCookie, setScaleFactor } from "@/lib/scale";
+import {
+  CURRENCY_COOKIE,
+  RATES_BASE,
+  currencyFromCookie,
+  setDisplayCurrency,
+  setRatesMap,
+} from "@/lib/currency";
 import "./globals.css";
 
 // Read live account balances at request time for the sidebar.
@@ -59,14 +67,23 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // Seed the obfuscation scale from the cookie before any server component
   // formats currency this request.
-  const obfFactor = factorFromCookie((await cookies()).get(OBF_COOKIE)?.value);
+  const cookieStore = await cookies();
+  const obfFactor = factorFromCookie(cookieStore.get(OBF_COOKIE)?.value);
   setScaleFactor(obfFactor);
+
+  // Seed the display currency + cached FX rates from the cookie/DB before any
+  // server component formats money this request.
+  const displayCurrency = currencyFromCookie(cookieStore.get(CURRENCY_COOKIE)?.value);
+  const ratesMap = getDisplayCurrencyRates(RATES_BASE);
+  setDisplayCurrency(displayCurrency);
+  setRatesMap(ratesMap);
 
   const accounts = getAccounts();
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
       <body>
         <ScaleInit factor={obfFactor} />
+        <CurrencyInit currency={displayCurrency} rates={ratesMap} />
         <RegisterSW />
         <div className="mx-auto flex min-h-dvh max-w-[1500px]">
           <Sidebar accounts={accounts} />
@@ -74,6 +91,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <header className="sticky top-0 z-20 flex items-center gap-4 border-b border-line bg-[color-mix(in_srgb,var(--ink)_82%,transparent)] px-5 py-3 backdrop-blur-xl sm:px-8">
               <MobileNav />
               <div className="ml-auto flex items-center gap-2">
+                <CurrencySwitcher current={displayCurrency} />
                 <ObfuscationToggle initialFactor={obfFactor} />
                 <SyncButton />
               </div>

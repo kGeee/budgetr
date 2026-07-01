@@ -1,6 +1,8 @@
 import { db } from "@/db";
 import {
   accounts,
+  appSettings,
+  exchangeRates,
   holdingCostBasisOverrides,
   holdings,
   investmentSectors,
@@ -994,6 +996,45 @@ export function getInvestmentTransactions(): InvestmentTxnRow[] {
     .leftJoin(accounts, eq(investmentTransactions.accountId, accounts.id))
     .orderBy(desc(investmentTransactions.date))
     .all();
+}
+
+// ── App settings & FX rates ───────────────────────────────────────────────────
+
+/** Read a single generic app setting (e.g. `displayCurrency`), or null. */
+export function getAppSetting(key: string): string | null {
+  const row = db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, key))
+    .get();
+  return row?.value ?? null;
+}
+
+/**
+ * The user's chosen display currency (from app settings), defaulting to USD.
+ * Kept here so server components can read the persisted preference without
+ * touching the cookie-backed module state in lib/currency.ts.
+ */
+export function getDisplayCurrencySetting(): string {
+  return getAppSetting("displayCurrency") ?? "USD";
+}
+
+/**
+ * The cached USD-based FX rate map (quote → units per 1 USD) used to convert
+ * source-currency figures into the display currency. Empty until the first
+ * refresh; callers treat a missing rate as identity.
+ */
+export function getDisplayCurrencyRates(base = "USD"): Record<string, number> {
+  const from = base.trim().toUpperCase();
+  const rows = db
+    .select({ quote: exchangeRates.quote, rate: exchangeRates.rate })
+    .from(exchangeRates)
+    .where(eq(exchangeRates.base, from))
+    .all();
+
+  const out: Record<string, number> = { [from]: 1 };
+  for (const r of rows) out[r.quote.toUpperCase()] = r.rate;
+  return out;
 }
 
 export function prettyCategory(c: string | null): string {

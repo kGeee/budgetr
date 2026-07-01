@@ -352,6 +352,34 @@ export const holdingCostBasisOverrides = sqliteTable("holding_cost_basis_overrid
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Cached FX pairs from the rates source (Frankfurter). One row per
+ * `base → quote` pair; `rate` is how many units of `quote` equal one unit of
+ * `base`, `asOf` is when the source last quoted it. Refreshed opportunistically
+ * (see lib/rates.ts) and read synchronously to convert any figure whose stored
+ * isoCurrencyCode differs from the chosen display currency.
+ */
+export const exchangeRates = sqliteTable(
+  "exchange_rates",
+  {
+    base: text("base").notNull(), // ISO 4217, e.g. USD
+    quote: text("quote").notNull(), // ISO 4217, e.g. EUR
+    rate: real("rate").notNull(), // 1 base = rate quote
+    asOf: integer("as_of", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.base, t.quote] })],
+);
+
+/**
+ * Generic key/value settings store. Used here for the display-currency
+ * preference (`displayCurrency`) and later for report-schedule config. Values
+ * are stored as text; callers own the (de)serialization.
+ */
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+});
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -369,3 +397,5 @@ export type RecurringStream = typeof recurringStreams.$inferSelect;
 export type VendorGroup = typeof vendorGroups.$inferSelect;
 export type VendorGroupMember = typeof vendorGroupMembers.$inferSelect;
 export type InvestmentSector = typeof investmentSectors.$inferSelect;
+export type ExchangeRate = typeof exchangeRates.$inferSelect;
+export type AppSetting = typeof appSettings.$inferSelect;
