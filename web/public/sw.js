@@ -1,55 +1,49 @@
-const CACHE = "budgetr-v1";
+// budgetr service worker.
+//
+// Deliberately minimal: it provides PWA installability and an offline fallback
+// page, and nothing else. It does NOT cache build assets. Next.js serves its
+// content-hashed `/_next/static/*` files as immutable, so the browser's own HTTP
+// cache handles them correctly — a rebuild produces new hashes that are fetched
+// fresh, and there is no service-worker copy that can go stale. (An earlier
+// version cached those chunks under a fixed name, which left the installed app
+// serving mismatched JS after every rebuild.)
+
+const CACHE = "budgetr-offline-v2";
 const OFFLINE_URL = "/offline";
 
-// Pre-cache the offline fallback on install.
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll([OFFLINE_URL])),
-  );
+  event.waitUntil(caches.open(CACHE).then((c) => c.add(OFFLINE_URL)));
+  // Take over as soon as possible so the fix reaches existing clients on reload.
   self.skipWaiting();
 });
 
-// Remove stale caches on activate.
 self.addEventListener("activate", (event) => {
+  // Drop every cache except the current offline one. This purges the stale
+  // build-asset caches left by older service workers, so upgrading to this
+  // version self-heals a client that was serving mismatched chunks.
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
-    ),
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
+      )
+      .then(() => self.clients.claim()),
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  const url = new URL(request.url);
+  if (request.method !== "GET") return;
+  if (new URL(request.url).origin !== self.location.origin) return;
 
-  // Only handle same-origin requests.
-  if (url.origin !== self.location.origin) return;
-
-  // Cache-first for Next.js static chunks (immutable, content-hashed).
-  if (url.pathname.startsWith("/_next/static/")) {
-    event.respondWith(
-      caches.match(request).then(
-        (cached) =>
-          cached ??
-          fetch(request).then((res) => {
-            const clone = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, clone));
-            return res;
-          }),
-      ),
-    );
-    return;
-  }
-
-  // Network-first for navigation (pages have live server data).
-  // Fall back to the offline page when the network is unavailable.
+  // Network-first for page navigations (the data is live and server-rendered);
+  // fall back to the offline page only when the network is unreachable. Static
+  // assets and data requests are intentionally left to the browser/HTTP cache.
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request).catch(() =>
         caches.match(OFFLINE_URL).then((r) => r ?? Response.error()),
       ),
     );
-    return;
   }
 });
