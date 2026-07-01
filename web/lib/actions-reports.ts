@@ -27,7 +27,9 @@ import {
 
 export type ReportFrequency = "daily" | "weekly" | "monthly";
 
-export const REPORT_FREQUENCIES: ReportFrequency[] = ["daily", "weekly", "monthly"];
+// Not exported: a "use server" module may only export async functions, so this
+// lives here as a module-local constant (the type is exported for callers).
+const REPORT_FREQUENCIES: ReportFrequency[] = ["daily", "weekly", "monthly"];
 
 /** Upsert one app_settings key (null clears it). */
 function putSetting(key: string, value: string) {

@@ -101,13 +101,20 @@ export function SpendHeatmap({
     return { weeks, months, total, maxDay };
   }, [data, start, end]);
 
+  // Change the selected day and drop any previously-loaded rows in the same
+  // update, so the drill-down never flashes the prior day's transactions before
+  // its fetch resolves. Kept out of the effect to avoid setState-in-effect churn.
+  function selectDate(date: string | null) {
+    setSelectedDate(date);
+    setTxns(null);
+    // Enter the loading state here (an event handler) rather than in the fetch
+    // effect, so the effect body holds no synchronous setState.
+    setLoading(date != null);
+  }
+
   useEffect(() => {
-    if (!selectedDate) {
-      setTxns(null);
-      return;
-    }
+    if (!selectedDate) return;
     let active = true;
-    setLoading(true);
     getTransactionsForDate(selectedDate)
       .then((rows) => {
         if (active) {
@@ -188,7 +195,7 @@ export function SpendHeatmap({
                         key={day.date}
                         type="button"
                         onClick={() =>
-                          setSelectedDate((prev) => (prev === day.date ? null : day.date))
+                          selectDate(selectedDate === day.date ? null : day.date)
                         }
                         title={`${
                           day.spent > 0 ? formatMoney(day.spent, "USD") : "No spending"
@@ -235,7 +242,7 @@ export function SpendHeatmap({
           <div className="flex items-center gap-2">
             <p className="eyebrow">{format(parseISO(selectedDate), "MMMM d, yyyy")}</p>
             <button
-              onClick={() => setSelectedDate(null)}
+              onClick={() => selectDate(null)}
               className="rounded-full p-0.5 text-[var(--faint)] transition hover:text-[var(--paper)]"
               aria-label="Clear selected day"
             >
