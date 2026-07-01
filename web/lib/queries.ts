@@ -1045,3 +1045,150 @@ export function prettyCategory(c: string | null): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 }
+
+// ── Period-scoped review queries ──────────────────────────────────────────────
+// Explicit [start, end] date bounds ('YYYY-MM-DD', both inclusive) rather than
+// the budget month, so /review can summarize any month or year. All exclude
+// internal transfers the same way the dashboard does, and stay synchronous.
+
+export type PeriodTotals = {
+  income: number;
+  expenses: number;
+  net: number;
+  txCount: number;
+};
+
+/**
+ * Income / expense / net / count for an arbitrary date window — the review
+ * hero numbers. Mirrors getMonthlyCashflow's transfer exclusion via the
+ * transferPrimaries subquery (income = inflows, expenses = outflows).
+ */
+export function getPeriodTotals(start: string, end: string): PeriodTotals {
+  const row = db.get<{ income: number; expenses: number; txCount: number }>(
+    sql`SELECT
+          SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS income,
+          SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS expenses,
+          COUNT(*) AS txCount
+        FROM transactions
+        WHERE pending = 0
+          AND (category IS NULL OR category NOT IN (${transferPrimaries}))
+          AND date >= ${start} AND date <= ${end}`,
+  );
+  const income = Number(row?.income ?? 0);
+  const expenses = Number(row?.expenses ?? 0);
+  return { income, expenses, net: income - expenses, txCount: Number(row?.txCount ?? 0) };
+}
+
+/** getTopMerchants, but over an explicit [start, end] window instead of `days`. */
+export function getTopMerchantsForPeriod(
+  start: string,
+  end: string,
+  limit = 8,
+): TopMerchant[] {
+  return db
+    .all<{ vendor: string | null; total: number; count: number }>(
+      sql`SELECT COALESCE(t.merchant_name, t.name) AS vendor,
+             SUM(t.amount) AS total, COUNT(*) AS count
+          FROM transactions t
+          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          WHERE t.pending = 0 AND t.amount > 0
+            AND (cat."group" IS NULL OR cat."group" != 'transfer')
+            AND t.date >= ${start} AND t.date <= ${end}
+          GROUP BY vendor
+          ORDER BY total DESC
+          LIMIT ${limit}`,
+    )
+    .map((r) => ({
+      vendor: cleanTransactionName(r.vendor ?? "Unknown", null),
+      total: Number(r.total),
+      count: Number(r.count),
+    }));
+}
+
+/** getSpendingByCategory, but over an explicit [start, end] window. */
+export function getCategorySpendForPeriod(start: string, end: string): CategorySpend[] {
+  return db
+    .all<{ categoryId: string | null; name: string | null; icon: string | null; total: number }>(
+      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon, SUM(t.amount) AS total
+          FROM transactions t
+          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          WHERE t.pending = 0 AND t.amount > 0
+            AND (cat."group" IS NULL OR cat."group" != 'transfer')
+            AND t.date >= ${start} AND t.date <= ${end}
+          GROUP BY cat.id
+          ORDER BY total DESC`,
+    )
+    .map((r) => ({
+      categoryId: r.categoryId,
+      category: r.name ?? "Uncategorized",
+      icon: r.icon,
+      total: Number(r.total),
+    }));
+}
+
+export type BiggestPurchase = {
+  id: string;
+  date: string;
+  vendor: string;
+  amount: number;
+  categoryName: string;
+  categoryIcon: string | null;
+};
+
+/** The single largest outflows (positive amounts) in the window, transfers excluded. */
+export function getBiggestPurchases(
+  start: string,
+  end: string,
+  limit = 6,
+): BiggestPurchase[] {
+  return db
+    .all<{
+      id: string;
+      date: string;
+      name: string;
+      merchantName: string | null;
+      amount: number;
+      categoryName: string | null;
+      categoryIcon: string | null;
+    }>(
+      sql`SELECT t.id AS id, t.date AS date, t.name AS name, t.merchant_name AS merchantName,
+             t.amount AS amount, cat.name AS categoryName, cat.icon AS categoryIcon
+          FROM transactions t
+          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          WHERE t.pending = 0 AND t.amount > 0
+            AND (cat."group" IS NULL OR cat."group" != 'transfer')
+            AND t.date >= ${start} AND t.date <= ${end}
+          ORDER BY t.amount DESC
+          LIMIT ${limit}`,
+    )
+    .map((r) => ({
+      id: r.id,
+      date: r.date,
+      vendor: cleanTransactionName(r.name, r.merchantName),
+      amount: Number(r.amount),
+      categoryName: r.categoryName ?? "Uncategorized",
+      categoryIcon: r.categoryIcon,
+    }));
+}
+
+/**
+ * Total spend per calendar month for `year` ('YYYY'), transfers excluded —
+ * feeds the month-by-month review bar. Returns all 12 months (0 for empty
+ * ones) so the chart reads as a full year even before it fills in.
+ */
+export function getMonthlySpendForYear(year: number): { month: string; spent: number }[] {
+  const rows = db.all<{ month: string; spent: number }>(
+    sql`SELECT substr(date,1,7) AS month,
+          SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS spent
+        FROM transactions
+        WHERE pending = 0
+          AND (category IS NULL OR category NOT IN (${transferPrimaries}))
+          AND substr(date,1,4) = ${String(year)}
+        GROUP BY month`,
+  );
+  const byMonth = new Map(rows.map((r) => [r.month, Number(r.spent)]));
+  return Array.from({ length: 12 }, (_, i) => {
+    const month = `${year}-${String(i + 1).padStart(2, "0")}`;
+    return { month, spent: byMonth.get(month) ?? 0 };
+  });
+}
