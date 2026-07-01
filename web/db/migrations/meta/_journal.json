@@ -85,6 +85,13 @@
       "when": 1782887200402,
       "tag": "0011_condemned_tyrannus",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1782887656300,
+      "tag": "0012_melted_shatterstar",
+      "breakpoints": true
     }
   ]
 }

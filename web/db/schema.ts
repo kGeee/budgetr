@@ -439,6 +439,23 @@ export const attachments = sqliteTable(
   (t) => [index("attachments_txn_idx").on(t.transactionId)],
 );
 
+/**
+ * A named, reusable set of transaction filter criteria for the transactions
+ * search bar. `query` is the JSON-serialized TxnCriteria (see lib/queries.ts) —
+ * kept opaque here so new criteria fields never require a schema change. Purely
+ * additive: nothing else references this table.
+ */
+export const savedFilters = sqliteTable(
+  "saved_filters",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    query: text("query").notNull(), // JSON-serialized TxnCriteria
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("saved_filters_created_idx").on(t.createdAt)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -459,3 +476,4 @@ export type InvestmentSector = typeof investmentSectors.$inferSelect;
 export type TransactionSplit = typeof transactionSplits.$inferSelect;
 export type TransactionMatch = typeof transactionMatches.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
+export type SavedFilter = typeof savedFilters.$inferSelect;

@@ -9,6 +9,7 @@ import {
   holdingCostBasisOverrides,
   investmentSectors,
   manualHoldings,
+  savedFilters,
   tagBudgets,
   tagRules,
   tags,
@@ -34,6 +35,7 @@ import {
   type CategoryMonth,
   type TransactionRow,
   type TransactionSplitRow,
+  type TxnCriteria,
 } from "@/lib/queries";
 import { getMatchCounterpart, type MatchCounterpart, type MatchKind } from "@/lib/matching";
 import { deleteAttachmentFile, saveAttachmentFile } from "@/lib/attachments";
@@ -475,6 +477,28 @@ export async function createTagRule(pattern: string, tagName: string) {
 
 export async function deleteTagRule(id: string) {
   db.delete(tagRules).where(eq(tagRules.id, id)).run();
+  revalidateAll();
+}
+
+// ── Saved filters ─────────────────────────────────────────────────────────────
+
+/** Persist a named transaction filter set (criteria JSON-serialized). */
+export async function saveFilter(name: string, criteria: TxnCriteria) {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  db.insert(savedFilters)
+    .values({
+      id: `filter_${crypto.randomUUID().slice(0, 8)}`,
+      name: trimmed,
+      query: JSON.stringify(criteria),
+      createdAt: new Date(),
+    })
+    .run();
+  revalidateAll();
+}
+
+export async function deleteFilter(id: string) {
+  db.delete(savedFilters).where(eq(savedFilters.id, id)).run();
   revalidateAll();
 }
 

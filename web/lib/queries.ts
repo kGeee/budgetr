@@ -7,9 +7,11 @@ import {
   investmentTransactions,
   items,
   manualHoldings,
+  savedFilters,
   securities,
   vendorGroupMembers,
   vendorGroups,
+  type SavedFilter,
 } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
@@ -592,6 +594,65 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
 
 export function getRecentTransactions(limit = 50): TransactionRow[] {
   return selectTransactions(null, limit);
+}
+
+/**
+ * Filter criteria for the transactions search bar. Every field is optional; the
+ * empty object matches everything. Serialized to JSON in the saved_filters table
+ * so recalling a filter is just `JSON.parse` back into this shape.
+ */
+export type TxnCriteria = {
+  /** Free text matched (case-insensitive substring) over name / merchant / notes. */
+  q?: string;
+  accountId?: string;
+  /** Effective (or split) category — see txnInCategory. */
+  categoryId?: string;
+  tagId?: string;
+  dateFrom?: string; // YYYY-MM-DD, inclusive
+  dateTo?: string; // YYYY-MM-DD, inclusive
+  amountMin?: number; // abs(amount) >=
+  amountMax?: number; // abs(amount) <=
+};
+
+/**
+ * Full-text-ish search over transactions. Composes each supplied criterion into
+ * a `WHERE` fragment and hands it to the shared selectTransactions() selector —
+ * no selector rewrite. The text clause reuses the LIKE idiom from getTagRules
+ * (lower(col) LIKE '%q%'); category membership reuses txnInCategory so split
+ * transactions still surface under any of their split categories.
+ */
+export function searchTransactions(criteria: TxnCriteria, limit = 200): TransactionRow[] {
+  const clauses: ReturnType<typeof sql>[] = [];
+
+  const q = criteria.q?.trim().toLowerCase();
+  if (q) {
+    const like = `%${q}%`;
+    clauses.push(sql`(
+      lower(t.name) LIKE ${like}
+      OR lower(COALESCE(t.merchant_name, '')) LIKE ${like}
+      OR lower(COALESCE(t.notes, '')) LIKE ${like}
+    )`);
+  }
+
+  if (criteria.accountId) clauses.push(sql`t.account_id = ${criteria.accountId}`);
+  if (criteria.categoryId) clauses.push(txnInCategory(criteria.categoryId));
+  if (criteria.tagId) {
+    clauses.push(sql`EXISTS (
+      SELECT 1 FROM transaction_tags tt
+      WHERE tt.transaction_id = t.id AND tt.tag_id = ${criteria.tagId})`);
+  }
+  if (criteria.dateFrom) clauses.push(sql`t.date >= ${criteria.dateFrom}`);
+  if (criteria.dateTo) clauses.push(sql`t.date <= ${criteria.dateTo}`);
+  if (criteria.amountMin != null) clauses.push(sql`abs(t.amount) >= ${criteria.amountMin}`);
+  if (criteria.amountMax != null) clauses.push(sql`abs(t.amount) <= ${criteria.amountMax}`);
+
+  const where = clauses.length ? sql.join(clauses, sql` AND `) : null;
+  return selectTransactions(where, limit);
+}
+
+/** All saved transaction filters, newest first. */
+export function getSavedFilters(): SavedFilter[] {
+  return db.select().from(savedFilters).orderBy(desc(savedFilters.createdAt)).all();
 }
 
 export type VendorRow = {
