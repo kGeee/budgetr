@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
   allocationTargets,
+  attachments,
   budgetRollovers,
   budgets,
   categories,
@@ -13,10 +14,13 @@ import {
   investmentGeographies,
   investmentSectors,
   manualHoldings,
+  savedFilters,
   tagBudgets,
   tagRules,
   tags,
   taxLotOverrides,
+  transactionMatches,
+  transactionSplits,
   transactionTags,
   transactions,
   vendorGroupMembers,
@@ -27,14 +31,25 @@ import { applyTagRules } from "@/lib/tag-rules";
 import { cleanTransactionName } from "@/lib/utils";
 import {
   effectiveCatId,
+  getAttachments,
   getCategoryDailySpend,
   getCategoryMonthlyBreakdown,
+  getCategorySuggestion,
   getCategoryTransactions,
+  getTagSuggestions,
+  getTransactionSplits,
   getTransactionsByDate,
+  type AttachmentRow,
   type CategoryDay,
   type CategoryMonth,
+  type CategorySuggestion,
+  type TagSuggestion,
   type TransactionRow,
+  type TransactionSplitRow,
+  type TxnCriteria,
 } from "@/lib/queries";
+import { getMatchCounterpart, type MatchCounterpart, type MatchKind } from "@/lib/matching";
+import { deleteAttachmentFile, saveAttachmentFile } from "@/lib/attachments";
 
 /**
  * Server Actions for budgetr's user overlay (categories, review status, tags,
@@ -205,6 +220,198 @@ export async function setTransactionNotes(txnId: string, notes: string) {
   revalidateAll();
 }
 
+// ── Transaction splits ────────────────────────────────────────────────────────
+
+export type SplitInput = { categoryId: string | null; amount: number; note?: string | null };
+
+/** Read-only loader so the detail drawer can lazily fetch a transaction's splits. */
+export async function loadTransactionSplits(txnId: string): Promise<TransactionSplitRow[]> {
+  return getTransactionSplits(txnId);
+}
+
+/**
+ * Replace a transaction's category splits (delete-then-insert in one pass). The
+ * split amounts must sum to the transaction's own amount — reject otherwise, so
+ * category/budget reporting can never over- or under-count. An empty array clears
+ * the splits (the transaction reverts to resolving through effectiveCatId).
+ */
+export async function setTransactionSplits(
+  txnId: string,
+  splits: SplitInput[],
+): Promise<{ ok: boolean; error?: string }> {
+  const tx = db
+    .select({ amount: transactions.amount })
+    .from(transactions)
+    .where(eq(transactions.id, txnId))
+    .get();
+  if (!tx) return { ok: false, error: "Transaction not found." };
+
+  const clean = splits.filter((s) => Number.isFinite(s.amount) && s.amount !== 0);
+  if (clean.length === 0) {
+    db.delete(transactionSplits).where(eq(transactionSplits.transactionId, txnId)).run();
+    revalidateAll();
+    return { ok: true };
+  }
+
+  // Split amounts must reconcile to the parent amount (allow a cent of rounding).
+  const sum = clean.reduce((a, s) => a + s.amount, 0);
+  if (Math.abs(sum - tx.amount) > 0.01) {
+    return {
+      ok: false,
+      error: `Splits must add up to ${tx.amount.toFixed(2)} (currently ${sum.toFixed(2)}).`,
+    };
+  }
+
+  db.transaction((t) => {
+    t.delete(transactionSplits).where(eq(transactionSplits.transactionId, txnId)).run();
+    for (const s of clean) {
+      t.insert(transactionSplits)
+        .values({
+          id: `split_${crypto.randomUUID().slice(0, 8)}`,
+          transactionId: txnId,
+          categoryId: s.categoryId,
+          amount: s.amount,
+          note: s.note?.trim() || null,
+        })
+        .run();
+    }
+  });
+  revalidateAll();
+  return { ok: true };
+}
+
+/** Drop every split on a transaction; it reverts to single-category resolution. */
+export async function clearSplits(txnId: string) {
+  db.delete(transactionSplits).where(eq(transactionSplits.transactionId, txnId)).run();
+  revalidateAll();
+}
+
+// ── Receipt attachments ───────────────────────────────────────────────────────
+
+/** Read-only loader so the detail drawer can lazily fetch a transaction's files. */
+export async function loadAttachments(txnId: string): Promise<AttachmentRow[]> {
+  return getAttachments(txnId);
+}
+
+/**
+ * Upload a receipt/invoice file for a transaction. The bytes are written to disk
+ * under ATTACHMENTS_DIR (outside public/) and a metadata row records where. The
+ * FormData is expected to carry `transactionId` and a `file` File. Returns a
+ * simple result the client drawer can surface without throwing.
+ */
+export async function uploadAttachment(
+  form: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const txnId = String(form.get("transactionId") ?? "");
+  const file = form.get("file");
+  if (!txnId) return { ok: false, error: "Missing transaction." };
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "Choose a file to upload." };
+  }
+  // Guard against runaway uploads (25 MB is generous for a receipt scan/PDF).
+  if (file.size > 25 * 1024 * 1024) {
+    return { ok: false, error: "File is too large (max 25 MB)." };
+  }
+
+  const txn = db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(eq(transactions.id, txnId))
+    .get();
+  if (!txn) return { ok: false, error: "Transaction not found." };
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const filePath = saveAttachmentFile(buffer, file.name);
+
+  db.insert(attachments)
+    .values({
+      id: `att_${crypto.randomUUID().slice(0, 8)}`,
+      transactionId: txnId,
+      filePath,
+      mimeType: file.type || null,
+      size: file.size,
+      originalName: file.name || null,
+      createdAt: new Date(),
+    })
+    .run();
+
+  revalidateAll();
+  return { ok: true };
+}
+
+/** Delete an attachment — remove the on-disk file, then its metadata row. */
+export async function deleteAttachment(id: string) {
+  const row = db
+    .select({ filePath: attachments.filePath })
+    .from(attachments)
+    .where(eq(attachments.id, id))
+    .get();
+  if (row) deleteAttachmentFile(row.filePath);
+  db.delete(attachments).where(eq(attachments.id, id)).run();
+  revalidateAll();
+}
+
+// ── Refund & transfer matching ──────────────────────────────────────────────
+
+/** Read-only loader so the detail drawer can lazily fetch a txn's match counterpart. */
+export async function loadMatchCounterpart(txnId: string): Promise<MatchCounterpart | null> {
+  return getMatchCounterpart(txnId);
+}
+
+/**
+ * Link two offsetting transactions as a confirmed match, so both legs drop out of
+ * cashflow and category spend. Idempotent — re-confirming (or flipping a prior
+ * dismissal) just sets the pair back to `confirmed`.
+ */
+export async function confirmMatch(aId: string, bId: string, kind: MatchKind) {
+  if (!aId || !bId || aId === bId) return;
+  db.insert(transactionMatches)
+    .values({
+      id: `match_${crypto.randomUUID().slice(0, 8)}`,
+      txnAId: aId,
+      txnBId: bId,
+      kind,
+      status: "confirmed",
+      createdAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [transactionMatches.txnAId, transactionMatches.txnBId],
+      set: { status: "confirmed", kind },
+    })
+    .run();
+  revalidateAll();
+}
+
+/**
+ * Record a `dismissed` tombstone for a suggested pair so it's never re-suggested,
+ * without excluding either transaction from reporting.
+ */
+export async function dismissMatch(aId: string, bId: string) {
+  if (!aId || !bId || aId === bId) return;
+  db.insert(transactionMatches)
+    .values({
+      id: `match_${crypto.randomUUID().slice(0, 8)}`,
+      txnAId: aId,
+      txnBId: bId,
+      kind: "transfer",
+      status: "dismissed",
+      createdAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [transactionMatches.txnAId, transactionMatches.txnBId],
+      set: { status: "dismissed" },
+    })
+    .run();
+  revalidateAll();
+}
+
+/** Remove a match link entirely (both legs return to normal reporting). */
+export async function unmatch(id: string) {
+  if (!id) return;
+  db.delete(transactionMatches).where(eq(transactionMatches.id, id)).run();
+  revalidateAll();
+}
+
 // ── Tags ──────────────────────────────────────────────────────────────────────
 
 /** Find-or-create a tag by name (case-insensitive), returning its id. */
@@ -237,6 +444,19 @@ export async function removeTagFromTransaction(txnId: string, tagId: string) {
   revalidateAll();
 }
 
+// ── History-based suggestions ───────────────────────────────────────────────────
+
+export type TxnSuggestion = { category: CategorySuggestion | null; tags: TagSuggestion[] };
+
+/**
+ * Read-only loader wrapping the history-based category + tag suggestions so
+ * client components (the detail drawer, the review inbox) can fetch on open —
+ * the same lazy pattern as getVendorReclassCount. Nothing is mutated here.
+ */
+export async function suggestForTransaction(txnId: string): Promise<TxnSuggestion> {
+  return { category: getCategorySuggestion(txnId), tags: getTagSuggestions(txnId) };
+}
+
 // ── Auto-tag rules ────────────────────────────────────────────────────────────
 
 /**
@@ -266,14 +486,77 @@ export async function createTagRuleFromTransaction(txnId: string, tagName: strin
   revalidateAll();
 }
 
-/** Manually create a rule: when merchant/name contains `pattern`, apply `tagName`. */
-export async function createTagRule(pattern: string, tagName: string) {
-  const p = pattern.trim().toLowerCase();
+/** Optional conditions layered on top of the pattern/tag of a rule. */
+export type TagRuleOptions = {
+  matchType?: "contains" | "exact" | "regex";
+  minAmount?: number | null;
+  maxAmount?: number | null;
+  accountId?: string | null;
+  categoryId?: string | null;
+};
+
+// `contains`/`exact` match on the lowercased vendor signal, so store the pattern
+// lowercased; `regex` is tested case-insensitively in JS, so keep it verbatim.
+function normalizePattern(pattern: string, matchType: string): string {
+  return matchType === "regex" ? pattern.trim() : pattern.trim().toLowerCase();
+}
+
+/**
+ * Manually create a rule: when a transaction matches `pattern` (per matchType)
+ * and every set condition, apply `tagName` (and optionally a category).
+ */
+export async function createTagRule(
+  pattern: string,
+  tagName: string,
+  opts: TagRuleOptions = {},
+) {
+  const matchType = opts.matchType ?? "contains";
+  const p = normalizePattern(pattern, matchType);
   const t = tagName.trim();
   if (!p || !t) return;
   const tagId = ensureTag(t);
   db.insert(tagRules)
-    .values({ id: `rule_${crypto.randomUUID().slice(0, 8)}`, pattern: p, label: pattern.trim(), tagId, createdAt: new Date() })
+    .values({
+      id: `rule_${crypto.randomUUID().slice(0, 8)}`,
+      pattern: p,
+      label: pattern.trim(),
+      tagId,
+      matchType,
+      minAmount: opts.minAmount ?? null,
+      maxAmount: opts.maxAmount ?? null,
+      accountId: opts.accountId ?? null,
+      categoryId: opts.categoryId ?? null,
+      createdAt: new Date(),
+    })
+    .run();
+  applyTagRules();
+  revalidateAll();
+}
+
+/** Edit an existing rule's pattern, tag, and conditions, then re-backfill. */
+export async function updateTagRule(
+  id: string,
+  pattern: string,
+  tagName: string,
+  opts: TagRuleOptions = {},
+) {
+  const matchType = opts.matchType ?? "contains";
+  const p = normalizePattern(pattern, matchType);
+  const t = tagName.trim();
+  if (!p || !t) return;
+  const tagId = ensureTag(t);
+  db.update(tagRules)
+    .set({
+      pattern: p,
+      label: pattern.trim(),
+      tagId,
+      matchType,
+      minAmount: opts.minAmount ?? null,
+      maxAmount: opts.maxAmount ?? null,
+      accountId: opts.accountId ?? null,
+      categoryId: opts.categoryId ?? null,
+    })
+    .where(eq(tagRules.id, id))
     .run();
   applyTagRules();
   revalidateAll();
@@ -281,6 +564,28 @@ export async function createTagRule(pattern: string, tagName: string) {
 
 export async function deleteTagRule(id: string) {
   db.delete(tagRules).where(eq(tagRules.id, id)).run();
+  revalidateAll();
+}
+
+// ── Saved filters ─────────────────────────────────────────────────────────────
+
+/** Persist a named transaction filter set (criteria JSON-serialized). */
+export async function saveFilter(name: string, criteria: TxnCriteria) {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  db.insert(savedFilters)
+    .values({
+      id: `filter_${crypto.randomUUID().slice(0, 8)}`,
+      name: trimmed,
+      query: JSON.stringify(criteria),
+      createdAt: new Date(),
+    })
+    .run();
+  revalidateAll();
+}
+
+export async function deleteFilter(id: string) {
+  db.delete(savedFilters).where(eq(savedFilters.id, id)).run();
   revalidateAll();
 }
 

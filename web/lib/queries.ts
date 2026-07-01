@@ -11,11 +11,13 @@ import {
   investmentTransactions,
   items,
   manualHoldings,
+  savedFilters,
   savingsContributions,
   securities,
   taxLotOverrides,
   vendorGroupMembers,
   vendorGroups,
+  type SavedFilter,
 } from "@/db/schema";
 import type { SavingsContribution } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
@@ -53,6 +55,141 @@ export function effectiveCatId(alias: string) {
     ${a}.user_category_id,
     (SELECT c.id FROM categories c WHERE c.plaid_primary = ${a}.category)
   )`;
+}
+
+/**
+ * SQL predicate: the transaction under alias `alias` is a leg of a *confirmed*
+ * refund/transfer match. Such transactions are internal money movement (a
+ * transfer to yourself) or a reversal (a refund), so excluding both legs keeps
+ * cashflow and category spend from double-counting. Alias-parameterized to
+ * compose inside aliased joins/subqueries.
+ */
+function isConfirmedMatch(alias: string) {
+  const a = sql.raw(alias);
+  return sql`EXISTS (
+    SELECT 1 FROM transaction_matches m
+    WHERE m.status = 'confirmed' AND (m.txn_a_id = ${a}.id OR m.txn_b_id = ${a}.id)
+  )`;
+}
+
+/**
+ * A CTE named `spend_rows` that flattens every transaction into one or more
+ * category-attributed rows, so category/budget reporting stays correct when a
+ * transaction is split (see the transaction_splits overlay):
+ *  - Unsplit transactions contribute a single row carrying the full amount at
+ *    their effective category (effectiveCatId).
+ *  - Split transactions contribute one row per split — the split's amount at the
+ *    split's category — and never the parent amount, so nothing double-counts.
+ *
+ * Each row exposes (txn_id, date, pending, amount, category_id) with the same
+ * sign convention as transactions.amount. Splice into a query with
+ * `sql`WITH ${spendRowsCte} SELECT ... FROM spend_rows sr ...``.
+ */
+const spendRowsCte = sql`spend_rows AS (
+  SELECT t.id AS txn_id, t.date AS date, t.pending AS pending, t.amount AS amount,
+         ${effectiveCatId("t")} AS category_id
+  FROM transactions t
+  WHERE NOT EXISTS (SELECT 1 FROM transaction_splits s WHERE s.transaction_id = t.id)
+    AND NOT ${isConfirmedMatch("t")}
+  UNION ALL
+  SELECT t.id AS txn_id, t.date AS date, t.pending AS pending, s.amount AS amount,
+         s.category_id AS category_id
+  FROM transactions t
+  JOIN transaction_splits s ON s.transaction_id = t.id
+  WHERE NOT ${isConfirmedMatch("t")}
+)`;
+
+/**
+ * SQL matching transactions (alias `t`) that roll up to category `id`: either an
+ * unsplit transaction whose effective category is `id`, or a split transaction
+ * with at least one split in `id`. The full transaction is returned, so a split
+ * transaction can legitimately appear under more than one category.
+ */
+function txnInCategory(id: string): ReturnType<typeof sql> {
+  return sql`(
+    (NOT EXISTS (SELECT 1 FROM transaction_splits s WHERE s.transaction_id = t.id)
+      AND ${effectiveCatId("t")} = ${id})
+    OR EXISTS (SELECT 1 FROM transaction_splits s
+               WHERE s.transaction_id = t.id AND s.category_id = ${id})
+  )`;
+}
+
+export type TransactionSplitRow = {
+  id: string;
+  transactionId: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryIcon: string | null;
+  amount: number;
+  note: string | null;
+};
+
+/** The splits overlaying one transaction, joined to their category name/icon. */
+export function getTransactionSplits(txnId: string): TransactionSplitRow[] {
+  return db
+    .all<{
+      id: string;
+      transactionId: string;
+      categoryId: string | null;
+      categoryName: string | null;
+      categoryIcon: string | null;
+      amount: number;
+      note: string | null;
+    }>(sql`
+      SELECT s.id AS id, s.transaction_id AS transactionId, s.category_id AS categoryId,
+             cat.name AS categoryName, cat.icon AS categoryIcon,
+             s.amount AS amount, s.note AS note
+      FROM transaction_splits s
+      LEFT JOIN categories cat ON cat.id = s.category_id
+      WHERE s.transaction_id = ${txnId}
+      ORDER BY s.rowid ASC`)
+    .map((r) => ({
+      id: r.id,
+      transactionId: r.transactionId,
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      categoryIcon: r.categoryIcon,
+      amount: Number(r.amount),
+      note: r.note,
+    }));
+}
+
+export type AttachmentRow = {
+  id: string;
+  transactionId: string;
+  mimeType: string | null;
+  size: number | null;
+  originalName: string | null;
+  createdAt: number; // epoch ms
+  /** True when the file is a raster/vector image (drives inline thumbnails). */
+  isImage: boolean;
+};
+
+/** Metadata for the files attached to one transaction (newest first). */
+export function getAttachments(txnId: string): AttachmentRow[] {
+  return db
+    .all<{
+      id: string;
+      transactionId: string;
+      mimeType: string | null;
+      size: number | null;
+      originalName: string | null;
+      createdAt: number;
+    }>(sql`
+      SELECT id, transaction_id AS transactionId, mime_type AS mimeType,
+             size, original_name AS originalName, created_at AS createdAt
+      FROM attachments
+      WHERE transaction_id = ${txnId}
+      ORDER BY created_at DESC, id DESC`)
+    .map((r) => ({
+      id: r.id,
+      transactionId: r.transactionId,
+      mimeType: r.mimeType,
+      size: r.size,
+      originalName: r.originalName,
+      createdAt: Number(r.createdAt) * 1000, // stored as unix seconds (timestamp mode)
+      isImage: !!r.mimeType && r.mimeType.startsWith("image/"),
+    }));
 }
 
 export type NetWorth = { assets: number; liabilities: number; net: number };
@@ -93,9 +230,10 @@ export function getMonthlyCashflow(months = 6): {
     sql`SELECT substr(date,1,7) AS month,
           SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS income,
           SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS expenses
-        FROM transactions
+        FROM transactions t
         WHERE pending = 0
           AND (category IS NULL OR category NOT IN (${transferPrimaries}))
+          AND NOT ${isConfirmedMatch("t")}
         GROUP BY month
         ORDER BY month DESC
         LIMIT ${months}`,
@@ -115,12 +253,13 @@ export type CategorySpend = {
 export function getSpendingByCategory(days = 30): CategorySpend[] {
   return db
     .all<{ categoryId: string | null; name: string | null; icon: string | null; total: number }>(
-      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon, SUM(t.amount) AS total
-          FROM transactions t
-          LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
-          WHERE t.pending = 0 AND t.amount > 0
+      sql`WITH ${spendRowsCte}
+          SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon, SUM(sr.amount) AS total
+          FROM spend_rows sr
+          LEFT JOIN categories cat ON cat.id = sr.category_id
+          WHERE sr.pending = 0 AND sr.amount > 0
             AND (cat."group" IS NULL OR cat."group" != 'transfer')
-            AND t.date >= date('now', ${"-" + days + " days"})
+            AND sr.date >= date('now', ${"-" + days + " days"})
           GROUP BY cat.id
           ORDER BY total DESC`,
     )
@@ -201,13 +340,14 @@ export function getBudgetsWithSpend(): BudgetRow[] {
       budget: number | null;
       spent: number;
     }>(
-      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
+      sql`WITH ${spendRowsCte}
+          SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
              b.amount AS budget,
              COALESCE((
-               SELECT SUM(t.amount) FROM transactions t
-               WHERE t.pending = 0 AND t.amount > 0
-                 AND ${effectiveCatId("t")} = cat.id
-                 AND substr(t.date, 1, 7) = ${month}
+               SELECT SUM(sr.amount) FROM spend_rows sr
+               WHERE sr.pending = 0 AND sr.amount > 0
+                 AND sr.category_id = cat.id
+                 AND substr(sr.date, 1, 7) = ${month}
              ), 0) AS spent
           FROM categories cat
           LEFT JOIN budgets b ON b.category_id = cat.id
@@ -462,6 +602,12 @@ export type TransactionRow = {
   reviewed: boolean;
   notes: string | null;
   recurring: boolean;
+  /** Number of category splits overlaying this transaction (0 = unsplit). */
+  splitCount: number;
+  /** Number of receipt/invoice files attached (0 = none). Drives the paperclip. */
+  attachmentCount: number;
+  /** True when this transaction is a leg of a confirmed refund/transfer match. */
+  matched: boolean;
   tags: TxTag[];
 };
 
@@ -484,6 +630,9 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     reviewed: number;
     notes: string | null;
     recurring: number;
+    splitCount: number;
+    attachmentCount: number;
+    matched: number;
     tagsJson: string | null;
   }>(sql`
     SELECT t.id AS id, t.date AS date, t.name AS name, t.merchant_name AS merchantName,
@@ -491,6 +640,9 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
            t.pending AS pending, t.category AS plaidCategory,
            cat.id AS categoryId, cat.name AS categoryName, cat.icon AS categoryIcon,
            t.reviewed AS reviewed, t.notes AS notes,
+           (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) AS splitCount,
+           (SELECT COUNT(*) FROM attachments at WHERE at.transaction_id = t.id) AS attachmentCount,
+           ${isConfirmedMatch("t")} AS matched,
            EXISTS(SELECT 1 FROM recurring_streams r
                   WHERE r.is_active = 1 AND r.merchant_name IS NOT NULL
                     AND r.merchant_name = t.merchant_name) AS recurring,
@@ -521,12 +673,74 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     reviewed: !!r.reviewed,
     notes: r.notes,
     recurring: !!r.recurring,
+    splitCount: Number(r.splitCount),
+    attachmentCount: Number(r.attachmentCount),
+    matched: !!r.matched,
     tags: r.tagsJson ? (JSON.parse(r.tagsJson) as TxTag[]) : [],
   }));
 }
 
 export function getRecentTransactions(limit = 50): TransactionRow[] {
   return selectTransactions(null, limit);
+}
+
+/**
+ * Filter criteria for the transactions search bar. Every field is optional; the
+ * empty object matches everything. Serialized to JSON in the saved_filters table
+ * so recalling a filter is just `JSON.parse` back into this shape.
+ */
+export type TxnCriteria = {
+  /** Free text matched (case-insensitive substring) over name / merchant / notes. */
+  q?: string;
+  accountId?: string;
+  /** Effective (or split) category — see txnInCategory. */
+  categoryId?: string;
+  tagId?: string;
+  dateFrom?: string; // YYYY-MM-DD, inclusive
+  dateTo?: string; // YYYY-MM-DD, inclusive
+  amountMin?: number; // abs(amount) >=
+  amountMax?: number; // abs(amount) <=
+};
+
+/**
+ * Full-text-ish search over transactions. Composes each supplied criterion into
+ * a `WHERE` fragment and hands it to the shared selectTransactions() selector —
+ * no selector rewrite. The text clause reuses the LIKE idiom from getTagRules
+ * (lower(col) LIKE '%q%'); category membership reuses txnInCategory so split
+ * transactions still surface under any of their split categories.
+ */
+export function searchTransactions(criteria: TxnCriteria, limit = 200): TransactionRow[] {
+  const clauses: ReturnType<typeof sql>[] = [];
+
+  const q = criteria.q?.trim().toLowerCase();
+  if (q) {
+    const like = `%${q}%`;
+    clauses.push(sql`(
+      lower(t.name) LIKE ${like}
+      OR lower(COALESCE(t.merchant_name, '')) LIKE ${like}
+      OR lower(COALESCE(t.notes, '')) LIKE ${like}
+    )`);
+  }
+
+  if (criteria.accountId) clauses.push(sql`t.account_id = ${criteria.accountId}`);
+  if (criteria.categoryId) clauses.push(txnInCategory(criteria.categoryId));
+  if (criteria.tagId) {
+    clauses.push(sql`EXISTS (
+      SELECT 1 FROM transaction_tags tt
+      WHERE tt.transaction_id = t.id AND tt.tag_id = ${criteria.tagId})`);
+  }
+  if (criteria.dateFrom) clauses.push(sql`t.date >= ${criteria.dateFrom}`);
+  if (criteria.dateTo) clauses.push(sql`t.date <= ${criteria.dateTo}`);
+  if (criteria.amountMin != null) clauses.push(sql`abs(t.amount) >= ${criteria.amountMin}`);
+  if (criteria.amountMax != null) clauses.push(sql`abs(t.amount) <= ${criteria.amountMax}`);
+
+  const where = clauses.length ? sql.join(clauses, sql` AND `) : null;
+  return selectTransactions(where, limit);
+}
+
+/** All saved transaction filters, newest first. */
+export function getSavedFilters(): SavedFilter[] {
+  return db.select().from(savedFilters).orderBy(desc(savedFilters.createdAt)).all();
 }
 
 export type VendorRow = {
@@ -696,6 +910,105 @@ export function getTransactionsToReview(limit = 100): TransactionRow[] {
   return selectTransactions(sql`t.reviewed = 0 AND t.pending = 0`, limit);
 }
 
+// ── History-based suggestions ───────────────────────────────────────────────────
+
+/**
+ * Group-aware vendor match for a *single* transaction id — mirrors the logic in
+ * getVendorReclassCount. Resolves the transaction's vendor key, expands it to
+ * the whole vendor group when it belongs to one, and returns a `t.`-aliased SQL
+ * predicate matching every transaction from that vendor. Returns null when the
+ * transaction doesn't exist. The predicate reuses `vendorKeyExpr` (alias `t`),
+ * so splice it into a query that aliases the transactions table as `t`.
+ */
+function vendorMatchForTxn(
+  txnId: string,
+): { match: ReturnType<typeof sql>; vendorKey: string } | null {
+  const tx = db.get<{ vendorKey: string }>(
+    sql`SELECT COALESCE(NULLIF(merchant_name, ''), name) AS vendorKey
+        FROM transactions WHERE id = ${txnId}`,
+  );
+  if (!tx) return null;
+
+  const grp = db.get<{ groupId: string }>(
+    sql`SELECT group_id AS groupId FROM vendor_group_members WHERE vendor_key = ${tx.vendorKey}`,
+  );
+  const match = grp
+    ? sql`${vendorKeyExpr} IN (SELECT vendor_key FROM vendor_group_members WHERE group_id = ${grp.groupId})`
+    : sql`${vendorKeyExpr} = ${tx.vendorKey}`;
+  return { match, vendorKey: tx.vendorKey };
+}
+
+export type CategorySuggestion = {
+  categoryId: string;
+  categoryName: string;
+  icon: string | null;
+  /** How many of this vendor's other transactions the user filed under it. */
+  count: number;
+  /** Share of this vendor's user-classified history that used it (0–1). */
+  confidence: number;
+};
+
+/**
+ * ML-lite category suggestion: how did the user previously classify this vendor?
+ * Counts the *explicit* user category overrides on this vendor's OTHER (group-aware)
+ * transactions and returns the most frequent one with its count and confidence
+ * (its share of all this vendor's classified history), or null when there's no
+ * history to learn from. Pure read-model over the existing overlay — no schema.
+ */
+export function getCategorySuggestion(txnId: string): CategorySuggestion | null {
+  const v = vendorMatchForTxn(txnId);
+  if (!v) return null;
+
+  const rows = db.all<{ categoryId: string; categoryName: string; icon: string | null; n: number }>(
+    sql`SELECT t.user_category_id AS categoryId, cat.name AS categoryName, cat.icon AS icon,
+               COUNT(*) AS n
+        FROM transactions t
+        JOIN categories cat ON cat.id = t.user_category_id
+        WHERE t.id != ${txnId} AND t.pending = 0 AND cat.archived = 0 AND ${v.match}
+        GROUP BY t.user_category_id
+        ORDER BY n DESC, categoryName ASC`,
+  );
+  if (rows.length === 0) return null;
+
+  const total = rows.reduce((a, r) => a + Number(r.n), 0);
+  const top = rows[0];
+  const count = Number(top.n);
+  return {
+    categoryId: top.categoryId,
+    categoryName: top.categoryName,
+    icon: top.icon,
+    count,
+    confidence: count / total,
+  };
+}
+
+export type TagSuggestion = { id: string; name: string; color: string | null; count: number };
+
+/**
+ * The tags most frequently applied to this vendor's past (group-aware)
+ * transactions, excluding any already on this transaction — the top `limit`,
+ * most-used first. Empty when the vendor has no tag history left to suggest.
+ */
+export function getTagSuggestions(txnId: string, limit = 4): TagSuggestion[] {
+  const v = vendorMatchForTxn(txnId);
+  if (!v) return [];
+
+  return db
+    .all<{ id: string; name: string; color: string | null; count: number }>(
+      sql`SELECT tg.id AS id, tg.name AS name, tg.color AS color, COUNT(*) AS count
+          FROM transactions t
+          JOIN transaction_tags tt ON tt.transaction_id = t.id
+          JOIN tags tg ON tg.id = tt.tag_id
+          WHERE t.id != ${txnId} AND ${v.match}
+            AND tt.tag_id NOT IN
+              (SELECT tag_id FROM transaction_tags WHERE transaction_id = ${txnId})
+          GROUP BY tg.id
+          ORDER BY count DESC, tg.name ASC
+          LIMIT ${limit}`,
+    )
+    .map((r) => ({ id: r.id, name: r.name, color: r.color, count: Number(r.count) }));
+}
+
 // ── Category drill-down ───────────────────────────────────────────────────────
 
 /** Archived categories (for the restore UI), grouped then alphabetical. */
@@ -765,7 +1078,7 @@ export function getCategoryById(id: string): CategoryDetail | null {
 
 /** Every (non-pending) transaction that rolls up to this category, newest first. */
 export function getCategoryTransactions(id: string, limit = 500): TransactionRow[] {
-  return selectTransactions(sql`t.pending = 0 AND ${effectiveCatId("t")} = ${id}`, limit);
+  return selectTransactions(sql`t.pending = 0 AND ${txnInCategory(id)}`, limit);
 }
 
 export function getTransactionsByDate(date: string): TransactionRow[] {
@@ -813,12 +1126,13 @@ export type CategoryMonth = { month: string; spent: number; received: number; co
 export function getCategoryMonthlyBreakdown(id: string, months = 12): CategoryMonth[] {
   return db
     .all<{ month: string; spent: number; received: number; count: number }>(sql`
-      SELECT substr(t.date, 1, 7) AS month,
-             SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS spent,
-             SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END) AS received,
+      WITH ${spendRowsCte}
+      SELECT substr(sr.date, 1, 7) AS month,
+             SUM(CASE WHEN sr.amount > 0 THEN sr.amount ELSE 0 END) AS spent,
+             SUM(CASE WHEN sr.amount < 0 THEN -sr.amount ELSE 0 END) AS received,
              COUNT(*) AS count
-      FROM transactions t
-      WHERE t.pending = 0 AND ${effectiveCatId("t")} = ${id}
+      FROM spend_rows sr
+      WHERE sr.pending = 0 AND sr.category_id = ${id}
       GROUP BY month
       ORDER BY month DESC
       LIMIT ${months}`)
@@ -839,18 +1153,37 @@ export type TagRuleRow = {
   pattern: string;
   label: string | null;
   tagName: string;
+  matchType: string; // contains | exact | regex
+  minAmount: number | null;
+  maxAmount: number | null;
+  accountId: string | null;
+  accountName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
   matches: number;
 };
 
-/** Auto-tag rules with the count of transactions each currently matches. */
+/**
+ * Auto-tag rules with the count of transactions each currently matches. The
+ * count uses the LIKE idiom for every rule regardless of match type, so it is
+ * approximate for `regex`/`exact` rules (a cheap indicator, not the exact set).
+ */
 export function getTagRules(): TagRuleRow[] {
   return db.all<TagRuleRow>(sql`
     SELECT r.id AS id, r.pattern AS pattern, r.label AS label, tg.name AS tagName,
+      r.match_type AS matchType, r.min_amount AS minAmount, r.max_amount AS maxAmount,
+      r.account_id AS accountId, a.name AS accountName,
+      r.category_id AS categoryId, cat.name AS categoryName,
       (SELECT COUNT(*) FROM transactions t
-        WHERE lower(COALESCE(t.merchant_name,'')) LIKE '%' || r.pattern || '%'
-           OR lower(t.name) LIKE '%' || r.pattern || '%') AS matches
+        WHERE (lower(COALESCE(t.merchant_name,'')) LIKE '%' || r.pattern || '%'
+           OR lower(t.name) LIKE '%' || r.pattern || '%')
+          AND (r.account_id IS NULL OR t.account_id = r.account_id)
+          AND (r.min_amount IS NULL OR t.amount >= r.min_amount)
+          AND (r.max_amount IS NULL OR t.amount <= r.max_amount)) AS matches
     FROM tag_rules r
     JOIN tags tg ON tg.id = r.tag_id
+    LEFT JOIN accounts a ON a.id = r.account_id
+    LEFT JOIN categories cat ON cat.id = r.category_id
     ORDER BY r.created_at DESC`);
 }
 
