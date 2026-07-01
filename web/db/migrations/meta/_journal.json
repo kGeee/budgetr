@@ -71,6 +71,13 @@
       "when": 1782887126132,
       "tag": "0009_colossal_tag",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1782887733102,
+      "tag": "0010_lush_leader",
+      "breakpoints": true
     }
   ]
 }

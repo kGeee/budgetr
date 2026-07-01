@@ -6,6 +6,7 @@ import {
   allocationTargets,
   budgets,
   categories,
+  costBasisMethod,
   holdingCostBasisOverrides,
   investmentAssetClasses,
   investmentGeographies,
@@ -14,6 +15,7 @@ import {
   tagBudgets,
   tagRules,
   tags,
+  taxLotOverrides,
   transactionTags,
   transactions,
   vendorGroupMembers,
@@ -566,5 +568,53 @@ export async function clearHoldingCostBasisOverride(holdingId: string) {
   db.delete(holdingCostBasisOverrides)
     .where(eq(holdingCostBasisOverrides.holdingId, id))
     .run();
+  revalidateAll();
+}
+
+// ── Cost-basis method + spec-ID lot overrides (realized gains) ────────────────
+
+const COST_BASIS_METHODS = new Set(["FIFO", "LIFO", "specid"]);
+
+/**
+ * Set the cost-basis matching method for a scope — `*` (global) or `sym:AAPL`
+ * (per-ticker). An empty/invalid method clears the row, reverting the scope to
+ * its next fallback (per-ticker → global → FIFO default).
+ */
+export async function setCostBasisMethod(scopeKey: string, method: string) {
+  const key = scopeKey?.trim();
+  if (!key) return;
+  if (!COST_BASIS_METHODS.has(method)) {
+    db.delete(costBasisMethod).where(eq(costBasisMethod.scopeKey, key)).run();
+    revalidateAll();
+    return;
+  }
+  db.insert(costBasisMethod)
+    .values({ scopeKey: key, method })
+    .onConflictDoUpdate({ target: costBasisMethod.scopeKey, set: { method } })
+    .run();
+  revalidateAll();
+}
+
+/** Pin `quantity` shares of a sell to a specific buy lot (spec-ID matching). */
+export async function addTaxLotOverride(
+  sellTxnId: string,
+  buyTxnId: string,
+  quantity: number,
+) {
+  const sell = sellTxnId?.trim();
+  const buy = buyTxnId?.trim();
+  if (!sell || !buy) return;
+  if (!Number.isFinite(quantity) || quantity <= 0) return;
+  db.insert(taxLotOverrides)
+    .values({ id: `tlo_${crypto.randomUUID().slice(0, 8)}`, sellTxnId: sell, buyTxnId: buy, quantity })
+    .run();
+  revalidateAll();
+}
+
+/** Remove a spec-ID lot assignment; its shares revert to FIFO matching. */
+export async function removeTaxLotOverride(id: string) {
+  const key = id?.trim();
+  if (!key) return;
+  db.delete(taxLotOverrides).where(eq(taxLotOverrides.id, key)).run();
   revalidateAll();
 }

@@ -387,6 +387,35 @@ export const holdingCostBasisOverrides = sqliteTable("holding_cost_basis_overrid
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Per-scope cost-basis matching method used to reconstruct realized gains from
+ * the investmentTransactions ledger. `scopeKey` is either a symbol scope
+ * (`sym:AAPL`, mirroring investmentSectors' `sym:` keys) or the global fallback
+ * `*`. Resolution order for a ticker: its `sym:` row → `*` row → FIFO default.
+ * `method` is one of FIFO | LIFO | specid.
+ */
+export const costBasisMethod = sqliteTable("cost_basis_method", {
+  scopeKey: text("scope_key").primaryKey(), // `sym:AAPL` | `*`
+  method: text("method").notNull(), // FIFO | LIFO | specid
+});
+
+/**
+ * Manual spec-ID lot matching: pins a specific sell transaction to a specific
+ * buy lot for `quantity` shares, overriding the automatic FIFO/LIFO ordering.
+ * Only consulted when the effective method for the ticker is `specid`; any
+ * quantity a sell isn't explicitly matched for falls back to FIFO.
+ */
+export const taxLotOverrides = sqliteTable(
+  "tax_lot_overrides",
+  {
+    id: text("id").primaryKey(),
+    sellTxnId: text("sell_txn_id").notNull(), // investmentTransactions.id of the sell
+    buyTxnId: text("buy_txn_id").notNull(), // investmentTransactions.id of the buy lot
+    quantity: real("quantity").notNull(), // shares from the buy lot applied to the sell
+  },
+  (t) => [index("tax_lot_overrides_sell_idx").on(t.sellTxnId)],
+);
+
 export type Item = typeof items.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
@@ -407,3 +436,5 @@ export type InvestmentSector = typeof investmentSectors.$inferSelect;
 export type AllocationTarget = typeof allocationTargets.$inferSelect;
 export type InvestmentAssetClass = typeof investmentAssetClasses.$inferSelect;
 export type InvestmentGeography = typeof investmentGeographies.$inferSelect;
+export type CostBasisMethod = typeof costBasisMethod.$inferSelect;
+export type TaxLotOverride = typeof taxLotOverrides.$inferSelect;

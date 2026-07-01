@@ -2,6 +2,7 @@ import { db } from "@/db";
 import {
   accounts,
   allocationTargets,
+  costBasisMethod,
   holdingCostBasisOverrides,
   holdings,
   investmentAssetClasses,
@@ -11,11 +12,20 @@ import {
   items,
   manualHoldings,
   securities,
+  taxLotOverrides,
   vendorGroupMembers,
   vendorGroups,
 } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
+import {
+  computeRealizedLots,
+  summarize,
+  summarizeByYear,
+  type LotOverride,
+  type RealizedLot,
+  type YearSummary,
+} from "@/lib/tax-lots";
 
 // Plaid primaries that resolve to a `transfer` category are internal money
 // movement, not real income/spending. Source of truth is the categories table
@@ -1033,6 +1043,77 @@ export function getInvestmentTransactions(): InvestmentTxnRow[] {
     .leftJoin(accounts, eq(investmentTransactions.accountId, accounts.id))
     .orderBy(desc(investmentTransactions.date))
     .all();
+}
+
+// ── Realized gains / tax lots ─────────────────────────────────────────────────
+
+/** Effective cost-basis method per scope (`sym:AAPL` | `*`), FIFO when absent. */
+export function getCostBasisMethods(): Record<string, string> {
+  const rows = db
+    .select({ scopeKey: costBasisMethod.scopeKey, method: costBasisMethod.method })
+    .from(costBasisMethod)
+    .all();
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.scopeKey] = r.method;
+  return map;
+}
+
+export type TaxLotOverrideRow = {
+  id: string;
+  sellTxnId: string;
+  buyTxnId: string;
+  quantity: number;
+};
+
+/** All manual spec-ID lot assignments. */
+export function getTaxLotOverrides(): TaxLotOverrideRow[] {
+  return db
+    .select({
+      id: taxLotOverrides.id,
+      sellTxnId: taxLotOverrides.sellTxnId,
+      buyTxnId: taxLotOverrides.buyTxnId,
+      quantity: taxLotOverrides.quantity,
+    })
+    .from(taxLotOverrides)
+    .all();
+}
+
+export type RealizedGains = {
+  /** Realized lots — filtered to `year` when one is supplied, else all. */
+  lots: RealizedLot[];
+  /** Per-year capital-gains summaries, newest first (always the full history). */
+  summaries: YearSummary[];
+  /** Aggregate totals for the returned `lots` (the selected scope). */
+  totals: Omit<YearSummary, "year">;
+  /** Distinct years with realized activity, newest first. */
+  years: number[];
+  /** The year filter applied, or null for "all years". */
+  year: number | null;
+};
+
+/**
+ * Stitch the investment ledger through lib/tax-lots.ts: reconstruct FIFO/LIFO/
+ * spec-ID lots, compute realized P&L + wash-sale flags, and roll up per-year
+ * summaries. Pass a `year` to scope the returned lots (summaries stay global so
+ * the year picker always has the full set to choose from).
+ */
+export function getRealizedGains(year?: number): RealizedGains {
+  const txns = getInvestmentTransactions();
+  const methods = getCostBasisMethods();
+  const overrides: LotOverride[] = getTaxLotOverrides().map((o) => ({
+    sellTxnId: o.sellTxnId,
+    buyTxnId: o.buyTxnId,
+    quantity: o.quantity,
+  }));
+
+  const all = computeRealizedLots(txns, methods, overrides);
+  const summaries = summarizeByYear(all);
+  const years = summaries.map((s) => s.year);
+
+  const lots =
+    year != null ? all.filter((l) => Number(l.closeDate.slice(0, 4)) === year) : all;
+
+  return { lots, summaries, totals: summarize(lots), years, year: year ?? null };
 }
 
 export function prettyCategory(c: string | null): string {
