@@ -1718,19 +1718,23 @@ export type PeriodTotals = {
 
 /**
  * Income / expense / net / count for an arbitrary date window — the review
- * hero numbers. Mirrors getMonthlyCashflow's transfer exclusion via the
- * transferPrimaries subquery (income = inflows, expenses = outflows).
+ * hero numbers. Excludes internal transfers by the transaction's *effective*
+ * category group (user override first, else the Plaid-primary mapping), the same
+ * way the category breakdown / vendors / heatmap do — so a Zelle payment the user
+ * re-tagged as Rent counts here too. `txCount` is the number of expense rows that
+ * make up "Total spent" (income rows are excluded from the count).
  */
 export function getPeriodTotals(start: string, end: string): PeriodTotals {
   const row = db.get<{ income: number; expenses: number; txCount: number }>(
     sql`SELECT
-          SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS income,
-          SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS expenses,
-          COUNT(*) AS txCount
-        FROM transactions
-        WHERE pending = 0
-          AND (category IS NULL OR category NOT IN (${transferPrimaries}))
-          AND date >= ${start} AND date <= ${end}`,
+          SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END) AS income,
+          SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS expenses,
+          SUM(CASE WHEN t.amount > 0 THEN 1 ELSE 0 END) AS txCount
+        FROM transactions t
+        LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+        WHERE t.pending = 0
+          AND (cat."group" IS NULL OR cat."group" != 'transfer')
+          AND t.date >= ${start} AND t.date <= ${end}`,
   );
   const income = Number(row?.income ?? 0);
   const expenses = Number(row?.expenses ?? 0);

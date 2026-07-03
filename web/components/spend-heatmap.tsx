@@ -5,7 +5,9 @@ import {
   eachDayOfInterval,
   format,
   parseISO,
+  startOfMonth,
   startOfWeek,
+  subDays,
 } from "date-fns";
 import { X } from "lucide-react";
 import { TransactionsTable } from "@/components/transactions-table";
@@ -32,6 +34,20 @@ const LEVELS = [
 
 const WEEKDAYS = ["", "Mon", "", "Wed", "", "Fri", ""];
 
+// Ad-hoc view windows over the trailing-year data. The server always sends the
+// full year; these just re-slice it in the browser (not persisted).
+type Range = "year" | "quarter" | "month";
+const RANGES: { key: Range; label: string }[] = [
+  { key: "year", label: "Year" },
+  { key: "quarter", label: "3M" },
+  { key: "month", label: "Month" },
+];
+const RANGE_PHRASE: Record<Range, string> = {
+  year: "over the trailing year",
+  quarter: "over the last 3 months",
+  month: "this month",
+};
+
 type Day = { date: string; spent: number; level: number };
 
 function quantile(sorted: number[], q: number): number {
@@ -55,20 +71,37 @@ export function SpendHeatmap({
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [txns, setTxns] = useState<TransactionRow[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [range, setRange] = useState<Range>("year");
+
+  // Resolve the active window. `end` is today; the year window reuses the
+  // server-provided `start` (already Sunday-aligned for whole week columns).
+  const { winStart, winEnd } = useMemo(() => {
+    const endD = parseISO(end);
+    if (range === "month")
+      return { winStart: format(startOfMonth(endD), "yyyy-MM-dd"), winEnd: end };
+    if (range === "quarter")
+      return { winStart: format(subDays(endD, 89), "yyyy-MM-dd"), winEnd: end };
+    return { winStart: start, winEnd: end };
+  }, [range, start, end]);
 
   const { weeks, months, total, maxDay } = useMemo(() => {
     const spentByDate = new Map(data.map((d) => [d.date, d.spent]));
+    const inWindow = (iso: string) => iso >= winStart && iso <= winEnd;
 
-    // Quantile thresholds over the days that actually had spend.
-    const values = data.map((d) => d.spent).filter((v) => v > 0).sort((a, b) => a - b);
+    const gridStart = startOfWeek(parseISO(winStart), { weekStartsOn: 0 });
+    const days = eachDayOfInterval({ start: gridStart, end: parseISO(winEnd) });
+
+    // Quantile thresholds over the in-window days that had spend, so the
+    // intensity scale re-calibrates to whatever range is showing.
+    const values = days
+      .map((d) => spentByDate.get(format(d, "yyyy-MM-dd")) ?? 0)
+      .filter((v) => v > 0)
+      .sort((a, b) => a - b);
     const t1 = quantile(values, 0.25);
     const t2 = quantile(values, 0.5);
     const t3 = quantile(values, 0.75);
     const level = (v: number) =>
       v <= 0 ? 0 : v <= t1 ? 1 : v <= t2 ? 2 : v <= t3 ? 3 : 4;
-
-    const gridStart = startOfWeek(parseISO(start), { weekStartsOn: 0 });
-    const days = eachDayOfInterval({ start: gridStart, end: parseISO(end) });
 
     const cells: Day[] = days.map((d) => {
       const iso = format(d, "yyyy-MM-dd");
@@ -91,15 +124,17 @@ export function SpendHeatmap({
       }
     });
 
+    // Totals cover only the in-window days (the grid pads back to Sunday).
     let total = 0;
     let maxDay: Day | null = null;
     for (const c of cells) {
+      if (!inWindow(c.date)) continue;
       total += c.spent;
       if (!maxDay || c.spent > maxDay.spent) maxDay = c;
     }
 
     return { weeks, months, total, maxDay };
-  }, [data, start, end]);
+  }, [data, winStart, winEnd]);
 
   // Change the selected day and drop any previously-loaded rows in the same
   // update, so the drill-down never flashes the prior day's transactions before
@@ -145,16 +180,42 @@ export function SpendHeatmap({
 
   return (
     <div className="space-y-4">
-      {maxDay && maxDay.spent > 0 && (
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-sm text-[var(--muted)]">
-          <span className="mono text-[var(--paper)]">{formatMoney(total, "USD")}</span> spent
-          over the trailing year · busiest day was{" "}
-          <span className="text-[var(--paper)]">
-            {format(parseISO(maxDay.date), "MMM d")}
-          </span>{" "}
-          at <span className="mono text-[var(--paper)]">{formatMoney(maxDay.spent, "USD")}</span>.
+          {maxDay && maxDay.spent > 0 ? (
+            <>
+              <span className="mono text-[var(--paper)]">{formatMoney(total, "USD")}</span> spent{" "}
+              {RANGE_PHRASE[range]} · busiest day was{" "}
+              <span className="text-[var(--paper)]">
+                {format(parseISO(maxDay.date), "MMM d")}
+              </span>{" "}
+              at <span className="mono text-[var(--paper)]">{formatMoney(maxDay.spent, "USD")}</span>.
+            </>
+          ) : (
+            <>No spending {RANGE_PHRASE[range]}.</>
+          )}
         </p>
-      )}
+        <div className="flex shrink-0 flex-wrap gap-1.5">
+          {RANGES.map((r) => {
+            const active = r.key === range;
+            return (
+              <button
+                key={r.key}
+                type="button"
+                onClick={() => setRange(r.key)}
+                aria-pressed={active}
+                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                  active
+                    ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
+                    : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+                }`}
+              >
+                {r.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="overflow-x-auto pb-1">
         <div className="flex gap-2" style={{ width: 28 + gridWidth }}>
@@ -189,7 +250,7 @@ export function SpendHeatmap({
               {weeks.map((week, wi) => (
                 <div key={wi} className="flex flex-col" style={{ gap: GAP }}>
                   {week.map((day) => {
-                    const inWindow = day.date >= start && day.date <= end;
+                    const inWindow = day.date >= winStart && day.date <= winEnd;
                     return (
                       <button
                         key={day.date}
