@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
-import { addDays, addMonths, addWeeks, addYears, format, parseISO } from "date-fns";
+import { addDays, format, parseISO } from "date-fns";
+import { streamOccurrences } from "@/lib/recurrence";
 import type { RecurringRow } from "@/lib/queries";
 
 /**
@@ -52,59 +53,6 @@ type StreamRow = {
 
 /** One projected landing of a recurring stream on a specific date. */
 type Occurrence = { date: string; direction: "inflow" | "outflow"; amount: number; stream: StreamRow };
-
-/** Advance a date by one period of `frequency`, or null for non-repeating streams. */
-function stepDate(d: Date, frequency: string | null): Date | null {
-  switch ((frequency ?? "").toUpperCase()) {
-    case "WEEKLY":
-      return addWeeks(d, 1);
-    case "BIWEEKLY":
-      return addWeeks(d, 2);
-    case "SEMI_MONTHLY":
-      return addDays(d, 15); // Plaid's twice-a-month cadence, approximated
-    case "MONTHLY":
-      return addMonths(d, 1);
-    case "ANNUALLY":
-      return addYears(d, 1);
-    default:
-      return null; // UNKNOWN / null → a single, non-repeating dated event
-  }
-}
-
-/**
- * The dates (YYYY-MM-DD, inclusive) a stream is predicted to land within
- * [from, to], rolling its stored prediction forward by frequency. This is the
- * heart of the fix: a stale `predicted_next_date` that's already passed advances
- * to the next real occurrence, and multi-per-month cadences (weekly/biweekly) are
- * emitted every time they land — so a biweekly paycheck shows twice, not zero.
- */
-function streamOccurrences(anchorISO: string, frequency: string | null, from: string, to: string): string[] {
-  if (from > to) return [];
-  let d = parseISO(anchorISO);
-
-  // Non-repeating streams: just the single dated event, if it's in the window.
-  if (stepDate(d, frequency) === null) {
-    return anchorISO >= from && anchorISO <= to ? [anchorISO] : [];
-  }
-
-  // Roll forward to the first occurrence on/after `from` (guarded against loops).
-  let guard = 0;
-  while (format(d, "yyyy-MM-dd") < from && guard++ < 800) {
-    const next = stepDate(d, frequency);
-    if (!next) break;
-    d = next;
-  }
-
-  const out: string[] = [];
-  guard = 0;
-  while (format(d, "yyyy-MM-dd") <= to && guard++ < 62) {
-    out.push(format(d, "yyyy-MM-dd"));
-    const next = stepDate(d, frequency);
-    if (!next) break;
-    d = next;
-  }
-  return out;
-}
 
 /** Active recurring streams, excluding those on hidden accounts. */
 function activeStreams(): StreamRow[] {

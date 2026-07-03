@@ -10,6 +10,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts",
     "dev:electron": "npm run electron:rebuild && electron desktop/electron/main.js",
     "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run electron:rebuild && electron-builder --mac",
     "electron:rebuild": "electron-rebuild -f -o better-sqlite3",
@@ -51,7 +54,8 @@
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
     "tsx": "^4.22.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   },
   "build": {
     "appId": "dev.budgetr.app",

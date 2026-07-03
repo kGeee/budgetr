@@ -14,10 +14,11 @@ A personal finance app, in two forms that share one data model:
 ```bash
 cd web
 npm install
-npm run dev
+npm run setup   # .env.local + encryption key + migrate + seed (idempotent)
+npm run dev     # http://localhost:3000  (Plaid sandbox: user_good / pass_good)
 ```
 
-See [`web/README.md`](web/README.md) for env vars, database commands, and Plaid setup.
+See [`web/README.md`](web/README.md) for env vars, database commands, testing, and Plaid setup.
 
 **Apple**
 
