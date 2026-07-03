@@ -41,6 +41,9 @@ export const accounts = sqliteTable("accounts", {
   currentBalance: real("current_balance"),
   availableBalance: real("available_balance"),
   isoCurrencyCode: text("iso_currency_code"),
+  // User overlay: hide this account from net worth, the sidebar, cashflow cash,
+  // and the accounts total. Never written by Plaid sync (see lib/sync.ts set:).
+  excluded: integer("excluded", { mode: "boolean" }).notNull().default(false),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 

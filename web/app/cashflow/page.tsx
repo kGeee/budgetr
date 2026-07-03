@@ -1,5 +1,5 @@
 import { format, parseISO } from "date-fns";
-import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { ForecastChart } from "@/components/charts";
 import { Card } from "@/components/ui/card";
@@ -14,8 +14,15 @@ export default function CashflowPage() {
   const series = getForecastSeries(forecast.month);
   const { bills, income } = getRemainingRecurring(forecast.month);
 
-  const { month, currentCash, remainingBills, remainingIncome, paceSpend, projectedEndBalance } =
-    forecast;
+  const {
+    month,
+    currentCash,
+    remainingBills,
+    remainingIncome,
+    paceSpend,
+    paceEstimated,
+    projectedEndBalance,
+  } = forecast;
   const negative = projectedEndBalance < 0;
   const monthLabel = new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", {
     month: "long",
@@ -28,6 +35,19 @@ export default function CashflowPage() {
     isCurrentMonth && forecast.daysElapsed > 0
       ? `${month}-${String(forecast.daysElapsed).padStart(2, "0")}`
       : null;
+
+  // Lowest projected balance during the month — an intra-month dip can go
+  // negative (overdraft) even when the month ends in the black, e.g. when big
+  // bills clear before payday. Surfaced as a heads-up above the chart.
+  const projectedPts = series.filter(
+    (p): p is { date: string; actual: number | null; projected: number } => p.projected != null,
+  );
+  const lowest = projectedPts.reduce<{ date: string; amount: number } | null>(
+    (m, p) => (!m || p.projected < m.amount ? { date: p.date, amount: p.projected } : m),
+    null,
+  );
+  const willOverdraft = !!lowest && lowest.amount < 0;
+  const showLowNote = !!lowest && lowest.amount < projectedEndBalance - 1;
 
   return (
     <div className="space-y-7">
@@ -59,9 +79,43 @@ export default function CashflowPage() {
           <Stat label="Cash today" value={formatCurrency(currentCash)} />
           <Stat label="Bills remaining" value={formatCurrency(remainingBills)} tone="coral" />
           <Stat label="Income remaining" value={formatCurrency(remainingIncome)} tone="jade" />
-          <Stat label="Projected pace spend" value={formatCurrency(paceSpend)} tone="coral" />
+          <Stat
+            label={paceEstimated ? "Pace spend · est." : "Projected pace spend"}
+            value={formatCurrency(paceSpend)}
+            tone="coral"
+          />
         </div>
       </div>
+
+      {(willOverdraft || showLowNote) && lowest && (
+        <div
+          className={`flex items-start gap-3 rounded-[var(--radius)] border px-5 py-4 text-sm ${
+            willOverdraft
+              ? "border-[var(--coral)] bg-[var(--panel)] text-[var(--coral)]"
+              : "border-line bg-[var(--panel)] text-[var(--muted)]"
+          }`}
+        >
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            {willOverdraft ? (
+              <>
+                Cash is projected to dip to{" "}
+                <span className="font-medium">{formatCurrency(lowest.amount)}</span> on{" "}
+                {format(parseISO(lowest.date), "MMM d")} before month-end — watch for an overdraft
+                around then.
+              </>
+            ) : (
+              <>
+                Lowest projected point this month:{" "}
+                <span className="font-medium text-[var(--paper)]">
+                  {formatCurrency(lowest.amount)}
+                </span>{" "}
+                on {format(parseISO(lowest.date), "MMM d")}.
+              </>
+            )}
+          </span>
+        </div>
+      )}
 
       {/* Actual-vs-projected balance chart. */}
       <Card className="p-0">

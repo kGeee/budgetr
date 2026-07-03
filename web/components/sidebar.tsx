@@ -53,6 +53,7 @@ export type SidebarAccount = {
   type: string;
   currentBalance: number | null;
   currency: string | null;
+  excluded?: boolean;
 };
 
 // Display order + labels for the grouped accounts section.
@@ -75,9 +76,11 @@ function fmtBalance(amount: number | null, currency: string | null) {
 export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
   const pathname = usePathname();
 
+  // Excluded accounts are hidden from the sidebar entirely — managed on /accounts.
+  const visible = accounts.filter((a) => !a.excluded);
   const groups = ACCOUNT_GROUPS.map((g) => ({
     ...g,
-    accounts: accounts.filter((a) =>
+    accounts: visible.filter((a) =>
       g.type === "other"
         ? !["credit", "depository", "investment", "loan"].includes(a.type)
         : a.type === g.type,

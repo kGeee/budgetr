@@ -1,6 +1,18 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
-import { getBudgetMonth, type RecurringRow } from "@/lib/queries";
+import { addDays, addMonths, addWeeks, addYears, format, parseISO } from "date-fns";
+import type { RecurringRow } from "@/lib/queries";
+
+/**
+ * Current calendar month as 'YYYY-MM'. A cash forecast is always about the month
+ * in progress, so — unlike the Budgets page's getBudgetMonth() — it must NOT fall
+ * back to the latest month that happens to have (non-pending) data. Early in a
+ * month, or when this month's transactions are still all pending, that fallback
+ * points at a closed past month and the forecast reads "Month closed" with zeros.
+ */
+function currentMonth(): string {
+  return new Date().toISOString().slice(0, 7);
+}
 
 // Mirror of queries.ts: Plaid primaries mapped to a `transfer` category are
 // internal money movement, not real income/spend, so they're excluded from all
@@ -20,6 +32,119 @@ function dayStr(month: string, day: number): string {
   return `${month}-${String(day).padStart(2, "0")}`;
 }
 
+// ── Recurring stream projection ───────────────────────────────────────────────
+
+type StreamRow = {
+  id: string;
+  direction: "inflow" | "outflow";
+  description: string | null;
+  merchantName: string | null;
+  category: string | null;
+  frequency: string | null;
+  averageAmount: number | null;
+  lastAmount: number | null;
+  lastDate: string | null;
+  predictedNextDate: string | null;
+  currency: string | null;
+  accountName: string | null;
+  status: string | null;
+};
+
+/** One projected landing of a recurring stream on a specific date. */
+type Occurrence = { date: string; direction: "inflow" | "outflow"; amount: number; stream: StreamRow };
+
+/** Advance a date by one period of `frequency`, or null for non-repeating streams. */
+function stepDate(d: Date, frequency: string | null): Date | null {
+  switch ((frequency ?? "").toUpperCase()) {
+    case "WEEKLY":
+      return addWeeks(d, 1);
+    case "BIWEEKLY":
+      return addWeeks(d, 2);
+    case "SEMI_MONTHLY":
+      return addDays(d, 15); // Plaid's twice-a-month cadence, approximated
+    case "MONTHLY":
+      return addMonths(d, 1);
+    case "ANNUALLY":
+      return addYears(d, 1);
+    default:
+      return null; // UNKNOWN / null → a single, non-repeating dated event
+  }
+}
+
+/**
+ * The dates (YYYY-MM-DD, inclusive) a stream is predicted to land within
+ * [from, to], rolling its stored prediction forward by frequency. This is the
+ * heart of the fix: a stale `predicted_next_date` that's already passed advances
+ * to the next real occurrence, and multi-per-month cadences (weekly/biweekly) are
+ * emitted every time they land — so a biweekly paycheck shows twice, not zero.
+ */
+function streamOccurrences(anchorISO: string, frequency: string | null, from: string, to: string): string[] {
+  if (from > to) return [];
+  let d = parseISO(anchorISO);
+
+  // Non-repeating streams: just the single dated event, if it's in the window.
+  if (stepDate(d, frequency) === null) {
+    return anchorISO >= from && anchorISO <= to ? [anchorISO] : [];
+  }
+
+  // Roll forward to the first occurrence on/after `from` (guarded against loops).
+  let guard = 0;
+  while (format(d, "yyyy-MM-dd") < from && guard++ < 800) {
+    const next = stepDate(d, frequency);
+    if (!next) break;
+    d = next;
+  }
+
+  const out: string[] = [];
+  guard = 0;
+  while (format(d, "yyyy-MM-dd") <= to && guard++ < 62) {
+    out.push(format(d, "yyyy-MM-dd"));
+    const next = stepDate(d, frequency);
+    if (!next) break;
+    d = next;
+  }
+  return out;
+}
+
+/** Active recurring streams, excluding those on hidden accounts. */
+function activeStreams(): StreamRow[] {
+  return db.all<StreamRow>(sql`
+    SELECT r.id AS id, r.direction AS direction, r.description AS description,
+           r.merchant_name AS merchantName, r.category AS category, r.frequency AS frequency,
+           r.average_amount AS averageAmount, r.last_amount AS lastAmount,
+           r.last_date AS lastDate, r.predicted_next_date AS predictedNextDate,
+           r.iso_currency_code AS currency, a.name AS accountName, r.status AS status
+    FROM recurring_streams r
+    LEFT JOIN accounts a ON a.id = r.account_id
+    WHERE r.is_active = 1 AND COALESCE(a.excluded, 0) = 0`);
+}
+
+/**
+ * Every recurring occurrence still ahead of us this month — strictly after today
+ * for the current month (today's cash already reflects anything cleared), the
+ * whole month when it's a future month. Anchors on the stored prediction, falling
+ * back to the last observed date so a stream with a null prediction still projects.
+ */
+function projectOccurrences(month: string): Occurrence[] {
+  const nowISO = new Date().toISOString().slice(0, 10);
+  const monthStart = `${month}-01`;
+  const monthEnd = dayStr(month, daysInMonthOf(month));
+  // Day after today for the current/past month; month start for a future month.
+  const dayAfterToday = format(addDays(parseISO(nowISO), 1), "yyyy-MM-dd");
+  const from = nowISO >= monthStart ? dayAfterToday : monthStart;
+
+  const out: Occurrence[] = [];
+  for (const s of activeStreams()) {
+    const anchor = s.predictedNextDate ?? s.lastDate;
+    if (!anchor) continue;
+    const amount = Math.abs(s.averageAmount ?? 0);
+    for (const date of streamOccurrences(anchor, s.frequency, from, monthEnd)) {
+      out.push({ date, direction: s.direction, amount, stream: s });
+    }
+  }
+  return out;
+}
+
 export type CashflowForecast = {
   month: string;
   /** Sum of current balances across depository (cash) accounts, right now. */
@@ -32,8 +157,10 @@ export type CashflowForecast = {
   remainingBills: number;
   /** Remaining recurring inflows (income) predicted between today and month-end. */
   remainingIncome: number;
-  /** Discretionary spend projected for the rest of the month from month-to-date pace. */
+  /** Discretionary spend projected for the rest of the month. */
   paceSpend: number;
+  /** True when paceSpend fell back to the trailing-30-day rate (no booked spend this month yet). */
+  paceEstimated: boolean;
   /** currentCash − remainingBills + remainingIncome − paceSpend. */
   projectedEndBalance: number;
   daysElapsed: number;
@@ -42,12 +169,11 @@ export type CashflowForecast = {
 
 /**
  * Project the end-of-month cash balance by combining current liquid balances,
- * month-to-date net flow, the recurring bills/income still to land this month,
- * and a discretionary spending-pace projection. Fully derived — reads accounts,
- * transactions, and recurring_streams. Foundational read-only module reused by
- * FIRE tracking.
+ * the recurring bills/income still to land this month (rolled forward by
+ * frequency), and a discretionary spending-pace projection. Fully derived —
+ * reads accounts, transactions, and recurring_streams.
  */
-export function getCashflowForecast(month: string = getBudgetMonth()): CashflowForecast {
+export function getCashflowForecast(month: string = currentMonth()): CashflowForecast {
   const daysInMonth = daysInMonthOf(month);
   const nowMonth = new Date().toISOString().slice(0, 7);
   // Days already elapsed within the target month: the calendar day when it's the
@@ -59,13 +185,12 @@ export function getCashflowForecast(month: string = getBudgetMonth()): CashflowF
         ? daysInMonth
         : 0;
   const daysRemaining = daysInMonth - daysElapsed;
-  const monthEnd = dayStr(month, daysInMonth);
 
-  // Liquid cash: depository balances as they stand right now.
+  // Liquid cash: depository balances as they stand right now (hidden accounts out).
   const currentCash = Number(
     db.get<{ v: number }>(
       sql`SELECT COALESCE(SUM(current_balance), 0) AS v
-          FROM accounts WHERE type = 'depository'`,
+          FROM accounts WHERE type = 'depository' AND excluded = 0`,
     )?.v ?? 0,
   );
 
@@ -80,27 +205,35 @@ export function getCashflowForecast(month: string = getBudgetMonth()): CashflowF
   const mtdIncome = Number(mtd?.income ?? 0);
   const mtdSpend = Number(mtd?.spend ?? 0);
 
-  // Recurring streams still predicted to land between today and month-end.
-  const recurring = db.all<{ direction: string; total: number }>(sql`
-    SELECT direction, COALESCE(SUM(ABS(COALESCE(average_amount, 0))), 0) AS total
-    FROM recurring_streams
-    WHERE is_active = 1
-      AND predicted_next_date IS NOT NULL
-      AND predicted_next_date >= date('now')
-      AND predicted_next_date <= ${monthEnd}
-    GROUP BY direction`);
+  // Recurring bills/income still to land, projected forward by frequency.
   let remainingBills = 0;
   let remainingIncome = 0;
-  for (const r of recurring) {
-    if (r.direction === "outflow") remainingBills += Number(r.total);
-    else if (r.direction === "inflow") remainingIncome += Number(r.total);
+  for (const o of projectOccurrences(month)) {
+    if (o.direction === "outflow") remainingBills += o.amount;
+    else if (o.direction === "inflow") remainingIncome += o.amount;
   }
 
-  // Discretionary pace: extrapolate month-to-date spend across the days left.
-  const paceSpend = daysElapsed > 0 ? (mtdSpend / daysElapsed) * daysRemaining : 0;
+  // Discretionary pace: extrapolate this month's booked daily spend across the
+  // days left. When nothing has posted yet (early month, or all-pending), fall
+  // back to the trailing-30-day daily rate so the projection isn't trivially flat.
+  const mtdDaily = daysElapsed > 0 ? mtdSpend / daysElapsed : 0;
+  let dailySpendRate = mtdDaily;
+  let paceEstimated = false;
+  if (mtdDaily <= 0) {
+    const trailing = Number(
+      db.get<{ v: number }>(sql`
+        SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS v
+        FROM transactions
+        WHERE pending = 0
+          AND date >= date('now', '-30 days') AND date < date('now')
+          AND (category IS NULL OR category NOT IN (${transferPrimaries}))`)?.v ?? 0,
+    );
+    dailySpendRate = trailing / 30;
+    paceEstimated = dailySpendRate > 0;
+  }
+  const paceSpend = dailySpendRate * daysRemaining;
 
-  const projectedEndBalance =
-    currentCash - remainingBills + remainingIncome - paceSpend;
+  const projectedEndBalance = currentCash - remainingBills + remainingIncome - paceSpend;
 
   return {
     month,
@@ -110,6 +243,7 @@ export function getCashflowForecast(month: string = getBudgetMonth()): CashflowF
     remainingBills,
     remainingIncome,
     paceSpend,
+    paceEstimated,
     projectedEndBalance,
     daysElapsed,
     daysRemaining,
@@ -128,10 +262,10 @@ export type ForecastPoint = {
  * Day-by-day balance series for the month: the `actual` line reconstructs cash
  * up to today from month-to-date net flow (anchored so today equals currentCash),
  * the `projected` line runs from today to month-end subtracting cumulative
- * pro-rated pace spend and any bills/income dated on or before each day. Both
+ * pro-rated pace spend and any bills/income landing on or before each day. Both
  * carry a value on today's date so the solid and dashed lines meet.
  */
-export function getForecastSeries(month: string = getBudgetMonth()): ForecastPoint[] {
+export function getForecastSeries(month: string = currentMonth()): ForecastPoint[] {
   const f = getCashflowForecast(month);
   const daysInMonth = f.daysElapsed + f.daysRemaining;
   const todayDay = f.daysElapsed; // 0 when the month is entirely in the future
@@ -152,22 +286,13 @@ export function getForecastSeries(month: string = getBudgetMonth()): ForecastPoi
   // Start-of-month cash so that walking net flow forward lands on currentCash at today.
   const startBalance = f.currentCash - (f.mtdIncome - f.mtdSpend);
 
-  // Remaining recurring events keyed by their predicted date, split by direction.
-  const eventRows = db.all<{ date: string; direction: string; amount: number }>(sql`
-    SELECT predicted_next_date AS date, direction,
-           COALESCE(SUM(ABS(COALESCE(average_amount, 0))), 0) AS amount
-    FROM recurring_streams
-    WHERE is_active = 1
-      AND predicted_next_date IS NOT NULL
-      AND predicted_next_date >= date('now')
-      AND predicted_next_date <= ${dayStr(month, daysInMonth)}
-    GROUP BY predicted_next_date, direction`);
+  // Remaining recurring events keyed by their projected date, split by direction.
   const eventByDate = new Map<string, { bills: number; income: number }>();
-  for (const r of eventRows) {
-    const e = eventByDate.get(r.date) ?? { bills: 0, income: 0 };
-    if (r.direction === "outflow") e.bills += Number(r.amount);
-    else if (r.direction === "inflow") e.income += Number(r.amount);
-    eventByDate.set(r.date, e);
+  for (const o of projectOccurrences(month)) {
+    const e = eventByDate.get(o.date) ?? { bills: 0, income: 0 };
+    if (o.direction === "outflow") e.bills += o.amount;
+    else if (o.direction === "inflow") e.income += o.amount;
+    eventByDate.set(o.date, e);
   }
 
   const dailyPace = f.daysRemaining > 0 ? f.paceSpend / f.daysRemaining : 0;
@@ -193,8 +318,7 @@ export function getForecastSeries(month: string = getBudgetMonth()): ForecastPoi
         cumIncome += ev.income;
       }
       const stepsFromToday = Math.max(0, d - todayDay);
-      projected =
-        f.currentCash - dailyPace * stepsFromToday - cumBills + cumIncome;
+      projected = f.currentCash - dailyPace * stepsFromToday - cumBills + cumIncome;
     }
 
     points.push({ date, actual, projected });
@@ -203,29 +327,32 @@ export function getForecastSeries(month: string = getBudgetMonth()): ForecastPoi
 }
 
 /**
- * Remaining recurring streams predicted to land between today and month-end,
- * split into bills (outflow) and income (inflow) — the RecurringRow shape the
- * page renders. Soonest predicted date first.
+ * Remaining recurring events between today and month-end — one row per projected
+ * occurrence (a biweekly paycheck appears twice, on each date it lands), split
+ * into bills (outflow) and income (inflow). Soonest first. Row ids are keyed by
+ * occurrence so the same stream on two dates stays distinct.
  */
-export function getRemainingRecurring(month: string = getBudgetMonth()): {
+export function getRemainingRecurring(month: string = currentMonth()): {
   bills: RecurringRow[];
   income: RecurringRow[];
 } {
-  const daysInMonth = daysInMonthOf(month);
-  const monthEnd = dayStr(month, daysInMonth);
-  const rows = db.all<RecurringRow>(sql`
-    SELECT r.id AS id, r.direction AS direction, r.description AS description,
-           r.merchant_name AS merchantName, r.category AS category, r.frequency AS frequency,
-           r.average_amount AS averageAmount, r.last_amount AS lastAmount,
-           r.last_date AS lastDate, r.predicted_next_date AS predictedNextDate,
-           r.iso_currency_code AS currency, a.name AS accountName, r.status AS status
-    FROM recurring_streams r
-    LEFT JOIN accounts a ON a.id = r.account_id
-    WHERE r.is_active = 1
-      AND r.predicted_next_date IS NOT NULL
-      AND r.predicted_next_date >= date('now')
-      AND r.predicted_next_date <= ${monthEnd}
-    ORDER BY r.predicted_next_date ASC, r.average_amount DESC`);
+  const rows: RecurringRow[] = projectOccurrences(month)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : b.amount - a.amount))
+    .map((o) => ({
+      id: `${o.stream.id}:${o.date}`,
+      direction: o.stream.direction,
+      description: o.stream.description,
+      merchantName: o.stream.merchantName,
+      category: o.stream.category,
+      frequency: o.stream.frequency,
+      averageAmount: o.stream.averageAmount,
+      lastAmount: o.stream.lastAmount,
+      lastDate: o.stream.lastDate,
+      predictedNextDate: o.date,
+      currency: o.stream.currency,
+      accountName: o.stream.accountName,
+      status: o.stream.status,
+    }));
   return {
     bills: rows.filter((r) => r.direction === "outflow"),
     income: rows.filter((r) => r.direction === "inflow"),

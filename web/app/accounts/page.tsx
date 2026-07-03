@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { PlaidLink } from "@/components/plaid-link";
 import { PageHead } from "@/components/page-head";
+import { AccountVisibilityToggle } from "@/components/account-visibility-toggle";
 import { getAccounts } from "@/lib/queries";
 import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
@@ -25,9 +26,12 @@ export default function AccountsPage() {
   }
 
   // Mixed source currencies — convert each account into the display currency
-  // before summing so the total is meaningful.
+  // before summing so the total is meaningful. Excluded accounts are hidden from
+  // the net total (but still listed, dimmed, so they can be un-hidden).
   const displayCurrency = getDisplayCurrency();
-  const net = accounts.reduce(
+  const visible = accounts.filter((a) => !a.excluded);
+  const hiddenCount = accounts.length - visible.length;
+  const net = visible.reduce(
     (s, a) => s + convertToDisplay(signedBalance(a.type, a.currentBalance), a.currency),
     0,
   );
@@ -41,7 +45,8 @@ export default function AccountsPage() {
           {formatCurrency(net, displayCurrency)}
         </span>
         <span className="text-sm text-[var(--muted)]">
-          net across {accounts.length} {accounts.length === 1 ? "account" : "accounts"}
+          net across {visible.length} {visible.length === 1 ? "account" : "accounts"}
+          {hiddenCount > 0 && ` · ${hiddenCount} hidden`}
         </span>
       </div>
 
@@ -55,10 +60,12 @@ export default function AccountsPage() {
 
       <div className="space-y-5">
         {[...byInstitution.entries()].map(([institution, accts]) => {
-          const subtotal = accts.reduce(
-            (s, a) => s + convertToDisplay(signedBalance(a.type, a.currentBalance), a.currency),
-            0,
-          );
+          const subtotal = accts
+            .filter((a) => !a.excluded)
+            .reduce(
+              (s, a) => s + convertToDisplay(signedBalance(a.type, a.currentBalance), a.currency),
+              0,
+            );
           return (
             <Card key={institution} className="p-0">
               <div className="flex items-center justify-between border-b border-line px-6 py-4">
@@ -78,11 +85,20 @@ export default function AccountsPage() {
                     key={a.id}
                     className="flex items-center justify-between gap-4 px-6 py-4 transition-colors hover:bg-[var(--panel-2)]"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {a.name}
-                        {a.mask && (
-                          <span className="ml-1.5 mono text-xs text-[var(--muted)]">••{a.mask}</span>
+                    <div className={`min-w-0 ${a.excluded ? "opacity-45" : ""}`}>
+                      <p className="flex items-center gap-2 truncate text-sm font-medium">
+                        <span className="truncate">
+                          {a.name}
+                          {a.mask && (
+                            <span className="ml-1.5 mono text-xs text-[var(--muted)]">
+                              ••{a.mask}
+                            </span>
+                          )}
+                        </span>
+                        {a.excluded && (
+                          <span className="shrink-0 rounded-full border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                            Hidden
+                          </span>
                         )}
                       </p>
                       <p className="mt-0.5 text-xs text-[var(--muted)]">
@@ -92,13 +108,16 @@ export default function AccountsPage() {
                         {a.subtype ? ` · ${a.subtype}` : ""}
                       </p>
                     </div>
-                    <span
-                      className={`mono shrink-0 text-sm ${
-                        isLiability(a.type) ? "text-[var(--coral)]" : "text-[var(--paper)]"
-                      }`}
-                    >
-                      {formatMoney(a.currentBalance ?? 0, a.currency)}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span
+                        className={`mono text-sm ${a.excluded ? "opacity-45" : ""} ${
+                          isLiability(a.type) ? "text-[var(--coral)]" : "text-[var(--paper)]"
+                        }`}
+                      >
+                        {formatMoney(a.currentBalance ?? 0, a.currency)}
+                      </span>
+                      <AccountVisibilityToggle id={a.id} excluded={!!a.excluded} />
+                    </div>
                   </li>
                 ))}
               </ul>

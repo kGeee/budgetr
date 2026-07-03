@@ -202,6 +202,7 @@ export function getNetWorth(): NetWorth {
   const rows = db
     .select({ type: accounts.type, total: sql<number>`COALESCE(SUM(${accounts.currentBalance}), 0)` })
     .from(accounts)
+    .where(eq(accounts.excluded, false))
     .groupBy(accounts.type)
     .all();
 
@@ -1274,6 +1275,7 @@ export function getAccounts() {
       currentBalance: accounts.currentBalance,
       availableBalance: accounts.availableBalance,
       currency: accounts.isoCurrencyCode,
+      excluded: accounts.excluded,
       institutionName: items.institutionName,
       itemStatus: items.status,
     })
@@ -1311,6 +1313,9 @@ export function getHoldings() {
       holdingCostBasisOverrides,
       eq(holdingCostBasisOverrides.holdingId, holdings.id),
     )
+    // Holdings in a hidden account drop off the Investments page and all
+    // downstream P&L / allocation / dividend math.
+    .where(eq(accounts.excluded, false))
     .orderBy(desc(holdings.institutionValue))
     .all();
 
@@ -1479,6 +1484,9 @@ export function getInvestmentTransactions(): InvestmentTxnRow[] {
     .from(investmentTransactions)
     .leftJoin(securities, eq(investmentTransactions.securityId, securities.id))
     .leftJoin(accounts, eq(investmentTransactions.accountId, accounts.id))
+    // Transactions from a hidden account are filtered out (trade markers,
+    // realized gains, tax lots, dividend income).
+    .where(eq(accounts.excluded, false))
     .orderBy(desc(investmentTransactions.date))
     .all();
 }

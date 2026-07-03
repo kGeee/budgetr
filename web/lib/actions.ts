@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
+  accounts,
   allocationTargets,
   attachments,
   budgetRollovers,
@@ -64,6 +65,18 @@ import { deleteAttachmentFile, saveAttachmentFile } from "@/lib/attachments";
 /** Invalidate every route + the layout so server components re-read the DB. */
 function revalidateAll() {
   revalidatePath("/", "layout");
+}
+
+// ── Accounts ──────────────────────────────────────────────────────────────
+
+/**
+ * Hide/show an account. Excluded accounts drop out of net worth, the sidebar,
+ * the accounts total, and cashflow cash — but stay listed (dimmed) on the
+ * Accounts page so they can be un-hidden. Never touched by Plaid sync.
+ */
+export async function setAccountExcluded(id: string, excluded: boolean) {
+  await db.update(accounts).set({ excluded }).where(eq(accounts.id, id));
+  revalidateAll();
 }
 
 // ── Categories ──────────────────────────────────────────────────────────────
