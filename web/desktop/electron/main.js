@@ -264,6 +264,29 @@ function createWindow() {
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.loadFile(path.join(__dirname, "loading.html"));
 
+  // The window is frameless (titleBarStyle: hiddenInset) with no title bar to
+  // grab, so out of the box you can't move it and the macOS traffic lights sit
+  // on top of the sidebar. Inject desktop-only CSS (never shipped to the web
+  // app) to (1) make the top header a drag handle while keeping its controls
+  // clickable, and (2) push the sidebar's contents below the traffic lights.
+  // Re-injected on every load since a full navigation clears inserted CSS.
+  mainWindow.webContents.on("did-finish-load", () => {
+    mainWindow.webContents
+      .insertCSS(
+        // Scoped to the layout's own top bar / sidebar (body > div > …) so it
+        // never hits nested <header>/<aside> in drawers like transaction-detail.
+        `
+        body > div > div > header { -webkit-app-region: drag; }
+        body > div > div > header button, body > div > div > header a,
+        body > div > div > header input, body > div > div > header select,
+        body > div > div > header label,
+        body > div > div > header [role="button"] { -webkit-app-region: no-drag; }
+        body > div > aside > div { padding-top: 44px; }
+        `,
+      )
+      .catch(() => {});
+  });
+
   // Open target=_blank / external links in the system browser, not a new window.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (serverUrl && url.startsWith(serverUrl)) return { action: "allow" };

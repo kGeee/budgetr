@@ -11,6 +11,11 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3"],
   turbopack: { root: projectRoot },
   outputFileTracingRoot: projectRoot,
+  // The desktop shell loads the dev server via http://127.0.0.1:<port>, but Next
+  // serves its dev resources (HMR / Fast Refresh client chunks) under the
+  // `localhost` origin and 403s cross-origin requests by default. Without this
+  // the Electron window renders but never hydrates — the UI loads frozen.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   async headers() {
     return [
       {

@@ -156,11 +156,6 @@ export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
       </div>
 
       <div className="shrink-0 border-t border-line px-5 py-4">
-        <p className="eyebrow mb-1">Environment</p>
-        <p className="flex items-center gap-2 text-sm text-[var(--paper)]">
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--jade)]" />
-          Plaid Sandbox
-        </p>
         <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
           Read-only · data stays on this machine.
         </p>
