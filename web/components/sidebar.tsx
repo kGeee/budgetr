@@ -21,6 +21,7 @@ import {
   Settings,
   type LucideIcon,
 } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 const nav: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
@@ -66,11 +67,8 @@ const ACCOUNT_GROUPS: { type: string; label: string }[] = [
 ];
 
 function fmtBalance(amount: number | null, currency: string | null) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency ?? "USD",
-    maximumFractionDigits: 0,
-  }).format(amount ?? 0);
+  // Routes through the shared formatter so privacy mode masks these too.
+  return formatCurrency(amount ?? 0, currency ?? "USD", { maximumFractionDigits: 0 });
 }
 
 export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {

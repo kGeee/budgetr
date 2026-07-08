@@ -1,10 +1,32 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { scaleForDisplay } from "./scale";
+import { isHidden } from "./scale";
 import { convertToDisplay, getDisplayCurrency } from "./currency";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+const HIDDEN_DIGITS = "••••";
+// Numeric part types produced by Intl formatToParts; these get masked away.
+const NUMERIC_PART = new Set(["integer", "group", "decimal", "fraction", "minusSign"]);
+
+/**
+ * Privacy mask for a currency figure: keeps the currency symbol and locale
+ * literals (so "$••••" still reads as a dollar amount) but replaces the actual
+ * digits — and the sign, so we don't leak positive/negative — with dots.
+ */
+function maskCurrency(fmt: Intl.NumberFormat): string {
+  let masked = false;
+  return fmt
+    .formatToParts(0)
+    .map((part) => {
+      if (!NUMERIC_PART.has(part.type)) return part.value;
+      if (masked) return "";
+      masked = true;
+      return HIDDEN_DIGITS;
+    })
+    .join("");
 }
 
 export function formatCurrency(
@@ -12,12 +34,13 @@ export function formatCurrency(
   currency = "USD",
   opts: Intl.NumberFormatOptions = {},
 ): string {
-  return new Intl.NumberFormat("en-US", {
+  const fmt = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
     maximumFractionDigits: 2,
     ...opts,
-  }).format(scaleForDisplay(amount));
+  });
+  return isHidden() ? maskCurrency(fmt) : fmt.format(amount);
 }
 
 /**
@@ -41,12 +64,13 @@ export function formatMoney(
 }
 
 export function formatCompactCurrency(amount: number, currency = "USD"): string {
-  return new Intl.NumberFormat("en-US", {
+  const fmt = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
     notation: "compact",
     maximumFractionDigits: 1,
-  }).format(scaleForDisplay(amount));
+  });
+  return isHidden() ? maskCurrency(fmt) : fmt.format(amount);
 }
 
 /**

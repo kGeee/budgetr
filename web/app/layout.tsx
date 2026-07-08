@@ -7,7 +7,7 @@ import { RegisterSW } from "@/components/register-sw";
 import { ScaleInit, ObfuscationToggle } from "@/components/obfuscation";
 import { CurrencyInit, CurrencySwitcher } from "@/components/currency-switcher";
 import { getAccounts, getDisplayCurrencyRates } from "@/lib/queries";
-import { OBF_COOKIE, factorFromCookie, setScaleFactor } from "@/lib/scale";
+import { OBF_COOKIE, hiddenFromCookie, setHidden } from "@/lib/scale";
 import {
   CURRENCY_COOKIE,
   RATES_BASE,
@@ -65,11 +65,11 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Seed the obfuscation scale from the cookie before any server component
-  // formats currency this request.
+  // Seed privacy mode from the cookie before any server component formats
+  // currency this request.
   const cookieStore = await cookies();
-  const obfFactor = factorFromCookie(cookieStore.get(OBF_COOKIE)?.value);
-  setScaleFactor(obfFactor);
+  const obfHidden = hiddenFromCookie(cookieStore.get(OBF_COOKIE)?.value);
+  setHidden(obfHidden);
 
   // Seed the display currency + cached FX rates from the cookie/DB before any
   // server component formats money this request.
@@ -82,7 +82,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
       <body>
-        <ScaleInit factor={obfFactor} />
+        <ScaleInit hidden={obfHidden} />
         <CurrencyInit currency={displayCurrency} rates={ratesMap} />
         <RegisterSW />
         <div className="mx-auto flex min-h-dvh max-w-[1500px]">
@@ -92,7 +92,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <MobileNav />
               <div className="ml-auto flex items-center gap-2">
                 <CurrencySwitcher current={displayCurrency} />
-                <ObfuscationToggle initialFactor={obfFactor} />
+                <ObfuscationToggle initialHidden={obfHidden} />
                 <SyncButton />
               </div>
             </header>

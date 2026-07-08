@@ -1,13 +1,13 @@
 /**
- * Display-only obfuscation scale ("privacy mode").
+ * Display-only privacy mode.
  *
- * When active, every money amount that flows through `formatCurrency` /
- * `formatCompactCurrency` is divided by `factor` (k) before formatting, so the
- * figures on screen read as 1/k of reality. This is purely cosmetic — no stored
- * data or calculation is touched, and percentages (being ratios) are unaffected.
+ * When active, every absolute money amount that flows through `formatCurrency` /
+ * `formatCompactCurrency` / `formatMoney` is masked out (rendered as dots) rather
+ * than shown. This is purely cosmetic — no stored data or calculation is touched,
+ * and percentages (being ratios, not absolute figures) are unaffected.
  *
- * The factor is the single source of truth held in the `obf` cookie. Because the
- * value lives in module scope, each runtime keeps its own copy:
+ * The on/off flag is the single source of truth held in the `obf` cookie. Because
+ * the value lives in module scope, each runtime keeps its own copy:
  *   • Server — set per request in the root layout from the cookie, before the
  *     page's server components format anything. (Single-user, local app, so the
  *     shared module value across requests is acceptable.)
@@ -16,25 +16,22 @@
  */
 
 export const OBF_COOKIE = "obf";
-export const DEFAULT_K = 10;
 
-let factor = 1; // active divisor; 1 = privacy mode off
+let hidden = false; // true = privacy mode on (dollar values masked)
 
-export function setScaleFactor(k: number): void {
-  factor = Number.isFinite(k) && k > 1 ? k : 1;
+export function setHidden(on: boolean): void {
+  hidden = !!on;
 }
 
-export function getScaleFactor(): number {
-  return factor;
+export function isHidden(): boolean {
+  return hidden;
 }
 
-/** Map a real amount to the value that should actually be displayed. */
-export function scaleForDisplay(amount: number): number {
-  return factor === 1 ? amount : amount / factor;
-}
-
-/** Parse the cookie value into a usable factor (defaults to 1 / disabled). */
-export function factorFromCookie(value: string | undefined): number {
-  const k = Number(value);
-  return Number.isFinite(k) && k > 1 ? k : 1;
+/**
+ * Parse the cookie value into the on/off flag. Any non-empty, non-"0" value means
+ * hidden — which also keeps older `obf=<k>` cookies (from the divide-by-k era)
+ * reading as "on".
+ */
+export function hiddenFromCookie(value: string | undefined): boolean {
+  return !!value && value !== "0";
 }
