@@ -231,14 +231,20 @@ export function getMonthlyCashflow(months = 6): {
   income: number;
   expenses: number;
 }[] {
+  // Built on spend_rows so it honours user category overrides and split
+  // transactions (and drops confirmed transfer/refund legs). Transfers are
+  // excluded by the *effective* category's group, so re-categorizing a
+  // mis-tagged transfer (e.g. a Zelle rent Plaid labelled TRANSFER_OUT) into a
+  // spending category makes it count here too.
   const rows = db.all<{ month: string; income: number; expenses: number }>(
-    sql`SELECT substr(date,1,7) AS month,
-          SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS income,
-          SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS expenses
-        FROM transactions t
-        WHERE pending = 0
-          AND (category IS NULL OR category NOT IN (${transferPrimaries}))
-          AND NOT ${isConfirmedMatch("t")}
+    sql`WITH ${spendRowsCte}
+        SELECT substr(sr.date, 1, 7) AS month,
+          SUM(CASE WHEN sr.amount < 0 THEN -sr.amount ELSE 0 END) AS income,
+          SUM(CASE WHEN sr.amount > 0 THEN sr.amount ELSE 0 END) AS expenses
+        FROM spend_rows sr
+        LEFT JOIN categories c ON c.id = sr.category_id
+        WHERE sr.pending = 0
+          AND (c."group" IS NULL OR c."group" <> 'transfer')
         GROUP BY month
         ORDER BY month DESC
         LIMIT ${months}`,
@@ -246,6 +252,68 @@ export function getMonthlyCashflow(months = 6): {
   return rows
     .map((r) => ({ month: r.month, income: Number(r.income), expenses: Number(r.expenses) }))
     .reverse();
+}
+
+export type CashflowTxn = {
+  id: string;
+  date: string;
+  /** YYYY-MM bucket, matching getMonthlyCashflow. */
+  month: string;
+  name: string;
+  categoryName: string | null;
+  categoryIcon: string | null;
+  /** Signed like transactions.amount: > 0 spending, < 0 income. */
+  amount: number;
+};
+
+/**
+ * The individual rows that feed getMonthlyCashflow, for the month drill-down.
+ * Same filters (spend_rows: effective category, split-flattened, confirmed
+ * matches dropped; pending and transfers excluded), limited to the most recent
+ * `months` buckets so it lines up 1:1 with the chart. One row per split.
+ */
+export function getCashflowBreakdown(months = 6): CashflowTxn[] {
+  return db
+    .all<{
+      id: string;
+      date: string;
+      month: string;
+      name: string;
+      merchantName: string | null;
+      categoryName: string | null;
+      categoryIcon: string | null;
+      amount: number;
+    }>(
+      sql`WITH ${spendRowsCte},
+          kept AS (
+            SELECT sr.txn_id, sr.date, sr.amount, sr.category_id
+            FROM spend_rows sr
+            LEFT JOIN categories c ON c.id = sr.category_id
+            WHERE sr.pending = 0
+              AND (c."group" IS NULL OR c."group" <> 'transfer')
+          ),
+          months AS (
+            SELECT DISTINCT substr(date, 1, 7) AS m FROM kept ORDER BY m DESC LIMIT ${months}
+          )
+          SELECT k.txn_id AS id, k.date AS date, substr(k.date, 1, 7) AS month,
+                 t.name AS name, t.merchant_name AS merchantName,
+                 c.name AS categoryName, c.icon AS categoryIcon,
+                 k.amount AS amount
+          FROM kept k
+          JOIN transactions t ON t.id = k.txn_id
+          LEFT JOIN categories c ON c.id = k.category_id
+          WHERE substr(k.date, 1, 7) IN (SELECT m FROM months)
+          ORDER BY k.date DESC, t.name ASC`,
+    )
+    .map((r) => ({
+      id: r.id,
+      date: r.date,
+      month: r.month,
+      name: r.merchantName || r.name,
+      categoryName: r.categoryName,
+      categoryIcon: r.categoryIcon,
+      amount: Number(r.amount),
+    }));
 }
 
 export type CategorySpend = {

@@ -30,6 +30,23 @@ export const PIE_COLORS = [
 const GRID = "#212a27";
 const tick = { fill: "#8b948c", fontSize: 11, fontFamily: "var(--font-mono)" };
 
+/**
+ * A Y-axis domain framed to the data with ~8% headroom on each side, so a line
+ * whose swings are small next to its absolute level (net worth, portfolio value)
+ * reads as real movement instead of a flat line pinned to a 0 baseline. Falls
+ * back to a sensible band when the series is empty or perfectly flat, and never
+ * forces 0 into view, so negative balances frame correctly too.
+ */
+function framedDomain(values: number[]): [number, number] {
+  const finite = values.filter((v) => Number.isFinite(v));
+  if (finite.length === 0) return [0, 1];
+  const lo = Math.min(...finite);
+  const hi = Math.max(...finite);
+  const range = hi - lo;
+  const pad = range > 0 ? range * 0.08 : Math.max(Math.abs(hi) * 0.08, 1);
+  return [lo - pad, hi + pad];
+}
+
 const tooltipStyle = {
   background: "#101413",
   border: "1px solid #303b37",
@@ -69,6 +86,8 @@ export function NetWorthChart({ data }: { data: { date: string; netWorth: number
           tickLine={false}
           axisLine={false}
           width={58}
+          domain={framedDomain(data.map((d) => d.netWorth))}
+          allowDataOverflow={false}
         />
         <Tooltip
           contentStyle={tooltipStyle}
@@ -92,10 +111,25 @@ export function NetWorthChart({ data }: { data: { date: string; netWorth: number
 
 export function CashflowChart({
   data,
+  selectedMonth = null,
+  onSelectMonth,
 }: {
   data: { month: string; income: number; expenses: number }[];
+  /** Highlighted month ('YYYY-MM') when the chart drives a drill-down. */
+  selectedMonth?: string | null;
+  /** Called with the clicked month, or null when the active bar is clicked again. */
+  onSelectMonth?: (month: string | null) => void;
 }) {
   if (data.length === 0) return <Empty label="No activity yet" hint="Connect an account to see cashflow." />;
+  const clickable = Boolean(onSelectMonth);
+  const handleClick = onSelectMonth
+    ? (entry: unknown) => {
+        const month = (entry as { payload?: { month?: string } })?.payload?.month;
+        if (month) onSelectMonth(month === selectedMonth ? null : month);
+      }
+    : undefined;
+  const dim = (month: string, base: string) =>
+    selectedMonth && month !== selectedMonth ? `${base}66` : base;
   return (
     <ResponsiveContainer width="100%" height={260}>
       <BarChart data={data} margin={{ left: 4, right: 8, top: 8 }} barGap={4}>
@@ -124,8 +158,28 @@ export function CashflowChart({
           ]}
           labelFormatter={(m) => format(parseISO(m + "-01"), "MMMM yyyy")}
         />
-        <Bar dataKey="income" fill="#6fe3a6" radius={[3, 3, 0, 0]} maxBarSize={26} />
-        <Bar dataKey="expenses" fill="#f0897b" radius={[3, 3, 0, 0]} maxBarSize={26} />
+        <Bar
+          dataKey="income"
+          radius={[3, 3, 0, 0]}
+          maxBarSize={26}
+          cursor={clickable ? "pointer" : undefined}
+          onClick={handleClick}
+        >
+          {data.map((d) => (
+            <Cell key={d.month} fill={dim(d.month, "#6fe3a6")} />
+          ))}
+        </Bar>
+        <Bar
+          dataKey="expenses"
+          radius={[3, 3, 0, 0]}
+          maxBarSize={26}
+          cursor={clickable ? "pointer" : undefined}
+          onClick={handleClick}
+        >
+          {data.map((d) => (
+            <Cell key={d.month} fill={dim(d.month, "#f0897b")} />
+          ))}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
@@ -353,7 +407,7 @@ export function ValueAreaChart({
           tickLine={false}
           axisLine={false}
           width={58}
-          domain={baseline === "auto" ? ["auto", "auto"] : undefined}
+          domain={baseline === "auto" ? framedDomain(data.map((d) => d.value)) : undefined}
           allowDataOverflow={false}
         />
         <Tooltip

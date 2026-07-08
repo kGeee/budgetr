@@ -9,7 +9,7 @@
 // writable per-user directory rather than the read-only app bundle, and (2)
 // migrations run on launch so a fresh install comes up with the right schema.
 
-const { app, BrowserWindow, dialog, shell } = require("electron");
+const { app, BrowserWindow, dialog, shell, Menu } = require("electron");
 const path = require("node:path");
 const net = require("node:net");
 const fs = require("node:fs");
@@ -299,8 +299,51 @@ function createWindow() {
   });
 }
 
+/**
+ * App menu with direct access to the per-user settings file and data folder,
+ * so non-technical users never have to hunt for
+ * ~/Library/Application Support/budgetr/budgetr.env by hand.
+ */
+function buildMenu() {
+  const template = [
+    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+    {
+      label: "Settings",
+      submenu: [
+        {
+          label: "Open Settings File (budgetr.env)…",
+          accelerator: "CmdOrCtrl+,",
+          click: () => {
+            loadUserEnv(); // ensures the file exists before opening it
+            shell.openPath(userEnvPath());
+          },
+        },
+        {
+          label: "Show Data Folder",
+          click: () => shell.showItemInFolder(databasePath()),
+        },
+        { type: "separator" },
+        {
+          label: "Relaunch to Apply Settings",
+          click: () => {
+            app.relaunch();
+            app.quit();
+          },
+        },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 async function boot() {
   const dbPath = databasePath();
+
+  buildMenu();
 
   if (app.isPackaged) {
     try {

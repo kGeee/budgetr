@@ -117,5 +117,7 @@ on the app.
 Packaged (Electron) builds never bundle your `.env.local`. They read secrets
 from a per-user file — `~/Library/Application Support/budgetr/budgetr.env` —
 which is auto-created on first launch with a fresh `APP_ENCRYPTION_KEY`; add
-your Plaid/Finnhub keys there and relaunch. This is what makes a publicly
-distributed DMG safe: no shared encryption key, no baked-in credentials.
+your Plaid/Finnhub keys there and relaunch. In the app, **Settings → Open
+Settings File** (`⌘,`) opens it directly and **Settings → Relaunch to Apply
+Settings** restarts. This is what makes a publicly distributed DMG safe: no
+shared encryption key, no baked-in credentials.

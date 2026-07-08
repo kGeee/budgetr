@@ -1,7 +1,8 @@
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHead } from "@/components/page-head";
-import { CashflowChart, CategoryChart } from "@/components/charts";
+import { CategoryChart } from "@/components/charts";
+import { CashflowCard } from "@/components/cashflow-card";
 import { ValueHistory } from "@/components/value-history";
 import { buildReconstructedSeries, getTickerHistories, overlayNetWorth } from "@/lib/portfolio-history";
 import { CategoryIcon } from "@/components/category-pill";
@@ -17,6 +18,7 @@ import {
   getCategories,
   getItems,
   getManualHoldings,
+  getCashflowBreakdown,
   getMonthlyBudgetSummary,
   getMonthlyCashflow,
   getNetWorth,
@@ -71,6 +73,7 @@ export default async function Dashboard() {
     net: nw.net,
   });
   const cashflow = getMonthlyCashflow();
+  const cashflowBreakdown = getCashflowBreakdown();
   const categories = getSpendingByCategory(30);
   const recent = getRecentTransactions(7);
   const toReview = getTransactionsToReview(6);
@@ -90,9 +93,6 @@ export default async function Dashboard() {
   const first = series[0]?.netWorth ?? nw.net;
   const change = nw.net - first;
   const changePct = first !== 0 ? (change / Math.abs(first)) * 100 : 0;
-
-  const thisMonth = cashflow[cashflow.length - 1];
-  const netFlow = thisMonth ? thisMonth.income - thisMonth.expenses : 0;
 
   return (
     <div className="space-y-7">
@@ -127,20 +127,7 @@ export default async function Dashboard() {
 
       {/* Cashflow + category */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <Card className="lg:col-span-3">
-          <CardHeader>
-            <CardTitle>Income vs spending</CardTitle>
-            {thisMonth && (
-              <span
-                className={`mono text-sm ${netFlow >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
-              >
-                {netFlow >= 0 ? "+" : "−"}
-                {formatCurrency(Math.abs(netFlow))} this month
-              </span>
-            )}
-          </CardHeader>
-          <CashflowChart data={cashflow} />
-        </Card>
+        <CashflowCard data={cashflow} breakdown={cashflowBreakdown} />
 
         <Card className="lg:col-span-2">
           <CardHeader>
