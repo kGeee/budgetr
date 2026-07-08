@@ -11,6 +11,8 @@
  * challenge to server-side callers, so it can't be fetched headless.)
  */
 
+import { parseOccSymbol } from "./options";
+
 export type PricePoint = { date: string; close: number };
 
 type YahooChart = {
@@ -79,6 +81,36 @@ export async function getDailyCloses(ticker: string, months = 12): Promise<Price
  * Cached in Next's Data Cache for 30m — IV drifts intraday but not by the second.
  */
 
+/** Live per-share option Greeks carried on a chain quote (source-provided). */
+export type QuoteGreeks = {
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  rho: number | null;
+};
+
+/** One live option contract quote from the chain, greeks-ready. */
+export type OptionQuote = {
+  /** OCC/contract symbol, uppercased. */
+  occ: string;
+  /** Expiry as YYYY-MM-DD. */
+  expiry: string;
+  strike: number;
+  right: "call" | "put";
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  /** Implied volatility as a decimal (0.42), or null. */
+  iv: number | null;
+  openInterest: number | null;
+  volume: number | null;
+  /** In-the-money flag, or null when absent. */
+  inTheMoney: boolean | null;
+  /** Source-provided Greeks (CBOE), or null fields when unavailable. */
+  greeks?: QuoteGreeks | null;
+};
+
 export type OptionChain = {
   /** Live underlying price Yahoo quotes alongside the chain, or null. */
   underlyingPrice: number | null;
@@ -86,11 +118,21 @@ export type OptionChain = {
   expirations: number[];
   /** Implied volatility keyed by OCC/contract symbol (decimal, e.g. 0.42). */
   ivByOcc: Record<string, number>;
+  /** Full contract quotes we pulled (nearest expiry + any requested ones). */
+  contracts: OptionQuote[];
 };
 
 type YahooOptionContract = {
   contractSymbol?: string;
+  strike?: number;
+  bid?: number;
+  ask?: number;
+  lastPrice?: number;
   impliedVolatility?: number;
+  openInterest?: number;
+  volume?: number;
+  inTheMoney?: boolean;
+  expiration?: number;
 };
 
 type YahooOptionChain = {
@@ -102,6 +144,11 @@ type YahooOptionChain = {
     }>;
   };
 };
+
+/** Finite number, else null. */
+function numOrNull(n: unknown): number | null {
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
 
 /**
  * Fetch the option chain for `underlying`. When `expiries` (YYYY-MM-DD) are
@@ -116,8 +163,34 @@ export async function getOptionChain(
   const base = `https://query1.finance.yahoo.com/v7/finance/options/${encodeURIComponent(sym)}`;
 
   const ivByOcc: Record<string, number> = {};
+  const byOcc = new Map<string, OptionQuote>();
   let underlyingPrice: number | null = null;
   let expirations: number[] = [];
+
+  function ingest(c: YahooOptionContract, right: "call" | "put"): void {
+    const occ = c.contractSymbol?.toUpperCase();
+    if (!occ) return;
+    const iv = typeof c.impliedVolatility === "number" && c.impliedVolatility > 0 ? c.impliedVolatility : null;
+    if (iv != null) ivByOcc[occ] = iv;
+    // OCC symbol carries a reliable expiry + strike; fall back to Yahoo's fields.
+    const parsed = parseOccSymbol(occ);
+    const expiry =
+      parsed?.expiry ??
+      (c.expiration != null ? new Date(c.expiration * 1000).toISOString().slice(0, 10) : "");
+    byOcc.set(occ, {
+      occ,
+      expiry,
+      strike: parsed?.strike ?? numOrNull(c.strike) ?? 0,
+      right,
+      bid: numOrNull(c.bid),
+      ask: numOrNull(c.ask),
+      last: numOrNull(c.lastPrice),
+      iv,
+      openInterest: numOrNull(c.openInterest),
+      volume: numOrNull(c.volume),
+      inTheMoney: typeof c.inTheMoney === "boolean" ? c.inTheMoney : null,
+    });
+  }
 
   async function pull(url: string): Promise<void> {
     const res = await fetch(url, {
@@ -133,11 +206,8 @@ export async function getOptionChain(
     }
     if (r.expirationDates?.length) expirations = r.expirationDates;
     for (const bundle of r.options ?? []) {
-      for (const c of [...(bundle.calls ?? []), ...(bundle.puts ?? [])]) {
-        if (c.contractSymbol && typeof c.impliedVolatility === "number" && c.impliedVolatility > 0) {
-          ivByOcc[c.contractSymbol.toUpperCase()] = c.impliedVolatility;
-        }
-      }
+      for (const c of bundle.calls ?? []) ingest(c, "call");
+      for (const c of bundle.puts ?? []) ingest(c, "put");
     }
   }
 
@@ -155,7 +225,7 @@ export async function getOptionChain(
       await Promise.all(epochs.map((ep) => pull(`${base}?date=${ep}`)));
     }
 
-    return { underlyingPrice, expirations, ivByOcc };
+    return { underlyingPrice, expirations, ivByOcc, contracts: [...byOcc.values()] };
   } catch {
     return null;
   }

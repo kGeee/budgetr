@@ -27,12 +27,12 @@ export type Greeks = {
 const NULL_GREEKS: Greeks = { delta: null, gamma: null, theta: null, vega: null, rho: null };
 
 /** Standard normal PDF. */
-function normPdf(x: number): number {
+export function normPdf(x: number): number {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
 }
 
 /** Standard normal CDF via the Abramowitz-Stegun rational approximation. */
-function normCdf(x: number): number {
+export function normCdf(x: number): number {
   const t = 1 / (1 + 0.2316419 * Math.abs(x));
   const d = normPdf(x);
   const p =

@@ -10,6 +10,8 @@
  * Pure module (no DB / server deps) so it's usable from client components too.
  */
 
+import { analyzePayoff, type PayoffLeg } from "./payoff";
+
 export type ParsedOption = {
   occ: string; // normalized OCC symbol
   underlying: string; // e.g. "LRCX"
@@ -67,10 +69,18 @@ export type OptionStructure = {
   legIndexes: number[];
   /** Best-case P&L in dollars at expiry (null when unbounded or un-costed). */
   maxProfit?: number | null;
+  /** True when the upside is unbounded (report as "Unlimited"). */
+  maxProfitUnbounded?: boolean;
   /** Worst-case P&L in dollars at expiry, as a positive magnitude. */
   maxLoss?: number | null;
-  /** Underlying price at which the structure breaks even at expiry. */
+  /** True when the downside is unbounded (naked short-call risk). */
+  maxLossUnbounded?: boolean;
+  /** Primary underlying price at which the structure breaks even at expiry. */
   breakeven?: number | null;
+  /** Every breakeven at expiry, ascending (straddles/condors have several). */
+  breakevens?: number[];
+  /** The legs, in engine form, for charting the payoff curve. */
+  payoffLegs?: PayoffLeg[];
 };
 
 // ── Expiry / risk helpers ──────────────────────────────────────────────────
@@ -161,6 +171,8 @@ export function classifyOptionLegs(legs: OptionLegInput[]): OptionStructure[] {
 
   const out: OptionStructure[] = [];
   for (const idxs of groups.values()) {
+    const structLegs = idxs.map((i) => legs[i]);
+
     if (idxs.length === 2) {
       const a = legs[idxs[0]];
       const b = legs[idxs[1]];
@@ -185,7 +197,7 @@ export function classifyOptionLegs(legs: OptionLegInput[]): OptionStructure[] {
           label: `${bias} ${right} spread`,
           detail: `${formatStrike(lower)} / ${formatStrike(upper)} · ${formatOptionExpiry(a.parsed.expiry)}`,
           legIndexes: idxs,
-          ...verticalEconomics(a, b, lower, upper, right),
+          ...economicsFor(structLegs),
         });
         continue;
       }
@@ -199,7 +211,7 @@ export function classifyOptionLegs(legs: OptionLegInput[]): OptionStructure[] {
         label: `${dir} ${l.parsed.right}`,
         detail: `${formatStrike(l.parsed.strike)} · ${formatOptionExpiry(l.parsed.expiry)}`,
         legIndexes: idxs,
-        ...singleEconomics(l),
+        ...economicsFor(structLegs),
       });
     } else {
       const l0 = legs[idxs[0]];
@@ -208,61 +220,36 @@ export function classifyOptionLegs(legs: OptionLegInput[]): OptionStructure[] {
         label: `${idxs.length}-leg ${l0.parsed.right}`,
         detail: formatOptionExpiry(l0.parsed.expiry),
         legIndexes: idxs,
+        ...economicsFor(structLegs),
       });
     }
   }
   return out;
 }
 
-/** Contracts × 100 — the share multiplier one option leg controls. */
-const CONTRACT_SIZE = 100;
-
-type Economics = { maxProfit: number | null; maxLoss: number | null; breakeven: number | null };
-
 /**
- * Max-profit / max-loss / breakeven for a two-leg vertical, derived purely from
- * the legs' cost basis. Net debit (> 0) = a debit spread capped at the strike
- * width; net credit (< 0) = a credit spread keeping the premium. Returns nulls
- * when either leg lacks a cost basis (nothing to net against).
+ * Risk/reward for a structure's legs via the general payoff engine. Quantities
+ * are in shares (100/contract) exactly as stored, so nothing here re-multiplies
+ * by the contract size — that double count was the old reward:risk bug. Returns
+ * the fields spread onto an `OptionStructure`.
  */
-function verticalEconomics(
-  a: OptionLegInput,
-  b: OptionLegInput,
-  lower: number,
-  upper: number,
-  right: "call" | "put",
-): Economics {
-  if (a.costBasis == null || b.costBasis == null) {
-    return { maxProfit: null, maxLoss: null, breakeven: null };
-  }
-  const contracts = Math.min(Math.abs(a.quantity ?? 0), Math.abs(b.quantity ?? 0)) || 1;
-  const widthValue = (upper - lower) * CONTRACT_SIZE * contracts;
-  const netDebit = a.costBasis + b.costBasis; // >0 paid, <0 received
-  const perShare = Math.abs(netDebit) / (CONTRACT_SIZE * contracts);
-  // Call verticals break even above the lower strike; puts below the upper one.
-  const breakeven = right === "call" ? lower + perShare : upper - perShare;
-  if (netDebit >= 0) {
-    return { maxLoss: netDebit, maxProfit: widthValue - netDebit, breakeven };
-  }
-  const credit = -netDebit;
-  return { maxProfit: credit, maxLoss: widthValue - credit, breakeven };
-}
-
-/**
- * Economics for a lone leg. A long option can only lose its premium; its upside
- * is unbounded (call) or capped at the strike going to zero (put). Short singles
- * carry undefined/undefinable risk here, so we leave everything null.
- */
-function singleEconomics(l: OptionLegInput): Economics {
-  const qty = l.quantity ?? 0;
-  if (qty <= 0 || l.costBasis == null) {
-    return { maxProfit: null, maxLoss: null, breakeven: null };
-  }
-  const contracts = Math.abs(qty) || 1;
-  const perShare = l.costBasis / (CONTRACT_SIZE * contracts);
-  if (l.parsed.right === "call") {
-    return { maxProfit: null, maxLoss: l.costBasis, breakeven: l.parsed.strike + perShare };
-  }
-  const maxProfit = l.parsed.strike * CONTRACT_SIZE * contracts - l.costBasis;
-  return { maxProfit, maxLoss: l.costBasis, breakeven: l.parsed.strike - perShare };
+function economicsFor(structLegs: OptionLegInput[]): Pick<
+  OptionStructure,
+  "maxProfit" | "maxProfitUnbounded" | "maxLoss" | "maxLossUnbounded" | "breakeven" | "breakevens" | "payoffLegs"
+> {
+  const payoffLegs: PayoffLeg[] = structLegs.map((l) => ({
+    parsed: l.parsed,
+    quantity: l.quantity,
+    costBasis: l.costBasis,
+  }));
+  const a = analyzePayoff(payoffLegs);
+  return {
+    maxProfit: a.maxProfit,
+    maxProfitUnbounded: a.maxProfitUnbounded,
+    maxLoss: a.maxLoss,
+    maxLossUnbounded: a.maxLossUnbounded,
+    breakeven: a.breakevens[0] ?? null,
+    breakevens: a.breakevens,
+    payoffLegs,
+  };
 }

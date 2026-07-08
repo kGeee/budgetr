@@ -14,7 +14,7 @@
  */
 
 import { useMemo } from "react";
-import { AlertTriangle, CalendarClock, Sigma } from "lucide-react";
+import { AlertTriangle, CalendarClock, Layers, Sigma } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { PIE_COLORS } from "@/components/charts";
 import { formatCurrency } from "@/lib/utils";
@@ -32,8 +32,12 @@ import {
   type RiskLevel,
 } from "@/lib/options";
 import { computeGreeks } from "@/lib/greeks";
+import { CONTRACT_SIZE, type PayoffLeg } from "@/lib/payoff";
+import { expectedMove, probabilityOfProfit } from "@/lib/option-analytics";
+import { PayoffDiagram } from "@/components/payoff-diagram";
 import type { HoldingRow } from "@/components/portfolio-view";
 import type { LiveQuote } from "@/components/live-prices";
+import type { OptionQuote } from "@/lib/yahoo";
 
 type Leg = { h: HoldingRow; p: ParsedOption };
 
@@ -42,12 +46,14 @@ export function OptionsAnalytics({
   quotes,
   ivByOcc,
   underlyingPrices,
+  chainByUnderlying = {},
   currency = "USD",
 }: {
   legs: HoldingRow[];
   quotes: Record<string, LiveQuote>;
   ivByOcc: Record<string, number>;
   underlyingPrices: Record<string, number>;
+  chainByUnderlying?: Record<string, OptionQuote[]>;
   currency?: string;
 }) {
   // Parse once; drop any non-OCC rows defensively.
@@ -70,15 +76,37 @@ export function OptionsAnalytics({
   const priceFor = (underlying: string): number | null =>
     quotes[underlying.toUpperCase()]?.price ?? underlyingPrices[underlying] ?? null;
 
+  // Flatten the chains into an OCC → quote lookup for real (CBOE) Greeks.
+  const chainByOcc = useMemo(() => {
+    const m: Record<string, OptionQuote> = {};
+    for (const list of Object.values(chainByUnderlying)) {
+      for (const c of list) m[c.occ] = c;
+    }
+    return m;
+  }, [chainByUnderlying]);
+
   if (parsed.length === 0) return null;
 
   return (
     <div className="space-y-5">
       <ExpirationCalendar parsed={parsed} colorByUnderlying={colorByUnderlying} priceFor={priceFor} />
-      <SpreadPnl parsed={parsed} colorByUnderlying={colorByUnderlying} currency={currency} />
+      <SpreadPnl
+        parsed={parsed}
+        colorByUnderlying={colorByUnderlying}
+        currency={currency}
+        ivByOcc={ivByOcc}
+        priceFor={priceFor}
+      />
       <GreeksTable
         parsed={parsed}
         ivByOcc={ivByOcc}
+        chainByOcc={chainByOcc}
+        colorByUnderlying={colorByUnderlying}
+        priceFor={priceFor}
+      />
+      <OptionsChain
+        parsed={parsed}
+        chainByUnderlying={chainByUnderlying}
         colorByUnderlying={colorByUnderlying}
         priceFor={priceFor}
       />
@@ -155,6 +183,8 @@ function ExpirationCalendar({
                 {legs.map(({ h, p }) => {
                   const flag = optionRiskFlag(p, h.quantity, priceFor(p.underlying), dte);
                   const long = (h.quantity ?? 0) >= 0;
+                  // Quantity is stored in shares (100/contract) — show contracts.
+                  const contracts = Math.abs(h.quantity ?? 0) / CONTRACT_SIZE;
                   return (
                     <li
                       key={h.id}
@@ -167,7 +197,7 @@ function ExpirationCalendar({
                       <span className="font-medium text-[var(--brass)]">{p.underlying}</span>
                       <span className={`mono ${long ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
                         {long ? "+" : "−"}
-                        {Math.abs(h.quantity ?? 0)}
+                        {contracts}
                       </span>
                       <span className="text-[var(--muted)]">
                         {formatStrike(p.strike)} {p.right}
@@ -195,59 +225,104 @@ function ExpirationCalendar({
 
 // ── Spread P&L ──────────────────────────────────────────────────────────────
 
+type SpreadCard = {
+  underlying: string;
+  label: string;
+  detail: string;
+  maxProfit: number | null;
+  maxProfitUnbounded: boolean;
+  maxLoss: number | null;
+  maxLossUnbounded: boolean;
+  breakevens: number[];
+  payoffLegs: PayoffLeg[];
+  currentPrice: number | null;
+  pop: number | null;
+  expMove: number | null;
+  dte: number;
+};
+
 function SpreadPnl({
   parsed,
   colorByUnderlying,
   currency,
+  ivByOcc,
+  priceFor,
 }: {
   parsed: Leg[];
   colorByUnderlying: Record<string, string>;
   currency: string;
+  ivByOcc: Record<string, number>;
+  priceFor: (u: string) => number | null;
 }) {
   // Classify per underlying, keeping only structures with computable economics.
-  const cards = useMemo(() => {
+  const cards = useMemo<SpreadCard[]>(() => {
     const byUnderlying = new Map<string, Leg[]>();
     for (const leg of parsed) {
       const arr = byUnderlying.get(leg.p.underlying);
       if (arr) arr.push(leg);
       else byUnderlying.set(leg.p.underlying, [leg]);
     }
-    const out: {
-      underlying: string;
-      label: string;
-      detail: string;
-      maxProfit: number | null;
-      maxLoss: number | null;
-      breakeven: number | null;
-    }[] = [];
+    const out: SpreadCard[] = [];
     for (const [underlying, legs] of byUnderlying) {
+      const spot = priceFor(underlying);
       const structures = classifyOptionLegs(
         legs.map(({ h, p }) => ({ parsed: p, quantity: h.quantity, costBasis: h.costBasis })),
       );
       for (const st of structures) {
-        if (st.maxProfit == null && st.maxLoss == null) continue;
+        const hasEconomics =
+          st.maxProfit != null || st.maxLoss != null || st.maxProfitUnbounded || st.maxLossUnbounded;
+        if (!hasEconomics || !st.payoffLegs) continue;
+
+        // Representative IV for the model-based estimates: the leg nearest spot.
+        const legParsed = st.legIndexes.map((i) => legs[i]?.p).filter(Boolean) as ParsedOption[];
+        const ivs = legParsed
+          .map((p) => ({ p, iv: ivByOcc[p.occ] }))
+          .filter((x): x is { p: ParsedOption; iv: number } => typeof x.iv === "number" && x.iv > 0);
+        const iv =
+          spot != null && ivs.length
+            ? ivs.slice().sort((a, b) => Math.abs(a.p.strike - spot) - Math.abs(b.p.strike - spot))[0].iv
+            : (ivs[0]?.iv ?? null);
+
+        const dte = Math.max(0, daysToExpiry(legParsed[0]?.expiry ?? ""));
+        const T = dte / 365;
+        const analysis = {
+          maxProfit: st.maxProfit ?? null,
+          maxProfitUnbounded: st.maxProfitUnbounded ?? false,
+          maxLoss: st.maxLoss ?? null,
+          maxLossUnbounded: st.maxLossUnbounded ?? false,
+          breakevens: st.breakevens ?? [],
+          netDebit: 0,
+        };
+
         out.push({
           underlying,
           label: st.label,
           detail: st.detail,
           maxProfit: st.maxProfit ?? null,
+          maxProfitUnbounded: st.maxProfitUnbounded ?? false,
           maxLoss: st.maxLoss ?? null,
-          breakeven: st.breakeven ?? null,
+          maxLossUnbounded: st.maxLossUnbounded ?? false,
+          breakevens: st.breakevens ?? [],
+          payoffLegs: st.payoffLegs,
+          currentPrice: spot,
+          pop: probabilityOfProfit(st.payoffLegs, analysis, spot, iv, T),
+          expMove: expectedMove(spot, iv, T),
+          dte,
         });
       }
     }
     return out;
-  }, [parsed]);
+  }, [parsed, ivByOcc, priceFor]);
 
   if (cards.length === 0) return null;
 
   return (
     <Card className="p-0">
       <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Spread risk / reward</span>
-        <span className="text-xs text-[var(--muted)]">max P&amp;L at expiry</span>
+        <span className="eyebrow">Strategy risk / reward</span>
+        <span className="text-xs text-[var(--muted)]">payoff at expiry</span>
       </div>
-      <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 p-6 lg:grid-cols-2">
         {cards.map((c, i) => {
           const rr =
             c.maxProfit != null && c.maxLoss != null && c.maxLoss !== 0
@@ -265,38 +340,67 @@ function SpreadPnl({
                 />
                 <span className="font-medium text-[var(--brass)]">{c.underlying}</span>
                 <span className="text-sm text-[var(--paper)]">{c.label}</span>
+                {c.dte > 0 && (
+                  <span className="ml-auto mono text-[10px] text-[var(--muted)]">{c.dte}d</span>
+                )}
               </div>
               <p className="mt-0.5 text-xs text-[var(--muted)]">{c.detail}</p>
-              <div className="mt-3 grid grid-cols-2 gap-3">
+
+              <PayoffDiagram
+                legs={c.payoffLegs}
+                currentPrice={c.currentPrice}
+                breakevens={c.breakevens}
+                className="mt-3"
+              />
+
+              <div className="mt-2 grid grid-cols-2 gap-3">
                 <Metric
                   label="Max profit"
                   value={c.maxProfit}
                   currency={currency}
                   tone="jade"
-                  unbounded={c.maxProfit == null}
+                  unbounded={c.maxProfitUnbounded}
                 />
                 <Metric
                   label="Max loss"
                   value={c.maxLoss != null ? -c.maxLoss : null}
                   currency={currency}
                   tone="coral"
+                  unbounded={c.maxLossUnbounded}
                 />
               </div>
-              <div className="mt-3 flex items-center justify-between border-t border-line/60 pt-2.5 text-xs">
-                <span className="text-[var(--muted)]">Breakeven</span>
-                <span className="mono">
-                  {c.breakeven != null ? formatStrike(Number(c.breakeven.toFixed(2))) : "—"}
-                </span>
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs">
-                <span className="text-[var(--muted)]">Reward : risk</span>
-                <span className="mono">{rr != null ? `${rr.toFixed(2)}×` : "—"}</span>
+
+              <div className="mt-3 space-y-1 border-t border-line/60 pt-2.5 text-xs">
+                <Row label={c.breakevens.length > 1 ? "Breakevens" : "Breakeven"}>
+                  {c.breakevens.length
+                    ? c.breakevens.map((b) => formatStrike(Number(b.toFixed(2)))).join(" · ")
+                    : "—"}
+                </Row>
+                <Row label="Reward : risk">{rr != null ? `${rr.toFixed(2)}×` : "—"}</Row>
+                <Row label="Prob. of profit">
+                  {c.pop != null ? `${(c.pop * 100).toFixed(0)}%` : "—"}
+                </Row>
+                <Row label="Expected move (1σ)">
+                  {c.expMove != null && c.currentPrice != null
+                    ? `±${formatCurrency(c.expMove, currency)}`
+                    : "—"}
+                </Row>
               </div>
             </div>
           );
         })}
       </div>
     </Card>
+  );
+}
+
+/** Label / value row in the strategy card's stats block. */
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-[var(--muted)]">{label}</span>
+      <span className="mono">{children}</span>
+    </div>
   );
 }
 
@@ -333,26 +437,34 @@ function Metric({
 function GreeksTable({
   parsed,
   ivByOcc,
+  chainByOcc,
   colorByUnderlying,
   priceFor,
 }: {
   parsed: Leg[];
   ivByOcc: Record<string, number>;
+  chainByOcc: Record<string, OptionQuote>;
   colorByUnderlying: Record<string, string>;
   priceFor: (u: string) => number | null;
 }) {
   const rows = useMemo(() => {
     return parsed
       .map(({ h, p }) => {
-        const iv = ivByOcc[p.occ] ?? null;
-        const g = computeGreeks(p, priceFor(p.underlying), iv);
-        const contracts = h.quantity ?? 0;
-        // Position delta = per-share delta × contracts × 100 shares.
-        const posDelta = g.delta != null ? g.delta * contracts * 100 : null;
+        const quote = chainByOcc[p.occ];
+        const iv = quote?.iv ?? ivByOcc[p.occ] ?? null;
+        // Prefer real source Greeks (CBOE); fall back to Black-Scholes from IV.
+        const cg = quote?.greeks;
+        const g =
+          cg && cg.delta != null ? cg : computeGreeks(p, priceFor(p.underlying), iv);
+        // Stored quantity is in SHARES (100 per contract); show contract count.
+        const shares = h.quantity ?? 0;
+        const contracts = shares / CONTRACT_SIZE;
+        // Position delta = per-share delta × shares held.
+        const posDelta = g.delta != null ? g.delta * shares : null;
         return { h, p, iv, g, contracts, posDelta };
       })
       .sort((a, b) => daysToExpiry(a.p.expiry) - daysToExpiry(b.p.expiry));
-  }, [parsed, ivByOcc, priceFor]);
+  }, [parsed, ivByOcc, chainByOcc, priceFor]);
 
   const hasAnyGreek = rows.some((r) => r.g.delta != null);
 
@@ -363,7 +475,7 @@ function GreeksTable({
           <Sigma size={13} className="text-[var(--brass)]" />
           Greeks
         </span>
-        <span className="text-xs text-[var(--muted)]">Black-Scholes · live IV</span>
+        <span className="text-xs text-[var(--muted)]">live CBOE Greeks · position Δ</span>
       </div>
       {hasAnyGreek ? (
         <div className="overflow-x-auto">
@@ -417,8 +529,8 @@ function GreeksTable({
         </div>
       ) : (
         <p className="px-6 py-8 text-center text-sm text-[var(--muted)]">
-          No implied-vol data available for these contracts right now — Greeks need a live option
-          chain from Yahoo.
+          No option-chain data available for these contracts right now — Greeks need a live chain
+          from CBOE.
         </p>
       )}
     </Card>
@@ -437,6 +549,267 @@ function Num({
 }) {
   return (
     <td className={`mono px-4 py-3 text-right ${value == null ? "text-[var(--faint)]" : ""}`}>
+      {value == null ? "—" : `${value.toFixed(digits)}${suffix}`}
+    </td>
+  );
+}
+
+// ── Options chain browser ───────────────────────────────────────────────────
+
+/** How many strikes to show on each side of the spot price. */
+const CHAIN_WINDOW = 8;
+
+/**
+ * Live option-chain browser (free Yahoo data), laid out the familiar way: calls
+ * on the left, puts on the right, strikes down the middle. Greeks are computed
+ * per contract from the chain's IV. Windowed around spot and centered on the
+ * strikes you actually hold, which are highlighted.
+ */
+function OptionsChain({
+  parsed,
+  chainByUnderlying,
+  colorByUnderlying,
+  priceFor,
+}: {
+  parsed: Leg[];
+  chainByUnderlying: Record<string, OptionQuote[]>;
+  colorByUnderlying: Record<string, string>;
+  priceFor: (u: string) => number | null;
+}) {
+  const blocks = useMemo(() => {
+    // Underlyings we hold options on, that also have chain data.
+    const heldOccs = new Set(parsed.map(({ p }) => p.occ));
+    const underlyings = Array.from(new Set(parsed.map(({ p }) => p.underlying))).sort();
+
+    return underlyings
+      .map((underlying) => {
+        const contracts = chainByUnderlying[underlying] ?? [];
+        if (!contracts.length) return null;
+        const spot = priceFor(underlying);
+
+        // Group by expiry, but only expiries we actually hold a leg on.
+        const heldExpiries = new Set(
+          parsed.filter(({ p }) => p.underlying === underlying).map(({ p }) => p.expiry),
+        );
+        const byExpiry = new Map<string, OptionQuote[]>();
+        for (const c of contracts) {
+          if (!heldExpiries.has(c.expiry)) continue;
+          const arr = byExpiry.get(c.expiry);
+          if (arr) arr.push(c);
+          else byExpiry.set(c.expiry, [c]);
+        }
+
+        const expiries = Array.from(byExpiry.entries())
+          .map(([expiry, cs]) => ({ expiry, cs, dte: daysToExpiry(expiry) }))
+          .sort((a, b) => a.dte - b.dte)
+          .map(({ expiry, cs, dte }) => {
+            const calls = new Map<number, OptionQuote>();
+            const puts = new Map<number, OptionQuote>();
+            for (const c of cs) (c.right === "call" ? calls : puts).set(c.strike, c);
+
+            let strikes = Array.from(new Set(cs.map((c) => c.strike))).sort((a, b) => a - b);
+            // Window around spot (or held strikes) so the table stays readable.
+            const center =
+              spot ??
+              cs.find((c) => heldOccs.has(c.occ))?.strike ??
+              strikes[Math.floor(strikes.length / 2)];
+            if (strikes.length > CHAIN_WINDOW * 2 + 1) {
+              let ci = 0;
+              for (let i = 0; i < strikes.length; i++) {
+                if (Math.abs(strikes[i] - center) < Math.abs(strikes[ci] - center)) ci = i;
+              }
+              strikes = strikes.slice(
+                Math.max(0, ci - CHAIN_WINDOW),
+                ci + CHAIN_WINDOW + 1,
+              );
+            }
+            return { expiry, dte, strikes, calls, puts };
+          });
+
+        return { underlying, spot, expiries };
+      })
+      .filter((b): b is NonNullable<typeof b> => b != null && b.expiries.length > 0);
+  }, [parsed, chainByUnderlying, priceFor]);
+
+  if (blocks.length === 0) return null;
+
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center justify-between border-b border-line px-6 py-4">
+        <span className="eyebrow inline-flex items-center gap-2">
+          <Layers size={13} className="text-[var(--brass)]" />
+          Options chain
+        </span>
+        <span className="text-xs text-[var(--muted)]">free CBOE chain · live IV + Greeks</span>
+      </div>
+      <div className="divide-y divide-line/60">
+        {blocks.map((b) => (
+          <div key={b.underlying} className="px-4 py-4 sm:px-6">
+            <div className="mb-2 flex items-center gap-2">
+              <span
+                className="inline-block h-2 w-2 shrink-0 rounded-sm"
+                style={{ background: colorByUnderlying[b.underlying] }}
+              />
+              <span className="font-medium text-[var(--brass)]">{b.underlying}</span>
+              {b.spot != null && (
+                <span className="mono text-xs text-[var(--muted)]">
+                  spot {formatStrike(Number(b.spot.toFixed(2)))}
+                </span>
+              )}
+            </div>
+            {b.expiries.map((e) => (
+              <ChainTable
+                key={e.expiry}
+                underlying={b.underlying}
+                expiry={e.expiry}
+                dte={e.dte}
+                strikes={e.strikes}
+                calls={e.calls}
+                puts={e.puts}
+                spot={b.spot}
+                heldOccs={new Set(parsed.map(({ p }) => p.occ))}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function ChainTable({
+  underlying,
+  expiry,
+  dte,
+  strikes,
+  calls,
+  puts,
+  spot,
+  heldOccs,
+}: {
+  underlying: string;
+  expiry: string;
+  dte: number;
+  strikes: number[];
+  calls: Map<number, OptionQuote>;
+  puts: Map<number, OptionQuote>;
+  spot: number | null;
+  heldOccs: Set<string>;
+}) {
+  return (
+    <div className="mb-4 last:mb-0">
+      <div className="mb-1.5 flex items-center gap-2 text-xs text-[var(--muted)]">
+        <span>{formatOptionExpiry(expiry)}</span>
+        {dte >= 0 && <span className="mono">· {dte}d</span>}
+        <span className="ml-3 text-[var(--jade)]">Calls</span>
+        <span className="text-[var(--coral)]">/ Puts</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-xs">
+          <thead>
+            <tr className="text-[var(--faint)]">
+              {["OI", "Δ", "IV", "Bid", "Ask"].map((h) => (
+                <th key={`c-${h}`} className="px-2 py-1 text-right font-medium">
+                  {h}
+                </th>
+              ))}
+              <th className="px-2 py-1 text-center font-medium text-[var(--paper)]">Strike</th>
+              {["Bid", "Ask", "IV", "Δ", "OI"].map((h) => (
+                <th key={`p-${h}`} className="px-2 py-1 text-right font-medium">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {strikes.map((k) => {
+              const call = calls.get(k);
+              const put = puts.get(k);
+              // Prefer the source's real Greeks; fall back to Black-Scholes.
+              const callG =
+                call?.greeks?.delta != null
+                  ? call.greeks
+                  : call
+                    ? computeGreeks(parseOccSymbol(call.occ)!, spot, call.iv)
+                    : null;
+              const putG =
+                put?.greeks?.delta != null
+                  ? put.greeks
+                  : put
+                    ? computeGreeks(parseOccSymbol(put.occ)!, spot, put.iv)
+                    : null;
+              const callHeld = call ? heldOccs.has(call.occ) : false;
+              const putHeld = put ? heldOccs.has(put.occ) : false;
+              const callItm = spot != null && spot > k;
+              const putItm = spot != null && spot < k;
+              const atSpot =
+                spot != null &&
+                Math.abs(k - spot) ===
+                  Math.min(...strikes.map((s) => Math.abs(s - spot)));
+              return (
+                <tr
+                  key={k}
+                  className={`border-t border-line/40 ${atSpot ? "bg-[var(--panel-2)]/60" : ""}`}
+                >
+                  <ChainCell value={call?.openInterest ?? null} digits={0} on={callHeld} itm={callItm} />
+                  <ChainCell value={callG?.delta ?? null} digits={2} on={callHeld} itm={callItm} />
+                  <ChainCell
+                    value={call?.iv != null ? call.iv * 100 : null}
+                    digits={0}
+                    suffix="%"
+                    on={callHeld}
+                    itm={callItm}
+                  />
+                  <ChainCell value={call?.bid ?? null} digits={2} on={callHeld} itm={callItm} />
+                  <ChainCell value={call?.ask ?? null} digits={2} on={callHeld} itm={callItm} />
+                  <td className="px-2 py-1.5 text-center mono font-medium text-[var(--paper)]">
+                    {formatStrike(k)}
+                  </td>
+                  <ChainCell value={put?.bid ?? null} digits={2} on={putHeld} itm={putItm} />
+                  <ChainCell value={put?.ask ?? null} digits={2} on={putHeld} itm={putItm} />
+                  <ChainCell
+                    value={put?.iv != null ? put.iv * 100 : null}
+                    digits={0}
+                    suffix="%"
+                    on={putHeld}
+                    itm={putItm}
+                  />
+                  <ChainCell value={putG?.delta ?? null} digits={2} on={putHeld} itm={putItm} />
+                  <ChainCell value={put?.openInterest ?? null} digits={0} on={putHeld} itm={putItm} />
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 text-[10px] text-[var(--faint)]">
+        Highlighted cells are contracts you hold in {underlying}. Shaded strike is nearest the spot.
+      </p>
+    </div>
+  );
+}
+
+/** One chain cell — brass-tinted when held, dimmed when out-of-the-money. */
+function ChainCell({
+  value,
+  digits,
+  suffix = "",
+  on,
+  itm,
+}: {
+  value: number | null;
+  digits: number;
+  suffix?: string;
+  on: boolean;
+  itm: boolean;
+}) {
+  const tone = value == null ? "text-[var(--faint)]" : itm ? "text-[var(--paper)]" : "text-[var(--muted)]";
+  return (
+    <td
+      className={`mono px-2 py-1.5 text-right ${tone} ${
+        on ? "bg-[var(--brass)]/15 font-medium text-[var(--brass)]" : ""
+      }`}
+    >
       {value == null ? "—" : `${value.toFixed(digits)}${suffix}`}
     </td>
   );

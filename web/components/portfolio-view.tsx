@@ -36,7 +36,7 @@ import { AssetAllocation, type AllocRow } from "@/components/asset-allocation";
 import { DividendPanel } from "@/components/dividend-panel";
 import type { InvestmentTxnRow } from "@/lib/queries";
 import type { DividendSummary } from "@/lib/dividends";
-import type { DividendCalendarEntry, PricePoint as YahooPricePoint } from "@/lib/yahoo";
+import type { DividendCalendarEntry, OptionQuote, PricePoint as YahooPricePoint } from "@/lib/yahoo";
 import type { BenchmarkKey, ComparisonRow } from "@/lib/benchmark";
 
 const UNASSIGNED = "Unassigned";
@@ -87,6 +87,7 @@ export function PortfolioView({
   knownSectors = [],
   ivByOcc = {},
   underlyingPrices = {},
+  chainByUnderlying = {},
   allocationTargets = {},
   assetClassOverrides = {},
   geographyOverrides = {},
@@ -106,6 +107,8 @@ export function PortfolioView({
   ivByOcc?: Record<string, number>;
   /** Underlying spot price by symbol (Yahoo chain quote fallback). */
   underlyingPrices?: Record<string, number>;
+  /** Full option-chain quotes by underlying (Yahoo), for the chain browser. */
+  chainByUnderlying?: Record<string, OptionQuote[]>;
   /** User-set target allocation percentages, keyed by dimension (see targetKeyFor). */
   allocationTargets?: Record<string, number>;
   /** Per-position asset-class overrides, keyed by sectorKey. */
@@ -140,6 +143,7 @@ export function PortfolioView({
         knownSectors={knownSectors}
         ivByOcc={ivByOcc}
         underlyingPrices={underlyingPrices}
+        chainByUnderlying={chainByUnderlying}
         allocationTargets={allocationTargets}
         assetClassOverrides={assetClassOverrides}
         geographyOverrides={geographyOverrides}
@@ -389,6 +393,7 @@ function PortfolioInner({
   knownSectors,
   ivByOcc,
   underlyingPrices,
+  chainByUnderlying,
   allocationTargets,
   assetClassOverrides,
   geographyOverrides,
@@ -404,6 +409,7 @@ function PortfolioInner({
   knownSectors: string[];
   ivByOcc: Record<string, number>;
   underlyingPrices: Record<string, number>;
+  chainByUnderlying: Record<string, OptionQuote[]>;
   allocationTargets: Record<string, number>;
   assetClassOverrides: Record<string, string>;
   geographyOverrides: Record<string, string>;
@@ -761,6 +767,7 @@ function PortfolioInner({
           quotes={quotes}
           ivByOcc={ivByOcc}
           underlyingPrices={underlyingPrices}
+          chainByUnderlying={chainByUnderlying}
           currency={optionLegs[0]?.currency ?? "USD"}
         />
       )}
