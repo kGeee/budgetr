@@ -19,7 +19,8 @@ import {
 } from "@/lib/portfolio-history";
 import { computeComparison, type BenchmarkKey } from "@/lib/benchmark";
 import { parseOccSymbol } from "@/lib/options";
-import { getDividendCalendar, getOptionChain } from "@/lib/yahoo";
+import { getDividendCalendar, getOptionChain, type OptionQuote } from "@/lib/yahoo";
+import { getCboeOptionChain } from "@/lib/cboe";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (always fresh), but the Yahoo history fetches should
@@ -140,17 +141,24 @@ export default async function InvestmentsPage() {
   }
   const ivByOcc: Record<string, number> = {};
   const underlyingPrices: Record<string, number> = {};
+  const chainByUnderlying: Record<string, OptionQuote[]> = {};
   if (expiriesByUnderlying.size > 0) {
+    // CBOE is the primary source — free, no auth, and it ships real Greeks. Yahoo
+    // now requires an auth crumb (401 headless), so it's only a best-effort
+    // fallback for IV + underlying price if CBOE is unavailable for a symbol.
     const chains = await Promise.all(
-      [...expiriesByUnderlying.entries()].map(
-        async ([underlying, expiries]) =>
-          [underlying, await getOptionChain(underlying, [...expiries])] as const,
-      ),
+      [...expiriesByUnderlying.entries()].map(async ([underlying, expiries]) => {
+        const list = [...expiries];
+        const chain =
+          (await getCboeOptionChain(underlying, list)) ?? (await getOptionChain(underlying, list));
+        return [underlying, chain] as const;
+      }),
     );
     for (const [underlying, chain] of chains) {
       if (!chain) continue;
       Object.assign(ivByOcc, chain.ivByOcc);
       if (chain.underlyingPrice != null) underlyingPrices[underlying] = chain.underlyingPrice;
+      if (chain.contracts.length) chainByUnderlying[underlying] = chain.contracts;
     }
   }
 
@@ -175,6 +183,7 @@ export default async function InvestmentsPage() {
         knownSectors={knownSectors}
         ivByOcc={ivByOcc}
         underlyingPrices={underlyingPrices}
+        chainByUnderlying={chainByUnderlying}
         allocationTargets={allocationTargets}
         assetClassOverrides={assetClassOverrides}
         geographyOverrides={geographyOverrides}

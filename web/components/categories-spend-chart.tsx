@@ -20,12 +20,8 @@ export function CategoriesSpendChart({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!selectedDate) {
-      setTxns(null);
-      return;
-    }
+    if (!selectedDate) return;
     let active = true;
-    setLoading(true);
     getTransactionsForDate(selectedDate)
       .then((rows) => {
         if (active) {
@@ -40,7 +36,10 @@ export function CategoriesSpendChart({
   }, [selectedDate]);
 
   function handleSelectDate(date: string | null) {
-    setSelectedDate((prev) => (prev === date ? null : date));
+    const next = selectedDate === date ? null : date;
+    setSelectedDate(next);
+    setTxns(null);
+    setLoading(next !== null);
   }
 
   return (

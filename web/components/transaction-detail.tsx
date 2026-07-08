@@ -67,22 +67,24 @@ export function TransactionDetail({
     count: number;
     vendorName: string;
   } | null>(null);
-  // Reset the offer when a different transaction opens (adjust-state-on-prop-change).
-  const [offerTxnId, setOfferTxnId] = useState(t?.id);
-  if (t?.id !== offerTxnId) {
-    setOfferTxnId(t?.id);
-    setCatOffer(null);
-  }
-
   // History-based category/tag suggestions, fetched lazily when a txn opens.
   const txnId = t?.id;
   const [catSuggestion, setCatSuggestion] = useState<CategorySuggestion | null>(null);
   const [tagSuggestions, setTagSuggestions] = useState<TagSuggestion[]>([]);
+
+  // Reset per-transaction state when a different transaction opens
+  // (adjust-state-on-prop-change).
+  const [offerTxnId, setOfferTxnId] = useState(t?.id);
+  if (t?.id !== offerTxnId) {
+    setOfferTxnId(t?.id);
+    setCatOffer(null);
+    setCatSuggestion(null);
+    setTagSuggestions([]);
+  }
+
   useEffect(() => {
     if (!txnId) return;
     let alive = true;
-    setCatSuggestion(null);
-    setTagSuggestions([]);
     suggestForTransaction(txnId).then((s) => {
       if (!alive) return;
       setCatSuggestion(s.category);
@@ -791,20 +793,18 @@ function AttachmentsEditor({ transaction }: { transaction: TransactionRow }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [files, setFiles] = useState<AttachmentRow[]>([]);
-  const [loading, setLoading] = useState(transaction.attachmentCount > 0);
+  // null = not yet fetched; loading is derived so the effect never sets
+  // state synchronously (react-hooks/set-state-in-effect).
+  const [files, setFiles] = useState<AttachmentRow[] | null>(null);
+  const loading = transaction.attachmentCount > 0 && files === null;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (transaction.attachmentCount === 0) {
-      setLoading(false);
-      return;
-    }
+    if (transaction.attachmentCount === 0) return;
     let alive = true;
     loadAttachments(transaction.id).then((rows) => {
       if (!alive) return;
       setFiles(rows);
-      setLoading(false);
     });
     return () => {
       alive = false;
@@ -831,7 +831,7 @@ function AttachmentsEditor({ transaction }: { transaction: TransactionRow }) {
     setError(null);
     start(async () => {
       await deleteAttachment(id);
-      setFiles((prev) => prev.filter((f) => f.id !== id));
+      setFiles((prev) => (prev ?? []).filter((f) => f.id !== id));
       router.refresh();
     });
   }
@@ -841,9 +841,9 @@ function AttachmentsEditor({ transaction }: { transaction: TransactionRow }) {
       {loading ? (
         <p className="text-xs text-[var(--muted)]">Loading receipts…</p>
       ) : (
-        files.length > 0 && (
+        (files ?? []).length > 0 && (
           <ul className="space-y-2">
-            {files.map((f) => (
+            {(files ?? []).map((f) => (
               <li
                 key={f.id}
                 className="flex items-center gap-3 rounded-lg border border-line bg-[var(--panel-2)] p-2"
@@ -906,7 +906,7 @@ function AttachmentsEditor({ transaction }: { transaction: TransactionRow }) {
         )
       )}
 
-      {!loading && files.length === 0 && (
+      {!loading && (files ?? []).length === 0 && (
         <p className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
           <Paperclip size={12} /> No receipts attached yet.
         </p>
