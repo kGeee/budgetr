@@ -229,8 +229,8 @@ export function RealizedGainsView({
           </div>
 
           {/* Lot detail table */}
-          <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-[var(--radius)] border border-line bg-[var(--panel)]">
+            <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-[var(--muted)]">
                   <th className="px-4 py-3 font-medium">Ticker</th>

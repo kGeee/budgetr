@@ -22,7 +22,7 @@ export function SyncButton() {
   return (
     <Button variant="secondary" size="sm" onClick={sync} disabled={syncing} aria-label="Sync accounts">
       <RefreshCw size={15} className={syncing ? "animate-spin" : ""} />
-      {syncing ? "Syncing…" : "Sync"}
+      <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync"}</span>
     </Button>
   );
 }

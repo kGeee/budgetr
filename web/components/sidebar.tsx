@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import {
+  Menu,
+  X,
   LayoutDashboard,
   LayoutGrid,
   ArrowLeftRight,
@@ -166,26 +169,87 @@ export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
 
 export function MobileNav() {
   const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const current = nav.find(({ href }) => isActive(pathname, href));
+
   return (
-    <nav className="flex items-center gap-1 overflow-x-auto md:hidden">
-      {nav.map(({ href, label, icon: Icon }) => {
-        const active = isActive(pathname, href);
-        return (
+    <div className="min-w-0 flex-1 md:hidden">
+      {/* Hamburger + current page name — one comfortable touch target. The
+          label truncates so the header controls never get pushed past the
+          viewport edge (which breaks page width on phones). */}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Open navigation"
+        aria-expanded={open}
+        className="-ml-1 flex max-w-full min-w-0 items-center gap-2.5 rounded-lg px-2 py-2 text-[var(--paper)] active:bg-[var(--panel)]"
+      >
+        <Menu size={21} className="shrink-0" />
+        <span className="truncate font-display text-lg tracking-tight">
+          {current?.label ?? "budgetr"}
+        </span>
+      </button>
+
+      {/* Dimmed click-away backdrop. Stays mounted so open/close can animate. */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-200 md:hidden ${
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={() => setOpen(false)}
+        aria-hidden
+      />
+
+      {/* Slide-in drawer from the left (mirrors the right-side detail drawers). */}
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation"
+        className={`fixed left-0 top-0 z-50 flex h-dvh w-[85vw] max-w-[320px] flex-col border-r border-line bg-[var(--ink)] shadow-[8px_0_40px_-12px_rgba(0,0,0,0.7)] transition-transform duration-200 ease-out md:hidden ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <Link
-            key={href}
-            href={href}
-            aria-current={active ? "page" : undefined}
-            className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition-colors ${
-              active
-                ? "bg-[var(--panel-2)] text-[var(--paper)]"
-                : "text-[var(--muted)] hover:text-[var(--paper)]"
-            }`}
+            href="/"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-3"
           >
-            <Icon size={15} />
-            {label}
+            <span className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-lg text-[var(--brass)]">
+              ₿
+            </span>
+            <span className="font-display text-2xl tracking-tight">budgetr</span>
           </Link>
-        );
-      })}
-    </nav>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close navigation"
+            className="rounded-lg p-2.5 text-[var(--muted)] active:bg-[var(--panel)]"
+          >
+            <X size={22} />
+          </button>
+        </div>
+        <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {nav.map(({ href, label, icon: Icon }) => {
+            const active = isActive(pathname, href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setOpen(false)}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-3.5 rounded-xl px-4 py-3 text-base transition-colors ${
+                  active
+                    ? "bg-[var(--panel-2)] text-[var(--paper)]"
+                    : "text-[var(--muted)] active:bg-[var(--panel)]"
+                }`}
+              >
+                <Icon size={20} strokeWidth={active ? 2.2 : 1.8} />
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
+      </aside>
+    </div>
   );
 }

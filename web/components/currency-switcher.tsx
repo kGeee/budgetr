@@ -63,7 +63,7 @@ export function CurrencySwitcher({ current }: { current: string }) {
         aria-label="Display currency"
         title="Display currency — convert all figures to this unit"
       >
-        <Coins size={15} />
+        <Coins size={15} className="hidden sm:block" />
         <span className="tabular">{current}</span>
         <ChevronDown size={13} className="opacity-60" />
       </Button>
