@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Electron packaging output and the plain-CJS Electron entrypoint.
+    "dist/**",
+    "desktop/electron/**",
   ]),
 ]);
 

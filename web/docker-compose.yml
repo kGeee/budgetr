@@ -1,0 +1,15 @@
+services:
+  budgetr:
+    build: .
+    ports:
+      - "3000:3000"
+    # Put PLAID_*, APP_ENCRYPTION_KEY, FINNHUB_API_KEY here. Generate the key:
+    #   openssl rand -hex 32
+    env_file:
+      - .env.local
+    volumes:
+      - budgetr-data:/data
+    restart: unless-stopped
+
+volumes:
+  budgetr-data:

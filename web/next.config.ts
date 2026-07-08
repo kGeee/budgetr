@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+// Pin the workspace root to this directory. Otherwise Next infers it from the
+// nearest lockfile and picks ~/bun.lock (the home dir), which makes Turbopack
+// walk all of $HOME — dev compiles hang and prod build over-traces files.
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3"],
+  turbopack: { root: projectRoot },
+  outputFileTracingRoot: projectRoot,
   async headers() {
     return [
       {

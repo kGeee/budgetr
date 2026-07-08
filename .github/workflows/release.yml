@@ -1,0 +1,50 @@
+# Tag a version (git tag v0.2.0 && git push --tags) and this publishes a
+# GitHub Release with the macOS desktop app attached, so consumers can
+# download and run budgetr without touching source code.
+#
+# The DMG is unsigned (electron-builder identity: null) — first launch needs
+# right-click → Open, or System Settings → Privacy & Security → Open Anyway.
+# Signing + notarization needs an Apple Developer account; see README.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  mac-dmg:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bootstrap (env + migrate + seed)
+        run: npm run setup
+
+      - name: Build DMG
+        run: npm run package
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: web/dist/budgetr-mac.dmg
+          generate_release_notes: true
+          body: |
+            **macOS:** download `budgetr-mac.dmg`, drag budgetr to Applications, then
+            right-click → Open on first launch (the build is unsigned). Your data stays
+            on your machine; settings live in `~/Library/Application Support/budgetr/budgetr.env`.

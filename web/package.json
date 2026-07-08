@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts",
-    "dev:electron": "npm run electron:rebuild && electron desktop/electron/main.js",
+    "dev:electron": "npm run web:rebuild && electron desktop/electron/main.js",
     "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run electron:rebuild && electron-builder --mac",
     "electron:rebuild": "electron-rebuild -f -o better-sqlite3",
     "web:rebuild": "npm rebuild better-sqlite3",
@@ -73,9 +73,7 @@
       "public/**/*",
       "db/**/*",
       "next.config.ts",
-      "package.json",
-      ".env",
-      ".env.local"
+      "package.json"
     ],
     "mac": {
       "target": "dmg",

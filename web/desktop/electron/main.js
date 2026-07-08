@@ -11,9 +11,9 @@
 
 const { app, BrowserWindow, dialog, shell } = require("electron");
 const path = require("node:path");
-const http = require("node:http");
 const net = require("node:net");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 
 const HOST = "127.0.0.1";
@@ -84,24 +84,81 @@ function runMigrations(dbPath) {
   }
 }
 
-/** Spawn the Next.js server as a child process using Electron's bundled Node. */
+/**
+ * Per-user runtime config for the packaged app. A publicly distributed build
+ * must not bake anyone's secrets into the bundle, so PLAID_* / FINNHUB_* /
+ * APP_ENCRYPTION_KEY live in <userData>/budgetr.env instead — created on first
+ * launch with a freshly generated encryption key and empty placeholders the
+ * user can fill in (Settings in-app points here).
+ */
+function userEnvPath() {
+  return path.join(app.getPath("userData"), "budgetr.env");
+}
+
+function loadUserEnv() {
+  const envPath = userEnvPath();
+  if (!fs.existsSync(envPath)) {
+    fs.mkdirSync(path.dirname(envPath), { recursive: true });
+    fs.writeFileSync(
+      envPath,
+      [
+        "# budgetr settings — quit and reopen the app after editing.",
+        "# To link real bank accounts, add Plaid keys from",
+        "# https://dashboard.plaid.com/developers/keys and set PLAID_ENV=production.",
+        "PLAID_CLIENT_ID=",
+        "PLAID_SECRET=",
+        "PLAID_ENV=sandbox",
+        "# Optional: live intraday prices (free key at https://finnhub.io)",
+        "FINNHUB_API_KEY=",
+        "# Encrypts Plaid access tokens at rest. Generated on first launch —",
+        "# don't change it once accounts are linked, or they'll need re-linking.",
+        `APP_ENCRYPTION_KEY=${crypto.randomBytes(32).toString("hex")}`,
+        "",
+      ].join("\n"),
+    );
+  }
+  const env = {};
+  for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
+    if (line.trim().startsWith("#")) continue;
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (m && m[2] !== "") env[m[1]] = m[2];
+  }
+  return env;
+}
+
+/** Spawn the Next.js server as a child process. */
 function startServer(dbPath, port) {
   if (EXTERNAL_URL) return; // a server is already running; just connect to it
 
   const nextBin = path.join(appPath, "node_modules", "next", "dist", "bin", "next");
   const command = app.isPackaged ? "start" : "dev";
 
+  // Which Node runs the server matters because better-sqlite3 is a native
+  // module with an ABI tied to its Node version:
+  //   • Packaged — Electron's own binary as Node (ELECTRON_RUN_AS_NODE); the
+  //     bundled better-sqlite3 is built for Electron's ABI during `npm run package`.
+  //   • Development — the *system* Node that launched us. This keeps the child on
+  //     the default (npm-installed) native-module ABI, so `npm run dev:electron`
+  //     and the web/launchd `next start` can share ONE better-sqlite3 build
+  //     instead of fighting over its ABI (146 vs 137). Running it as Electron's
+  //     Node here would force a rebuild that then breaks `next build`/`next start`.
+  const nodeBin = app.isPackaged ? process.execPath : process.env.npm_node_execpath || "node";
+
   const env = {
     ...process.env,
-    // Run the child as plain Node rather than a second Electron instance.
-    ELECTRON_RUN_AS_NODE: "1",
+    // Packaged: secrets come from the per-user budgetr.env, never the bundle.
+    ...(app.isPackaged ? loadUserEnv() : {}),
     NODE_ENV: app.isPackaged ? "production" : "development",
     PORT: String(port),
     HOSTNAME: HOST,
   };
-  // Only the packaged app relocates the database; in development we let the
-  // server fall back to its usual ./data/budgetr.db so you see your dev data.
-  if (app.isPackaged) env.DATABASE_PATH = dbPath;
+  // Packaged only: run Electron's binary as plain Node, and relocate the
+  // database to a writable per-user path. In development we run under system
+  // Node directly and let the server fall back to ./data/budgetr.db (your dev data).
+  if (app.isPackaged) {
+    env.ELECTRON_RUN_AS_NODE = "1";
+    env.DATABASE_PATH = dbPath;
+  }
 
   // Stream the server's output to a log file so a startup failure is
   // diagnosable after the fact (the dialog points users at this path).
@@ -116,7 +173,7 @@ function startServer(dbPath, port) {
     /* fall back to inherited stdio if the log file can't be opened */
   }
 
-  serverProcess = spawn(process.execPath, [nextBin, command, "-p", String(port)], {
+  serverProcess = spawn(nodeBin, [nextBin, command, "-p", String(port)], {
     cwd: appPath,
     env,
     stdio,
@@ -148,20 +205,38 @@ function stopServer() {
   }
 }
 
-/** Resolve once the server answers on `url`, or reject after `timeout` ms. */
+/**
+ * Resolve once the server is accepting connections on `url`'s host/port, or
+ * reject after `timeout` ms.
+ *
+ * We probe the TCP socket rather than making an HTTP request on purpose: in
+ * development the first HTTP hit to a route triggers an on-demand Turbopack
+ * compile that can take far longer than any reasonable health-check budget, so
+ * an HTTP poll would time out even though the server is up. Once the socket
+ * accepts, the window's own loadURL() waits out that first compile (behind
+ * loading.html) with no artificial cap.
+ */
 function waitForServer(url, { timeout = 60000, interval = 300 } = {}) {
+  const { hostname, port } = new URL(url);
   const deadline = Date.now() + timeout;
   return new Promise((resolve, reject) => {
     const attempt = () => {
-      const req = http.get(url, (res) => {
-        res.resume(); // drain so the socket frees up
-        resolve();
-      });
-      req.on("error", () => {
+      const socket = net.connect({ host: hostname, port: Number(port) });
+      let settled = false;
+      const retry = () => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
         if (Date.now() > deadline) reject(new Error("Timed out waiting for the server"));
         else setTimeout(attempt, interval);
+      };
+      socket.once("connect", () => {
+        settled = true;
+        socket.destroy();
+        resolve();
       });
-      req.setTimeout(2000, () => req.destroy());
+      socket.once("error", retry);
+      socket.setTimeout(2000, retry); // don't hang on a half-open connect
     };
     attempt();
   });
