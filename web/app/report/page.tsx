@@ -93,7 +93,7 @@ export default async function ReportPage({
             <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <p className="text-sm text-[var(--muted)]">Total spent</p>
-                <p className="mt-1.5 font-display text-5xl leading-none tracking-tight tabular sm:text-6xl">
+                <p className="display-1 mt-1.5 font-display text-5xl tabular sm:text-6xl">
                   {money(data.totals.expenses)}
                 </p>
                 <p className="mt-3 text-sm text-[var(--muted)]">

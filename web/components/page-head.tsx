@@ -5,7 +5,7 @@ export function PageHead({ title, action }: { title: string; action?: React.Reac
     <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
       <div>
         <p className="eyebrow">{format(new Date(), "EEEE, MMMM d")}</p>
-        <h1 className="mt-1.5 font-display text-3xl leading-none tracking-tight sm:text-4xl">
+        <h1 className="display-2 mt-1.5 font-display text-3xl sm:text-4xl">
           {title}
         </h1>
       </div>

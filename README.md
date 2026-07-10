@@ -11,13 +11,17 @@ A personal finance app, in two forms that share one data model:
 
 You don't need to be a programmer. Pick the option that fits you:
 
-**Option 1 — download the app (macOS, easiest).**
+**Option 1 — download the app (macOS, Apple Silicon).**
 Grab `budgetr-mac.dmg` from the [latest release](../../releases/latest), drag
-budgetr into Applications, and open it. First launch only: right-click → Open
-(the build is unsigned), or approve it under System Settings → Privacy &
-Security → *Open Anyway*. To link real banks, open **Settings → Open Settings
-File** inside the app (or press `⌘,`), paste in your Plaid keys, and relaunch —
-see [Settings & where your data lives](#settings--where-your-data-lives).
+budgetr into Applications, and open it. The build is for Apple Silicon
+(M-series) Macs only for now. On first launch double-clicking will fail with an
+"unverified developer" message (the app isn't notarized yet) — this is
+expected. To open it: go to **System Settings → Privacy & Security**, scroll to
+the notice that budgetr was blocked, and click **Open Anyway**. (Terminal
+alternative: `xattr -cr /Applications/budgetr.app`, then open normally.) To link
+real banks, open **Settings → Open Settings File** inside the app (or press
+`⌘,`), paste in your Plaid keys, and relaunch — see [Settings & where your data
+lives](#settings--where-your-data-lives).
 
 **Option 2 — run from source with one double-click (macOS / Linux).**
 [Download this repo](../../archive/refs/heads/main.zip) (or `git clone` it),

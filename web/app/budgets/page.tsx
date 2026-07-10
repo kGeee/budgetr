@@ -60,7 +60,7 @@ export default function BudgetsPage() {
         <div>
           <p className="eyebrow">{over ? "Over budget" : "Left to spend"}</p>
           <p
-            className={`mt-2 font-display text-5xl leading-none tabular ${over ? "text-[var(--coral)]" : ""}`}
+            className={`display-1 mt-2 font-display text-5xl tabular ${over ? "text-[var(--coral)]" : ""}`}
           >
             {formatCurrency(Math.abs(left))}
           </p>

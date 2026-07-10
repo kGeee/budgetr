@@ -90,7 +90,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <div className="flex min-w-0 flex-1 flex-col">
             {/* pt uses the iOS safe-area inset so the notch/status bar never
                 covers the controls in standalone (Add to Home Screen) mode. */}
-            <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-line bg-[color-mix(in_srgb,var(--ink)_82%,transparent)] px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl sm:gap-4 sm:px-8">
+            <header className="material sticky top-0 z-20 flex items-center gap-2 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-4 sm:px-8">
               <MobileNav />
               <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
                 <CurrencySwitcher current={displayCurrency} />

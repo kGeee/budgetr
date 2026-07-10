@@ -63,7 +63,7 @@ export default function CashflowPage() {
           <div>
             <p className="eyebrow">Projected end of {format(parseISO(`${month}-01`), "MMMM")}</p>
             <p
-              className={`mt-2 font-display text-5xl leading-none tabular ${negative ? "text-[var(--coral)]" : ""}`}
+              className={`display-1 mt-2 font-display text-5xl tabular ${negative ? "text-[var(--coral)]" : ""}`}
             >
               {formatCurrency(projectedEndBalance)}
             </p>

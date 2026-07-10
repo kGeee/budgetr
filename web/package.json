@@ -1,6 +1,6 @@
 {
   "name": "budgetr",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "budgetr — personal finance, self-hosted",
   "author": "budgetr",
@@ -14,7 +14,7 @@
     "test:watch": "vitest",
     "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts",
     "dev:electron": "npm run web:rebuild && electron desktop/electron/main.js",
-    "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run electron:rebuild && electron-builder --mac",
+    "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run electron:rebuild && CSC_IDENTITY_AUTO_DISCOVERY=${CSC_IDENTITY_AUTO_DISCOVERY:-false} electron-builder --mac",
     "electron:rebuild": "electron-rebuild -f -o better-sqlite3",
     "web:rebuild": "npm rebuild better-sqlite3",
     "db:generate": "drizzle-kit generate",
@@ -75,12 +75,14 @@
       "next.config.ts",
       "package.json"
     ],
+    "afterPack": "desktop/scripts/afterpack-sign.js",
     "mac": {
       "target": "dmg",
       "category": "public.app-category.finance",
       "icon": "desktop/build/icon.icns",
       "artifactName": "budgetr-mac.${ext}",
-      "identity": null
+      "hardenedRuntime": true,
+      "notarize": true
     },
     "dmg": {
       "title": "budgetr",

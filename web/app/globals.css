@@ -132,6 +132,42 @@ body::after {
   transform: translateY(0);
 }
 
+/*
+  Translucent material — a floating functional layer (nav, drawers, sticky chrome)
+  that lets content blur through it instead of sitting on an opaque strip. The
+  bright inset top edge reads as light catching the surface. `--material-bg` is a
+  deep tint of the canvas so dense text stays legible over the blur (a thick,
+  dark material, never a light one stacked on another surface).
+*/
+.material {
+  --material-bg: color-mix(in srgb, var(--ink) 82%, transparent);
+  background: var(--material-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset;
+}
+/* Bigger surfaces read as thicker: stronger blur + a deeper tint for drawers. */
+.material-thick {
+  --material-bg: color-mix(in srgb, var(--ink) 86%, transparent);
+  background: var(--material-bg);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+}
+
+/*
+  Display type: tracking must be size-specific — large type reads too loose as it
+  grows, so tighten it; body stays near 0. Leading tightens inversely with size.
+  Pair with .font-display (which carries the optical-sizing axis).
+*/
+.display-1 {
+  letter-spacing: -0.035em; /* hero numerals & 4xl+ headings */
+  line-height: 0.92;
+}
+.display-2 {
+  letter-spacing: -0.02em; /* section titles, 2xl–3xl */
+  line-height: 1;
+}
+
 ::selection {
   background: rgba(111, 227, 166, 0.25);
   color: #fff;
@@ -180,6 +216,31 @@ body::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+  Reduced transparency is an independent signal from reduced motion: drop the
+  blur and make every translucent material frosty-solid so text never has to
+  fight a busy backdrop.
+*/
+@media (prefers-reduced-transparency: reduce) {
+  .material,
+  .material-thick {
+    background: var(--ink);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* More contrast: near-solid surfaces with a defined, contrasting border. */
+@media (prefers-contrast: more) {
+  .material,
+  .material-thick {
+    background: var(--ink);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: var(--line-strong);
   }
 }
 

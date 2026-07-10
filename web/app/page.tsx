@@ -103,7 +103,7 @@ export default async function Dashboard() {
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="eyebrow">Total net worth</p>
-            <p className="mt-2 font-display text-5xl leading-none tracking-tight tabular sm:text-6xl">
+            <p className="display-1 mt-2 font-display text-5xl tabular sm:text-6xl">
               {formatCurrency(nw.net)}
             </p>
             <div className="mt-4 flex items-center gap-4">

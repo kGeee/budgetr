@@ -204,7 +204,7 @@ export function MobileNav() {
         role="dialog"
         aria-modal="true"
         aria-label="Navigation"
-        className={`fixed left-0 top-0 z-50 flex h-dvh w-[85vw] max-w-[320px] flex-col border-r border-line bg-[var(--ink)] shadow-[8px_0_40px_-12px_rgba(0,0,0,0.7)] transition-transform duration-200 ease-out md:hidden ${
+        className={`material-thick fixed left-0 top-0 z-50 flex h-dvh w-[85vw] max-w-[320px] flex-col border-r border-line shadow-[8px_0_40px_-12px_rgba(0,0,0,0.7)] transition-transform duration-300 ease-[var(--ease)] will-change-transform md:hidden ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >

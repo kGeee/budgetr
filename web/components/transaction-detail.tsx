@@ -151,7 +151,7 @@ export function TransactionDetail({
       <aside
         role="dialog"
         aria-label="Transaction detail"
-        className={`fixed right-0 top-0 z-40 flex h-dvh w-full max-w-[400px] flex-col border-l border-line bg-[var(--panel)] shadow-[0_0_60px_-20px_rgba(0,0,0,0.9)] transition-transform duration-300 ${
+        className={`material-thick fixed right-0 top-0 z-40 flex h-dvh w-full max-w-[400px] flex-col border-l border-line shadow-[0_0_60px_-20px_rgba(0,0,0,0.9)] transition-transform duration-300 ease-[var(--ease)] will-change-transform ${
           open ? "translate-x-0" : "translate-x-full"
         } ${pending ? "opacity-90" : ""}`}
       >
@@ -175,7 +175,7 @@ export function TransactionDetail({
               {/* Amount */}
               <div>
                 <p
-                  className={`font-display text-4xl tabular ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
+                  className={`display-1 font-display text-4xl tabular ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
                 >
                   {income ? "+" : "−"}
                   {formatCurrency(Math.abs(t.amount), t.currency ?? "USD")}
