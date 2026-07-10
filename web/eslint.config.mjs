@@ -12,9 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Electron packaging output and the plain-CJS Electron entrypoint.
+    // Electron packaging output and the plain-CJS Electron entrypoint /
+    // build scripts (CommonJS, run under Node — not part of the Next app).
     "dist/**",
     "desktop/electron/**",
+    "desktop/scripts/**",
   ]),
 ]);
 
