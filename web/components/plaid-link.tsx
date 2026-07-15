@@ -6,7 +6,15 @@ import { useRouter } from "next/navigation";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 
-export function PlaidLink({ variant = "primary" }: { variant?: ButtonProps["variant"] }) {
+export function PlaidLink({
+  variant = "primary",
+  onConnected,
+}: {
+  variant?: ButtonProps["variant"];
+  /** Called after a bank is successfully linked (e.g. the onboarding wizard
+   * advances to its final step). The dashboard refresh still happens regardless. */
+  onConnected?: () => void;
+}) {
   const router = useRouter();
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -32,12 +40,13 @@ export function PlaidLink({ variant = "primary" }: { variant?: ButtonProps["vari
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ public_token, institution: metadata.institution }),
         });
+        onConnected?.();
         router.refresh();
       } finally {
         setLoading(false);
       }
     },
-    [router],
+    [router, onConnected],
   );
 
   const { open, ready } = usePlaidLink({ token: linkToken, onSuccess });

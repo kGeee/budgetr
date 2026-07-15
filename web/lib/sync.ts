@@ -9,7 +9,7 @@ import {
   balanceSnapshots,
   recurringStreams,
 } from "@/db/schema";
-import { plaid, PLAID_ENV } from "@/lib/plaid";
+import { getPlaidClient, getPlaidEnv } from "@/lib/plaid";
 import { decrypt } from "@/lib/crypto";
 import { applyTagRules } from "@/lib/tag-rules";
 import { signedBalance } from "@/lib/utils";
@@ -23,7 +23,7 @@ function todayStr(): string {
 
 /** Pull account metadata + live balances, upsert accounts, write a daily snapshot. */
 async function refreshAccounts(item: Item, accessToken: string) {
-  const res = await plaid.accountsBalanceGet({ access_token: accessToken });
+  const res = await getPlaidClient().accountsBalanceGet({ access_token: accessToken });
   const now = new Date();
   const date = todayStr();
 
@@ -86,7 +86,7 @@ async function syncTransactions(item: Item, accessToken: string) {
   const removed: string[] = [];
 
   while (hasMore) {
-    const res = await plaid.transactionsSync({
+    const res = await getPlaidClient().transactionsSync({
       access_token: accessToken,
       cursor,
       count: 500,
@@ -149,7 +149,7 @@ async function syncTransactions(item: Item, accessToken: string) {
 /** Pull investment holdings + securities (no-op for non-investment items). */
 async function syncInvestments(accessToken: string) {
   try {
-    const res = await plaid.investmentsHoldingsGet({ access_token: accessToken });
+    const res = await getPlaidClient().investmentsHoldingsGet({ access_token: accessToken });
     const now = new Date();
 
     for (const s of res.data.securities) {
@@ -249,7 +249,7 @@ async function syncInvestmentTransactions(accessToken: string) {
     let offset = 0;
     let total = Infinity;
     while (offset < total) {
-      const res = await plaid.investmentsTransactionsGet({
+      const res = await getPlaidClient().investmentsTransactionsGet({
         access_token: accessToken,
         start_date: start,
         end_date: end,
@@ -331,7 +331,7 @@ async function syncInvestmentTransactions(accessToken: string) {
 /** Pull recurring transaction streams (subscriptions, paychecks, bills). */
 async function syncRecurring(accessToken: string) {
   try {
-    const res = await plaid.transactionsRecurringGet({ access_token: accessToken });
+    const res = await getPlaidClient().transactionsRecurringGet({ access_token: accessToken });
     const now = new Date();
 
     // Only persist streams whose account we actually have (FK safety).
@@ -380,10 +380,11 @@ export async function syncItem(item: Item) {
   // item was linked (e.g. sandbox -> production), the stored token is invalid
   // and Plaid would return an opaque INVALID_ACCESS_TOKEN. Fail fast with a
   // clear, actionable message instead.
-  if (item.plaidEnv && item.plaidEnv !== PLAID_ENV) {
+  const currentEnv = getPlaidEnv();
+  if (item.plaidEnv && item.plaidEnv !== currentEnv) {
     throw new Error(
-      `Item "${item.institutionName ?? item.id}" was linked under PLAID_ENV=${item.plaidEnv} ` +
-        `but the app is now running PLAID_ENV=${PLAID_ENV}. Plaid access tokens do not carry ` +
+      `Item "${item.institutionName ?? item.id}" was linked under Plaid env "${item.plaidEnv}" ` +
+        `but the app is now running Plaid env "${currentEnv}". Plaid access tokens do not carry ` +
         `over between environments — re-link this account (run "npm run db:reset-items" to clear ` +
         `stale links, then use Connect again).`,
     );

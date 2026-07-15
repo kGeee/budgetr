@@ -12,7 +12,7 @@ import {
   setCostBasisMethod,
 } from "@/lib/actions";
 import type { InvestmentTxnRow, TaxLotOverrideRow } from "@/lib/queries";
-import type { RealizedLot } from "@/lib/tax-lots";
+import { tradeAction, type RealizedLot } from "@/lib/tax-lots";
 
 const METHODS: { value: string; label: string }[] = [
   { value: "FIFO", label: "FIFO" },
@@ -37,7 +37,10 @@ function totalsFor(lots: RealizedLot[]): Totals {
   let basis = 0;
   let disallowedWash = 0;
   for (const l of lots) {
-    if (l.term === "long") longTerm += l.gain;
+    if (l.section1256) {
+      longTerm += l.gain * 0.6;
+      shortTerm += l.gain * 0.4;
+    } else if (l.term === "long") longTerm += l.gain;
     else shortTerm += l.gain;
     proceeds += l.proceeds;
     basis += l.basis;
@@ -89,13 +92,13 @@ export function RealizedGainsView({
   );
   const totals = useMemo(() => totalsFor(shown), [shown]);
 
-  // Sell / buy transactions available for spec-ID pinning.
+  // Spec-ID applies to owned lots: a sale-to-close matched to a buy-to-open.
   const sells = useMemo(
-    () => transactions.filter((t) => t.ticker && (t.type === "sell" || (t.quantity ?? 0) < 0)),
+    () => transactions.filter((t) => t.ticker && tradeAction(t) === "close-long"),
     [transactions],
   );
   const buys = useMemo(
-    () => transactions.filter((t) => t.ticker && (t.type === "buy" || (t.quantity ?? 0) > 0)),
+    () => transactions.filter((t) => t.ticker && tradeAction(t) === "open-long"),
     [transactions],
   );
   const txnById = useMemo(() => {
@@ -234,8 +237,8 @@ export function RealizedGainsView({
               <thead>
                 <tr className="border-b border-line text-left text-xs text-[var(--muted)]">
                   <th className="px-4 py-3 font-medium">Ticker</th>
-                  <th className="px-4 py-3 font-medium">Acquired</th>
-                  <th className="px-4 py-3 font-medium">Sold</th>
+                  <th className="px-4 py-3 font-medium">Opened</th>
+                  <th className="px-4 py-3 font-medium">Closed</th>
                   <th className="px-4 py-3 text-right font-medium">Qty</th>
                   <th className="px-4 py-3 text-right font-medium">Proceeds</th>
                   <th className="px-4 py-3 text-right font-medium">Basis</th>
@@ -249,7 +252,14 @@ export function RealizedGainsView({
                     key={`${l.sellTxnId}:${l.buyTxnId}:${i}`}
                     className="border-b border-line/50 last:border-0"
                   >
-                    <td className="px-4 py-3 font-medium">{l.ticker}</td>
+                    <td className="px-4 py-3 font-medium">
+                      <span>{l.ticker}</span>
+                      {l.position === "short" && (
+                        <span className="ml-2 rounded border border-line px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-[var(--muted)]">
+                          written
+                        </span>
+                      )}
+                    </td>
                     <td className="mono px-4 py-3 text-xs text-[var(--muted)]">{l.openDate}</td>
                     <td className="mono px-4 py-3 text-xs text-[var(--muted)]">{l.closeDate}</td>
                     <td className="tabular mono px-4 py-3 text-right text-[var(--muted)]">
@@ -264,12 +274,14 @@ export function RealizedGainsView({
                       <div className="flex items-center gap-1.5">
                         <span
                           className={`rounded-full border px-2 py-0.5 text-[11px] ${
-                            l.term === "long"
+                            l.section1256
+                              ? "border-[var(--brass-dim)] text-[var(--brass)]"
+                              : l.term === "long"
                               ? "border-[var(--jade)]/40 text-[var(--jade)]"
                               : "border-line text-[var(--muted)]"
                           }`}
                         >
-                          {l.term === "long" ? "Long" : "Short"}
+                          {l.section1256 ? "1256 · 60/40" : l.term === "long" ? "Long" : "Short"}
                         </span>
                         {l.washSale && (
                           <span
@@ -294,6 +306,14 @@ export function RealizedGainsView({
             </table>
           </div>
 
+          {shown.some((l) => l.section1256) && (
+            <p className="rounded-xl border border-[var(--brass-dim)]/60 bg-[color-mix(in_srgb,var(--brass)_7%,transparent)] px-4 py-3 text-xs leading-relaxed text-[var(--muted)]">
+              SPX/SPXW broad-based index options are shown with Section 1256 character: 60% long-term
+              and 40% short-term, regardless of holding period. The worksheet reconstructs closed
+              ledger activity; confirm year-end mark-to-market amounts against Form 1099-B and Form 6781.
+            </p>
+          )}
+
           {/* Spec-ID override controls — only relevant under spec-ID matching */}
           {globalMethod === "specid" && (
             <Card className="space-y-4">
@@ -302,7 +322,7 @@ export function RealizedGainsView({
                   <Pin size={13} /> Spec-ID lot assignments
                 </p>
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  Pin shares of a sale to a specific purchase lot. Unpinned shares
+                  Pin units of a long-position sale to a specific purchase lot. Unpinned units
                   fall back to FIFO.
                 </p>
               </div>
@@ -339,7 +359,7 @@ export function RealizedGainsView({
                   </select>
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
-                  Shares
+                  Units
                   <input
                     type="number"
                     min="0"
@@ -368,7 +388,7 @@ export function RealizedGainsView({
                     return (
                       <li key={o.id} className="flex items-center gap-3 py-2.5 text-sm">
                         <span className="mono min-w-0 flex-1 truncate text-xs text-[var(--muted)]">
-                          {o.quantity} sh · {sell ? txnLabel(sell) : o.sellTxnId}{" "}
+                          {o.quantity} units · {sell ? txnLabel(sell) : o.sellTxnId}{" "}
                           <span className="text-[var(--faint)]">←</span>{" "}
                           {buy ? txnLabel(buy) : o.buyTxnId}
                         </span>

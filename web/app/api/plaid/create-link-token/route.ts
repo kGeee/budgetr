@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  plaid,
+  getPlaidClient,
   hasPlaidCredentials,
   PLAID_PRODUCTS,
   PLAID_OPTIONAL_PRODUCTS,
@@ -12,14 +12,14 @@ export async function POST() {
     return NextResponse.json(
       {
         error:
-          "Missing Plaid credentials. Add PLAID_CLIENT_ID and PLAID_SECRET to .env.local " +
-          "(get them from https://dashboard.plaid.com/developers/keys), then restart the dev server.",
+          "Missing Plaid credentials. Add your Plaid client ID and secret in Settings → " +
+          "Connections (get them from https://dashboard.plaid.com/developers/keys).",
       },
       { status: 400 },
     );
   }
   try {
-    const res = await plaid.linkTokenCreate({
+    const res = await getPlaidClient().linkTokenCreate({
       user: { client_user_id: "budgetr-local-user" },
       client_name: "budgetr",
       language: "en",

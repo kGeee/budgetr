@@ -11,14 +11,16 @@
  *   real-time ticking updates while the market is open.
  */
 
+import { getFinnhubKey } from "@/lib/app-config";
+
 const BASE = "https://finnhub.io/api/v1";
 
-/** The Finnhub API key, or undefined when not configured. */
+/** The Finnhub API key (DB-backed config → env fallback), or undefined. */
 export function finnhubToken(): string | undefined {
-  return process.env.FINNHUB_API_KEY?.trim() || undefined;
+  return getFinnhubKey() ?? undefined;
 }
 
-/** True when a Finnhub API key is present in the environment. */
+/** True when a Finnhub API key is configured (DB or env). */
 export function hasFinnhubKey(): boolean {
   return Boolean(finnhubToken());
 }

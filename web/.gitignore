@@ -32,3 +32,6 @@ npm-debug.log*
 # Electron desktop build artifacts
 /dist/
 /desktop/build/icon.icns
+
+# marketing-only preview build
+.next-marketing/

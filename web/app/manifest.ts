@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "budgetr — private ledger",
     short_name: "budgetr",
     description: "Net worth, spending & income — read-only, on your machine.",
-    start_url: "/",
+    start_url: "/overview",
     display: "standalone",
     orientation: "portrait",
     background_color: "#080b0a",

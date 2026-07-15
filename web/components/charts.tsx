@@ -102,6 +102,7 @@ export function NetWorthChart({ data }: { data: { date: string; netWorth: number
           stroke="#6fe3a6"
           strokeWidth={2.5}
           fill="url(#nw)"
+          isAnimationActive={false}
           activeDot={{ r: 4, fill: "#6fe3a6", stroke: "#090c0b", strokeWidth: 2 }}
         />
       </AreaChart>
@@ -162,6 +163,7 @@ export function CashflowChart({
           dataKey="income"
           radius={[3, 3, 0, 0]}
           maxBarSize={26}
+          isAnimationActive={false}
           cursor={clickable ? "pointer" : undefined}
           onClick={handleClick}
         >
@@ -173,6 +175,7 @@ export function CashflowChart({
           dataKey="expenses"
           radius={[3, 3, 0, 0]}
           maxBarSize={26}
+          isAnimationActive={false}
           cursor={clickable ? "pointer" : undefined}
           onClick={handleClick}
         >
@@ -229,6 +232,7 @@ export function MonthlySpendChart({
           dataKey="spent"
           radius={[3, 3, 0, 0]}
           maxBarSize={30}
+          isAnimationActive={false}
           cursor={clickable ? "pointer" : undefined}
           onClick={
             onSelectMonth
@@ -256,18 +260,19 @@ export function CategoryChart({ data }: { data: { category: string; total: numbe
   const top = data.slice(0, 8);
   const total = top.reduce((s, d) => s + d.total, 0);
   return (
-    <div className="flex flex-col items-center gap-6 sm:flex-row">
-      <div className="relative w-full max-w-[200px] shrink-0">
-        <ResponsiveContainer width="100%" height={200}>
+    <div className="flex flex-col items-center justify-center gap-6 sm:flex-row sm:gap-8">
+      <div className="relative w-full max-w-[190px] shrink-0">
+        <ResponsiveContainer width="100%" height={190}>
           <PieChart>
             <Pie
               data={top}
               dataKey="total"
               nameKey="category"
-              innerRadius={62}
-              outerRadius={92}
+              innerRadius={60}
+              outerRadius={88}
               paddingAngle={2.5}
               stroke="none"
+              isAnimationActive={false}
             >
               {top.map((_, i) => (
                 <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
@@ -286,9 +291,9 @@ export function CategoryChart({ data }: { data: { category: string; total: numbe
           </span>
         </div>
       </div>
-      <ul className="w-full flex-1 space-y-2 text-sm">
+      <ul className="w-full flex-1 space-y-2 text-sm sm:max-w-[260px]">
         {top.map((d, i) => (
-          <li key={d.category} className="flex items-center justify-between gap-3">
+          <li key={d.category} className="flex items-center justify-between gap-4">
             <span className="flex min-w-0 items-center gap-2.5 text-[var(--muted)]">
               <span
                 className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
@@ -296,7 +301,7 @@ export function CategoryChart({ data }: { data: { category: string; total: numbe
               />
               <span className="truncate">{d.category}</span>
             </span>
-            <span className="mono shrink-0 text-[var(--paper)]">{formatCurrency(d.total)}</span>
+            <span className="mono shrink-0 tabular text-[var(--paper)]">{formatCurrency(d.total)}</span>
           </li>
         ))}
       </ul>
@@ -350,6 +355,7 @@ export function PortfolioChart({ data }: { data: { date: string; value: number }
           stroke="#cbb07c"
           strokeWidth={2.5}
           fill="url(#pf)"
+          isAnimationActive={false}
           activeDot={{ r: 4, fill: "#cbb07c", stroke: "#090c0b", strokeWidth: 2 }}
         />
       </AreaChart>
@@ -423,6 +429,7 @@ export function ValueAreaChart({
           stroke={color}
           strokeWidth={2.5}
           fill={`url(#${gradientId})`}
+          isAnimationActive={false}
           activeDot={{ r: 4, fill: color, stroke: "#090c0b", strokeWidth: 2 }}
         />
       </AreaChart>
@@ -957,6 +964,7 @@ export function AllocationDonut({
               outerRadius={92}
               paddingAngle={2.5}
               stroke="none"
+              isAnimationActive={false}
               labelLine={false}
               label={renderLabel}
               onClick={
@@ -1049,6 +1057,7 @@ export function SectorBarChart({
           dataKey="value"
           radius={[0, 3, 3, 0]}
           maxBarSize={22}
+          isAnimationActive={false}
           cursor={onSelect ? "pointer" : undefined}
           onClick={
             onSelect

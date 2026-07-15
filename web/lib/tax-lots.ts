@@ -19,6 +19,7 @@ export type Term = "short" | "long";
 export type LedgerTxn = {
   id: string;
   date: string; // YYYY-MM-DD
+  name?: string | null; // brokerage description; carries option open/close intent
   type: string | null; // buy | sell | ...
   quantity: number | null; // + buy, - sell
   amount: number | null; // + cash out (buy), - cash in (sell)
@@ -37,14 +38,16 @@ export type LotOverride = {
 /** A single closed lot: one sell matched against one buy, with its P&L. */
 export type RealizedLot = {
   ticker: string;
-  openDate: string; // buy date
-  closeDate: string; // sell date
-  quantity: number; // shares closed in this match
-  proceeds: number; // sale proceeds allocated to these shares (net of fees)
-  basis: number; // cost basis of these shares (incl. buy fees)
+  openDate: string; // date the long or written position opened
+  closeDate: string; // date the position closed or expired
+  quantity: number; // units closed in this match
+  proceeds: number; // long sale proceeds or premium received for a written lot
+  basis: number; // long purchase cost or cost to close a written lot
   gain: number; // proceeds - basis
   term: Term; // held > 365 calendar days → long
   washSale: boolean; // realized loss with a same-ticker buy within ±30 days
+  position: "long" | "short"; // whether the closed lot was owned or written
+  section1256: boolean; // broad-based index option; 60/40 tax character
   sellTxnId: string;
   buyTxnId: string;
 };
@@ -64,22 +67,38 @@ const DAY_MS = 86_400_000;
 const LONG_TERM_DAYS = 365;
 const WASH_WINDOW_DAYS = 30;
 
+/** Known OCC roots for listed, broad-based S&P 500 index options. */
+export function isSection1256Ticker(ticker: string): boolean {
+  return /^(?:SPX|SPXW|XSP)\d{6}[CP]\d{8}$/i.test(ticker.trim());
+}
+
 function daysBetween(a: string, b: string): number {
   const da = Date.parse(a + "T00:00:00Z");
   const db = Date.parse(b + "T00:00:00Z");
   return Math.round((db - da) / DAY_MS);
 }
 
-/** True for a buy (opens/adds to a lot). Prefers `type`, falls back to sign. */
-function isBuy(t: LedgerTxn): boolean {
-  if (t.type === "buy") return true;
-  if (t.type === "sell") return false;
-  return (t.quantity ?? 0) > 0;
-}
-function isSell(t: LedgerTxn): boolean {
-  if (t.type === "sell") return true;
-  if (t.type === "buy") return false;
-  return (t.quantity ?? 0) < 0;
+/** Economic action represented by a brokerage ledger row. */
+type TradeAction = "open-long" | "close-long" | "open-short" | "close-short" | null;
+
+/**
+ * Plaid flattens option activity to buy/sell, while the description preserves
+ * the economically important open/close direction. Expirations arrive as
+ * transfers: a negative quantity closes a long contract and a positive one
+ * closes a written contract at zero value.
+ */
+export function tradeAction(t: LedgerTxn): TradeAction {
+  const name = (t.name ?? "").toUpperCase().replace(/[^A-Z]/g, "");
+  if (name.includes("PURCHASETOOPEN") || name.includes("BUYTOOPEN")) return "open-long";
+  if (name.includes("SOLDTOCLOSE") || name.includes("SELLTOCLOSE")) return "close-long";
+  if (name.includes("SOLDTOOPEN") || name.includes("SELLTOOPEN")) return "open-short";
+  if (name.includes("PURCHASETOCLOSE") || name.includes("BUYTOCLOSE")) return "close-short";
+  if (name.includes("OPTIONEXPIRATION") || name.includes("OPTIONEXPIRED")) {
+    return (t.quantity ?? 0) < 0 ? "close-long" : (t.quantity ?? 0) > 0 ? "close-short" : null;
+  }
+  if (t.type === "buy") return "open-long";
+  if (t.type === "sell") return "close-long";
+  return (t.quantity ?? 0) > 0 ? "open-long" : (t.quantity ?? 0) < 0 ? "close-long" : null;
 }
 
 /** Total cash basis of a buy incl. fees (falls back to price×qty + fees). */
@@ -98,7 +117,8 @@ type OpenLot = {
   buyTxnId: string;
   date: string;
   remaining: number; // shares still open
-  costPerShare: number;
+  amountPerUnit: number; // long basis or short-sale proceeds
+  position: "long" | "short";
 };
 
 /**
@@ -128,7 +148,7 @@ export function computeRealizedLots(
   const byTicker = new Map<string, LedgerTxn[]>();
   for (const t of txns) {
     if (!t.ticker) continue;
-    if (!isBuy(t) && !isSell(t)) continue;
+    if (!tradeAction(t)) continue;
     if (!t.quantity || t.quantity === 0) continue;
     const key = t.ticker.toUpperCase();
     (byTicker.get(key) ?? byTicker.set(key, []).get(key)!).push(t);
@@ -144,44 +164,63 @@ export function computeRealizedLots(
 
   for (const [ticker, rows] of byTicker) {
     const method = methodForTicker(methods, ticker);
+    const section1256 = isSection1256Ticker(ticker);
     // Chronological replay; stable within a day by original order.
-    const ordered = [...rows].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const ordered = [...rows].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      // Brokerage feeds often omit execution time. For an OCC contract opened
+      // and closed on the same posted day, replay opening activity first.
+      const opens = new Set<TradeAction>(["open-long", "open-short"]);
+      return Number(opens.has(tradeAction(b))) - Number(opens.has(tradeAction(a)));
+    });
 
     // All buy dates for this ticker drive wash-sale detection.
-    const buyDates = ordered.filter(isBuy).map((t) => ({ id: t.id, date: t.date }));
+    const buyDates = ordered
+      .filter((t) => tradeAction(t) === "open-long")
+      .map((t) => ({ id: t.id, date: t.date }));
 
     const open: OpenLot[] = [];
 
     for (const t of ordered) {
-      if (isBuy(t)) {
+      const action = tradeAction(t);
+      if (action === "open-long" || action === "open-short") {
         const qty = Math.abs(t.quantity ?? 0);
         if (qty === 0) continue;
         open.push({
           buyTxnId: t.id,
           date: t.date,
           remaining: qty,
-          costPerShare: buyCostTotal(t, qty) / qty,
+          amountPerUnit:
+            (action === "open-long" ? buyCostTotal(t, qty) : sellProceedsTotal(t, qty)) / qty,
+          position: action === "open-long" ? "long" : "short",
         });
         continue;
       }
 
-      // Sell: allocate proceeds across the matched buy lots proportionally.
-      let sellQty = Math.abs(t.quantity ?? 0);
-      if (sellQty === 0) continue;
-      const totalProceeds = sellProceedsTotal(t, sellQty);
-      const proceedsPerShare = totalProceeds / sellQty;
+      if (action !== "close-long" && action !== "close-short") continue;
+
+      const closingPosition = action === "close-long" ? "long" : "short";
+      let closeQty = Math.abs(t.quantity ?? 0);
+      if (closeQty === 0) continue;
+      const closeAmount =
+        action === "close-long" ? sellProceedsTotal(t, closeQty) : buyCostTotal(t, closeQty);
+      const closeAmountPerUnit = closeAmount / closeQty;
 
       const takeFromLot = (lot: OpenLot, want: number) => {
-        const take = Math.min(lot.remaining, want, sellQty);
+        if (lot.position !== closingPosition) return 0;
+        const take = Math.min(lot.remaining, want, closeQty);
         if (take <= 0) return 0;
         lot.remaining -= take;
-        sellQty -= take;
-        const proceeds = proceedsPerShare * take;
-        const basis = lot.costPerShare * take;
+        closeQty -= take;
+        const proceeds =
+          closingPosition === "long" ? closeAmountPerUnit * take : lot.amountPerUnit * take;
+        const basis =
+          closingPosition === "long" ? lot.amountPerUnit * take : closeAmountPerUnit * take;
         const gain = proceeds - basis;
         const heldDays = daysBetween(lot.date, t.date);
         const isLoss = gain < 0;
         const washSale =
+          !section1256 &&
           isLoss &&
           buyDates.some(
             (b) => b.id !== lot.buyTxnId && Math.abs(daysBetween(b.date, t.date)) <= WASH_WINDOW_DAYS,
@@ -196,6 +235,8 @@ export function computeRealizedLots(
           gain,
           term: heldDays > LONG_TERM_DAYS ? "long" : "short",
           washSale,
+          position: lot.position,
+          section1256,
           sellTxnId: t.id,
           buyTxnId: lot.buyTxnId,
         });
@@ -205,21 +246,23 @@ export function computeRealizedLots(
       // 1) Honor explicit spec-ID pins first (specid method only).
       if (method === "specid") {
         for (const ov of overridesBySell.get(t.id) ?? []) {
-          if (sellQty <= 0) break;
-          const lot = open.find((l) => l.buyTxnId === ov.buyTxnId && l.remaining > 0);
+          if (closeQty <= 0) break;
+          const lot = open.find(
+            (l) => l.buyTxnId === ov.buyTxnId && l.remaining > 0 && l.position === closingPosition,
+          );
           if (lot) takeFromLot(lot, ov.quantity);
         }
       }
 
       // 2) Fill any remainder by FIFO (specid fallback) / FIFO / LIFO order.
-      const pool = open.filter((l) => l.remaining > 0);
+      const pool = open.filter((l) => l.remaining > 0 && l.position === closingPosition);
       if (method === "LIFO") pool.reverse(); // latest lots first
       for (const lot of pool) {
-        if (sellQty <= 0) break;
+        if (closeQty <= 0) break;
         takeFromLot(lot, lot.remaining);
       }
-      // Any sellQty left over means an oversold/short position we can't basis —
-      // silently ignored (no negative-basis phantom lots).
+      // Any unmatched close is ignored: without its opening leg there is no
+      // defensible basis/proceeds figure to report.
     }
   }
 
@@ -235,7 +278,10 @@ export function summarize(lots: RealizedLot[]): Omit<YearSummary, "year"> {
   let basis = 0;
   let disallowedWash = 0;
   for (const l of lots) {
-    if (l.term === "long") longTerm += l.gain;
+    if (l.section1256) {
+      longTerm += l.gain * 0.6;
+      shortTerm += l.gain * 0.4;
+    } else if (l.term === "long") longTerm += l.gain;
     else shortTerm += l.gain;
     proceeds += l.proceeds;
     basis += l.basis;

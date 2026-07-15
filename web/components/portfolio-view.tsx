@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import {
   AllocationDonut,
@@ -600,12 +601,27 @@ function PortfolioInner({
   const gain = costedValue - totalCost;
   const gainPct = totalCost !== 0 ? (gain / totalCost) * 100 : 0;
   const uncostedValue = total - costedValue;
+  const dayPriced = holdings
+    .map((h) => ({ value: effectiveValue(h, quotes), change: dayChangeValue(h, quotes) }))
+    .filter((row): row is { value: number; change: number } => row.change != null);
+  const dayChange = dayPriced.reduce((sum, row) => sum + row.change, 0);
+  const priorDayValue = dayPriced.reduce((sum, row) => sum + row.value - row.change, 0);
+  const dayChangePctTotal = priorDayValue !== 0 ? (dayChange / priorDayValue) * 100 : 0;
+  const dayCoverage = total !== 0
+    ? (dayPriced.reduce((sum, row) => sum + Math.abs(row.value), 0) / Math.abs(total)) * 100
+    : 0;
 
   return (
     <div className="space-y-7">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Market value" value={total} big />
-        <Stat label="Cost basis" value={totalCost} />
+        <Stat
+          label="Day change"
+          value={dayChange}
+          signed
+          pct={dayChangePctTotal}
+          detail={`${Math.min(dayCoverage, 100).toFixed(0)}% of value priced today`}
+        />
         <Stat
           label="Unrealized gain"
           value={gain}
@@ -613,6 +629,15 @@ function PortfolioInner({
           pct={gainPct}
           hint="View breakdown"
           onClick={() => setShowBreakdown(true)}
+        />
+        <Stat
+          label="Cost basis"
+          value={totalCost}
+          detail={
+            uncostedValue > 0.005
+              ? `${formatCurrency(uncostedValue)} has no basis`
+              : "All positions costed"
+          }
         />
       </div>
 
@@ -627,22 +652,6 @@ function PortfolioInner({
         />
       )}
 
-      <SectorAllocation
-        allocation={allocation}
-        total={allocationTotal}
-        activeSector={sectorFilter}
-        onSelect={setSectorFilter}
-      />
-
-      <AssetAllocation
-        rows={allocRows}
-        total={total}
-        targets={allocationTargets}
-        assetClassOverrides={assetClassOverrides}
-        geographyOverrides={geographyOverrides}
-        knownSectors={sectorOptions}
-      />
-
       <Card className="p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <span className="eyebrow">Portfolio value</span>
@@ -655,6 +664,21 @@ function PortfolioInner({
 
       <BenchmarkComparison comparison={comparison} />
 
+      <AssetAllocation
+        rows={allocRows}
+        total={total}
+        targets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
+        knownSectors={sectorOptions}
+      />
+
+      <SectorAllocation
+        allocation={allocation}
+        total={allocationTotal}
+        activeSector={sectorFilter}
+        onSelect={setSectorFilter}
+      />
 
       <Card className="overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
@@ -827,6 +851,16 @@ function HoldingRowView({
           <div className="flex flex-col gap-1">
             <span className="inline-flex items-center gap-2">
               <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+              {h.ticker && !parseOccSymbol(h.ticker) && (
+                <Link
+                  href={`/investments/options/${encodeURIComponent(h.ticker)}`}
+                  title={`Options desk for ${h.ticker}`}
+                  className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+                >
+                  Options
+                  <ArrowUpRight size={10} />
+                </Link>
+              )}
               <span className="text-[var(--muted)]">{h.securityName}</span>
               {h.manual && (
                 <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
@@ -1042,9 +1076,15 @@ function OptionGroupRow({
         <td className="py-3.5 pr-3 pl-1">
           <span className="inline-flex flex-wrap items-center gap-2">
             <span className="font-medium text-[var(--brass)]">{underlying}</span>
-            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+            <Link
+              href={`/investments/options/${encodeURIComponent(underlying)}`}
+              onClick={(e) => e.stopPropagation()}
+              title={`Options desk for ${underlying}`}
+              className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+            >
               options
-            </span>
+              <ArrowUpRight size={10} />
+            </Link>
             <span className="text-[var(--muted)]">{summary}</span>
             {Number.isFinite(soonestDte) && (
               <span
@@ -1890,6 +1930,7 @@ function Stat({
   signed,
   pct,
   hint,
+  detail,
   onClick,
 }: {
   label: string;
@@ -1898,6 +1939,7 @@ function Stat({
   signed?: boolean;
   pct?: number;
   hint?: string;
+  detail?: string;
   onClick?: () => void;
 }) {
   const positive = value >= 0;
@@ -1922,6 +1964,7 @@ function Stat({
           {Math.abs(pct).toFixed(2)}%
         </p>
       )}
+      {detail && <p className="mt-1 text-xs text-[var(--muted)]">{detail}</p>}
     </>
   );
 
