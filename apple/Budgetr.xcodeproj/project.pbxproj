@@ -7,28 +7,37 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		043C1B22D999A6E8BFB79C8E /* CategoriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581DCB166B8CBA1E54338A5B /* CategoriesView.swift */; };
+		0AB2B7DF60D97D54FFF17669 /* AccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03F4080CE879F5EFD02A6FF /* AccountsView.swift */; };
 		164E10C45E73D7ED2137C3AF /* ProxyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3707E0930386EEF308DD0C74 /* ProxyClient.swift */; };
 		31B85DF883C4E6BF7E9D8457 /* AppCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADF462CADCE7DEA792E49E5 /* AppCrypto.swift */; };
 		32B2CDB63243DADD775957EF /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EF5C4E36C3182F51EB25B6B /* PersistenceController.swift */; };
 		37A5FD19C1CA4BEBBF8FB070 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F928F8BDD0DC37862CF4838 /* KeychainStore.swift */; };
 		3E7CBB6B1A1BB2002BB54F62 /* TransactionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA4E3511A390619B607FD38 /* TransactionsView.swift */; };
 		3ED2976907FDA90E8E8F5564 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A373F1B5D9EDB3618E9FE54 /* DashboardView.swift */; };
+		4ABAA6C2DA9C8B163600ECA6 /* RulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B85791B6C44E1FBFF61D035 /* RulesView.swift */; };
 		51888A3C79D4C9DCB8F6AF3D /* Model.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = A0D3B593CF453D31B4C22355 /* Model.xcdatamodeld */; };
+		5B59D7CEAABDFD9B543FE639 /* RecurringView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E200535C2E3E17F19ACA64D1 /* RecurringView.swift */; };
 		60523EBB7F9833EAE4B1CA50 /* VendorGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46FA8EB2F73B59E24E6278A5 /* VendorGrouping.swift */; };
 		6979350D65B6BE7A744CA978 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81ED19750A676B23FD907591 /* RootView.swift */; };
+		89D98884A9A7129B78FD5E61 /* VendorsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3AB06E786B4304E47BF9374 /* VendorsView.swift */; };
 		955B036DDCB5D17F74F3CF3B /* AutoTagging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68FC64F6AE91E4DB23F8C3A2 /* AutoTagging.swift */; };
 		98B97D03BFE97096C44DF212 /* CategoryMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DD47B1F2F7AB1398DFC8D9D /* CategoryMapping.swift */; };
 		9E1F220AA1164A46A02D8DBC /* BudgetPacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A41E17B8FA93E4B7A051599 /* BudgetPacing.swift */; };
 		D99A7E025DD77605EA371985 /* BudgetsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39F03E00FB78FA0A5877618 /* BudgetsView.swift */; };
 		DEFD11F59E5C74669CA2CCA9 /* ImportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A536026645A9DD5568BF538 /* ImportController.swift */; };
+		E97CD0B793BF5ABCFB7AB4D1 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0368DAD9D01FDA06568B8E4D /* SettingsView.swift */; };
 		FA264A4DA55251BA685AB151 /* BudgetrApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98C9AF58DA5F7B6EE730B24C /* BudgetrApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0368DAD9D01FDA06568B8E4D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		2B85791B6C44E1FBFF61D035 /* RulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesView.swift; sourceTree = "<group>"; };
 		3707E0930386EEF308DD0C74 /* ProxyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyClient.swift; sourceTree = "<group>"; };
 		3A373F1B5D9EDB3618E9FE54 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		46FA8EB2F73B59E24E6278A5 /* VendorGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VendorGrouping.swift; sourceTree = "<group>"; };
 		4A41E17B8FA93E4B7A051599 /* BudgetPacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetPacing.swift; sourceTree = "<group>"; };
+		581DCB166B8CBA1E54338A5B /* CategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoriesView.swift; sourceTree = "<group>"; };
 		5A35A40CB99B49966F9199EC /* Budgetr.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Budgetr.entitlements; sourceTree = "<group>"; };
 		5A536026645A9DD5568BF538 /* ImportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportController.swift; sourceTree = "<group>"; };
 		68FC64F6AE91E4DB23F8C3A2 /* AutoTagging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTagging.swift; sourceTree = "<group>"; };
@@ -40,7 +49,10 @@
 		98C9AF58DA5F7B6EE730B24C /* BudgetrApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetrApp.swift; sourceTree = "<group>"; };
 		A39F03E00FB78FA0A5877618 /* BudgetsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetsView.swift; sourceTree = "<group>"; };
 		BADF462CADCE7DEA792E49E5 /* AppCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCrypto.swift; sourceTree = "<group>"; };
+		C03F4080CE879F5EFD02A6FF /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
+		D3AB06E786B4304E47BF9374 /* VendorsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VendorsView.swift; sourceTree = "<group>"; };
 		DF4CA55ECF30D059AE48C257 /* Model.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = Model.xcdatamodel; sourceTree = "<group>"; };
+		E200535C2E3E17F19ACA64D1 /* RecurringView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringView.swift; sourceTree = "<group>"; };
 		F038438482828015BB08B95A /* Budgetr.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Budgetr.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -64,10 +76,16 @@
 		44F1BAB017A3D82F938E06AA /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				C03F4080CE879F5EFD02A6FF /* AccountsView.swift */,
 				A39F03E00FB78FA0A5877618 /* BudgetsView.swift */,
+				581DCB166B8CBA1E54338A5B /* CategoriesView.swift */,
 				3A373F1B5D9EDB3618E9FE54 /* DashboardView.swift */,
+				E200535C2E3E17F19ACA64D1 /* RecurringView.swift */,
 				81ED19750A676B23FD907591 /* RootView.swift */,
+				2B85791B6C44E1FBFF61D035 /* RulesView.swift */,
+				0368DAD9D01FDA06568B8E4D /* SettingsView.swift */,
 				8EA4E3511A390619B607FD38 /* TransactionsView.swift */,
+				D3AB06E786B4304E47BF9374 /* VendorsView.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -182,11 +200,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0AB2B7DF60D97D54FFF17669 /* AccountsView.swift in Sources */,
 				31B85DF883C4E6BF7E9D8457 /* AppCrypto.swift in Sources */,
 				955B036DDCB5D17F74F3CF3B /* AutoTagging.swift in Sources */,
 				9E1F220AA1164A46A02D8DBC /* BudgetPacing.swift in Sources */,
 				FA264A4DA55251BA685AB151 /* BudgetrApp.swift in Sources */,
 				D99A7E025DD77605EA371985 /* BudgetsView.swift in Sources */,
+				043C1B22D999A6E8BFB79C8E /* CategoriesView.swift in Sources */,
 				98B97D03BFE97096C44DF212 /* CategoryMapping.swift in Sources */,
 				3ED2976907FDA90E8E8F5564 /* DashboardView.swift in Sources */,
 				DEFD11F59E5C74669CA2CCA9 /* ImportController.swift in Sources */,
@@ -194,9 +214,13 @@
 				51888A3C79D4C9DCB8F6AF3D /* Model.xcdatamodeld in Sources */,
 				32B2CDB63243DADD775957EF /* PersistenceController.swift in Sources */,
 				164E10C45E73D7ED2137C3AF /* ProxyClient.swift in Sources */,
+				5B59D7CEAABDFD9B543FE639 /* RecurringView.swift in Sources */,
 				6979350D65B6BE7A744CA978 /* RootView.swift in Sources */,
+				4ABAA6C2DA9C8B163600ECA6 /* RulesView.swift in Sources */,
+				E97CD0B793BF5ABCFB7AB4D1 /* SettingsView.swift in Sources */,
 				3E7CBB6B1A1BB2002BB54F62 /* TransactionsView.swift in Sources */,
 				60523EBB7F9833EAE4B1CA50 /* VendorGrouping.swift in Sources */,
+				89D98884A9A7129B78FD5E61 /* VendorsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

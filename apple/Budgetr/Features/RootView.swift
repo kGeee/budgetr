@@ -12,12 +12,24 @@ struct RootView: View {
         case dashboard = "Dashboard"
         case transactions = "Transactions"
         case budgets = "Budgets"
+        case accounts = "Accounts"
+        case categories = "Categories"
+        case vendors = "Vendors"
+        case rules = "Rules"
+        case recurring = "Recurring"
+        case settings = "Settings"
         var id: String { rawValue }
         var symbol: String {
             switch self {
             case .dashboard: return "chart.line.uptrend.xyaxis"
             case .transactions: return "list.bullet.rectangle"
             case .budgets: return "chart.pie"
+            case .accounts: return "building.columns"
+            case .categories: return "folder"
+            case .vendors: return "storefront"
+            case .rules: return "wand.and.stars"
+            case .recurring: return "repeat"
+            case .settings: return "gearshape"
             }
         }
     }
@@ -48,6 +60,12 @@ struct RootView: View {
             case .dashboard: DashboardView()
             case .transactions: TransactionsView()
             case .budgets: BudgetsView()
+            case .accounts: AccountsView()
+            case .categories: CategoriesView()
+            case .vendors: VendorsView()
+            case .rules: RulesView()
+            case .recurring: RecurringView()
+            case .settings: SettingsView()
             }
         }
         .fileImporter(

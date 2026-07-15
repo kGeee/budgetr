@@ -34,12 +34,14 @@
         <attribute name="currentBalance" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <attribute name="availableBalance" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <attribute name="isoCurrencyCode" optional="YES" attributeType="String"/>
+        <attribute name="excluded" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <relationship name="item" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDItem" inverseName="accounts" inverseEntity="CDItem"/>
         <relationship name="transactions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDTransaction" inverseName="account" inverseEntity="CDTransaction"/>
         <relationship name="recurringStreams" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDRecurringStream" inverseName="account" inverseEntity="CDRecurringStream"/>
         <relationship name="holdings" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDHolding" inverseName="account" inverseEntity="CDHolding"/>
         <relationship name="balanceSnapshots" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDBalanceSnapshot" inverseName="account" inverseEntity="CDBalanceSnapshot"/>
+        <relationship name="investmentTransactions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDInvestmentTransaction" inverseName="account" inverseEntity="CDInvestmentTransaction"/>
     </entity>
     <entity name="CDTransaction" representedClassName="CDTransaction" syncable="YES" codeGenerationType="class">
         <attribute name="id" optional="YES" attributeType="String"/>
@@ -57,6 +59,10 @@
         <relationship name="account" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDAccount" inverseName="transactions" inverseEntity="CDAccount"/>
         <relationship name="userCategory" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDCategory" inverseName="transactions" inverseEntity="CDCategory"/>
         <relationship name="tags" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CDTag" inverseName="transactions" inverseEntity="CDTag"/>
+        <relationship name="splits" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDTransactionSplit" inverseName="transaction" inverseEntity="CDTransactionSplit"/>
+        <relationship name="attachments" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDAttachment" inverseName="transaction" inverseEntity="CDAttachment"/>
+        <relationship name="matchesAsTxnA" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDTransactionMatch" inverseName="txnA" inverseEntity="CDTransactionMatch"/>
+        <relationship name="matchesAsTxnB" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDTransactionMatch" inverseName="txnB" inverseEntity="CDTransactionMatch"/>
     </entity>
     <entity name="CDCategory" representedClassName="CDCategory" syncable="YES" codeGenerationType="class">
         <attribute name="id" optional="YES" attributeType="String"/>
@@ -69,6 +75,8 @@
         <attribute name="archived" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <relationship name="transactions" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CDTransaction" inverseName="userCategory" inverseEntity="CDTransaction"/>
         <relationship name="budget" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="CDBudget" inverseName="category" inverseEntity="CDBudget"/>
+        <relationship name="rollovers" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDBudgetRollover" inverseName="category" inverseEntity="CDBudgetRollover"/>
+        <relationship name="splits" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CDTransactionSplit" inverseName="category" inverseEntity="CDTransactionSplit"/>
     </entity>
     <entity name="CDTag" representedClassName="CDTag" syncable="YES" codeGenerationType="class">
         <attribute name="id" optional="YES" attributeType="String"/>
@@ -120,6 +128,7 @@
         <attribute name="closePrice" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <attribute name="isoCurrencyCode" optional="YES" attributeType="String"/>
         <relationship name="holdings" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CDHolding" inverseName="security" inverseEntity="CDHolding"/>
+        <relationship name="investmentTransactions" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CDInvestmentTransaction" inverseName="security" inverseEntity="CDInvestmentTransaction"/>
     </entity>
     <entity name="CDHolding" representedClassName="CDHolding" syncable="YES" codeGenerationType="class">
         <attribute name="id" optional="YES" attributeType="String"/>
@@ -150,6 +159,168 @@
         <attribute name="vendorKey" optional="YES" attributeType="String"/>
         <relationship name="group" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDVendorGroup" inverseName="members" inverseEntity="CDVendorGroup"/>
     </entity>
+    <entity name="CDBudgetRollover" representedClassName="CDBudgetRollover" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="month" optional="YES" attributeType="String"/>
+        <attribute name="carryIn" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="category" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDCategory" inverseName="rollovers" inverseEntity="CDCategory"/>
+    </entity>
+    <entity name="CDInvestmentTransaction" representedClassName="CDInvestmentTransaction" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="date" optional="YES" attributeType="String"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="type" optional="YES" attributeType="String"/>
+        <attribute name="subtype" optional="YES" attributeType="String"/>
+        <attribute name="quantity" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="amount" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="price" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="fees" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="isoCurrencyCode" optional="YES" attributeType="String"/>
+        <relationship name="account" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDAccount" inverseName="investmentTransactions" inverseEntity="CDAccount"/>
+        <relationship name="security" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDSecurity" inverseName="investmentTransactions" inverseEntity="CDSecurity"/>
+    </entity>
+    <entity name="CDManualHolding" representedClassName="CDManualHolding" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="symbol" optional="YES" attributeType="String"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="type" optional="YES" attributeType="String"/>
+        <attribute name="quantity" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="costBasis" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="manualValue" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="isoCurrencyCode" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="CDInvestmentSector" representedClassName="CDInvestmentSector" syncable="YES" codeGenerationType="class">
+        <attribute name="sectorKey" optional="YES" attributeType="String"/>
+        <attribute name="sector" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="CDAllocationTarget" representedClassName="CDAllocationTarget" syncable="YES" codeGenerationType="class">
+        <attribute name="targetKey" optional="YES" attributeType="String"/>
+        <attribute name="target" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="CDInvestmentAssetClass" representedClassName="CDInvestmentAssetClass" syncable="YES" codeGenerationType="class">
+        <attribute name="sectorKey" optional="YES" attributeType="String"/>
+        <attribute name="assetClass" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="CDInvestmentGeography" representedClassName="CDInvestmentGeography" syncable="YES" codeGenerationType="class">
+        <attribute name="sectorKey" optional="YES" attributeType="String"/>
+        <attribute name="region" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="CDHoldingCostBasisOverride" representedClassName="CDHoldingCostBasisOverride" syncable="YES" codeGenerationType="class">
+        <attribute name="holdingId" optional="YES" attributeType="String"/>
+        <attribute name="totalCost" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="unitCost" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="asOfDate" optional="YES" attributeType="String"/>
+        <attribute name="note" optional="YES" attributeType="String"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="CDCostBasisMethod" representedClassName="CDCostBasisMethod" syncable="YES" codeGenerationType="class">
+        <attribute name="scopeKey" optional="YES" attributeType="String"/>
+        <attribute name="method" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="CDTaxLotOverride" representedClassName="CDTaxLotOverride" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="sellTxnId" optional="YES" attributeType="String"/>
+        <attribute name="buyTxnId" optional="YES" attributeType="String"/>
+        <attribute name="quantity" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="CDDismissedAlert" representedClassName="CDDismissedAlert" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="alertKey" optional="YES" attributeType="String"/>
+        <attribute name="dismissedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="snoozeUntil" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="CDSavingsGoal" representedClassName="CDSavingsGoal" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="icon" optional="YES" attributeType="String"/>
+        <attribute name="color" optional="YES" attributeType="String"/>
+        <attribute name="targetAmount" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="targetDate" optional="YES" attributeType="String"/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="archived" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="contributions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDSavingsContribution" inverseName="goal" inverseEntity="CDSavingsContribution"/>
+    </entity>
+    <entity name="CDSavingsContribution" representedClassName="CDSavingsContribution" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="date" optional="YES" attributeType="String"/>
+        <attribute name="note" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="goal" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDSavingsGoal" inverseName="contributions" inverseEntity="CDSavingsGoal"/>
+    </entity>
+    <entity name="CDFireSettings" representedClassName="CDFireSettings" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String" defaultValueString="default"/>
+        <attribute name="annualExpenses" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="safeWithdrawalRate" optional="YES" attributeType="Double" defaultValueString="4" usesScalarValueType="YES"/>
+        <attribute name="expectedReturn" optional="YES" attributeType="Double" defaultValueString="7" usesScalarValueType="YES"/>
+        <attribute name="monthlyContribution" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="targetRetirementAge" optional="YES" attributeType="Integer 64" usesScalarValueType="NO"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="CDNetWorthMilestone" representedClassName="CDNetWorthMilestone" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="label" optional="YES" attributeType="String"/>
+        <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="achievedDate" optional="YES" attributeType="String"/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="CDTransactionSplit" representedClassName="CDTransactionSplit" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="note" optional="YES" attributeType="String"/>
+        <relationship name="transaction" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTransaction" inverseName="splits" inverseEntity="CDTransaction"/>
+        <relationship name="category" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDCategory" inverseName="splits" inverseEntity="CDCategory"/>
+    </entity>
+    <entity name="CDTransactionMatch" representedClassName="CDTransactionMatch" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="kind" optional="YES" attributeType="String"/>
+        <attribute name="status" optional="YES" attributeType="String" defaultValueString="confirmed"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="txnA" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTransaction" inverseName="matchesAsTxnA" inverseEntity="CDTransaction"/>
+        <relationship name="txnB" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTransaction" inverseName="matchesAsTxnB" inverseEntity="CDTransaction"/>
+    </entity>
+    <entity name="CDAttachment" representedClassName="CDAttachment" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="filePath" optional="YES" attributeType="String"/>
+        <attribute name="mimeType" optional="YES" attributeType="String"/>
+        <attribute name="size" optional="YES" attributeType="Integer 64" usesScalarValueType="NO"/>
+        <attribute name="originalName" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="transaction" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTransaction" inverseName="attachments" inverseEntity="CDTransaction"/>
+    </entity>
+    <entity name="CDSavedFilter" representedClassName="CDSavedFilter" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="query" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="CDExchangeRate" representedClassName="CDExchangeRate" syncable="YES" codeGenerationType="class">
+        <attribute name="base" optional="YES" attributeType="String"/>
+        <attribute name="quote" optional="YES" attributeType="String"/>
+        <attribute name="rate" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="asOf" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="CDAppSetting" representedClassName="CDAppSetting" syncable="YES" codeGenerationType="class">
+        <attribute name="key" optional="YES" attributeType="String"/>
+        <attribute name="value" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="CDDashboard" representedClassName="CDDashboard" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="widgets" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDDashboardWidget" inverseName="dashboard" inverseEntity="CDDashboardWidget"/>
+    </entity>
+    <entity name="CDDashboardWidget" representedClassName="CDDashboardWidget" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="type" optional="YES" attributeType="String"/>
+        <attribute name="config" optional="YES" attributeType="String"/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="dashboard" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDDashboard" inverseName="widgets" inverseEntity="CDDashboard"/>
+    </entity>
     <configuration name="Default" usedWithCloudKit="YES">
         <memberEntity name="CDItem"/>
         <memberEntity name="CDAccount"/>
@@ -165,5 +336,28 @@
         <memberEntity name="CDBalanceSnapshot"/>
         <memberEntity name="CDVendorGroup"/>
         <memberEntity name="CDVendorGroupMember"/>
+        <memberEntity name="CDBudgetRollover"/>
+        <memberEntity name="CDInvestmentTransaction"/>
+        <memberEntity name="CDManualHolding"/>
+        <memberEntity name="CDInvestmentSector"/>
+        <memberEntity name="CDAllocationTarget"/>
+        <memberEntity name="CDInvestmentAssetClass"/>
+        <memberEntity name="CDInvestmentGeography"/>
+        <memberEntity name="CDHoldingCostBasisOverride"/>
+        <memberEntity name="CDCostBasisMethod"/>
+        <memberEntity name="CDTaxLotOverride"/>
+        <memberEntity name="CDDismissedAlert"/>
+        <memberEntity name="CDSavingsGoal"/>
+        <memberEntity name="CDSavingsContribution"/>
+        <memberEntity name="CDFireSettings"/>
+        <memberEntity name="CDNetWorthMilestone"/>
+        <memberEntity name="CDTransactionSplit"/>
+        <memberEntity name="CDTransactionMatch"/>
+        <memberEntity name="CDAttachment"/>
+        <memberEntity name="CDSavedFilter"/>
+        <memberEntity name="CDExchangeRate"/>
+        <memberEntity name="CDAppSetting"/>
+        <memberEntity name="CDDashboard"/>
+        <memberEntity name="CDDashboardWidget"/>
     </configuration>
 </model>

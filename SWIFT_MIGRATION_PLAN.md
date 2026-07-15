@@ -1,10 +1,25 @@
 # budgetr → Native Swift (macOS + iOS) Migration Plan
 
-**Status:** Proposal for review — no code yet.
+**Status:** In progress, tracking parity against web/. See "Parity backlog" below for current phase status.
 **Target:** Single SwiftUI codebase for macOS 14+ / iOS 17+, data synced via iCloud (Core Data + CloudKit).
-**Source app:** Next.js 16 + TypeScript, SQLite (Drizzle, 17 tables), Plaid + Finnhub + Yahoo Finance, single-user, no auth.
+**Source app:** Next.js 16 + TypeScript, SQLite (Drizzle, 37 tables as of 2026-07), Plaid + Finnhub + Yahoo Finance, single-user, no auth.
 
 This is a **rewrite**, not a port — no TS/React code is reusable — but the design maps cleanly to native, and the single-user/local-first shape is ideal for it.
+
+---
+
+## Parity backlog (added 2026-07-09)
+
+web/ grew substantially past the scope this plan originally described (37 DB tables vs. the 17 assumed below; options-trading analytics, tax lots, multi-currency, custom dashboards, FIRE calculator, and more were added after apple/ was scaffolded and then paused). This section tracks closing that gap, phased so each phase is independently buildable/verifiable via `xcodebuild`.
+
+- [x] **Phase A — Core Data schema parity.** Model.xcdatamodeld now covers all 37 web tables (23 entities added: BudgetRollover, InvestmentTransaction, ManualHolding, InvestmentSector, AllocationTarget, InvestmentAssetClass, InvestmentGeography, HoldingCostBasisOverride, CostBasisMethod, TaxLotOverride, DismissedAlert, SavingsGoal, SavingsContribution, FireSettings, NetWorthMilestone, TransactionSplit, TransactionMatch, Attachment, SavedFilter, ExchangeRate, AppSetting, Dashboard, DashboardWidget). Also backfilled `CDAccount.excluded`, which was missing even for the original 15-table scope. Note: `CDTagRule` still lacks `matchType`/`minAmount`/`maxAmount`/`accountId`/`categoryId` from the current web schema — carried forward as a follow-up, not blocking.
+- [x] **Phase B — Core CRUD screens parity.** Accounts, Categories, Vendors, Rules, Recurring, Settings — read-only MVP screens matching the existing Dashboard/Budgets/Transactions maturity level (list views, no add/edit forms yet). Wired into RootView navigation (sidebar now has 9 sections). Builds green on both macOS and iOS destinations.
+- [ ] **Phase C — Business logic ports (low/med risk).** tag-rules engine, recurrence, currency/rates, allocation, benchmark, dividends, matching, anomalies, forecast — pure Swift ports of web/lib/*.ts.
+- [ ] **Phase D — Investments subsystem.** portfolio-history.ts (high risk — forward-fill + price merge) and tax-lots.ts (FIFO/LIFO/specid), Investments + Realized Gains screens, holdings/manual holdings/investment transactions CRUD, cost basis overrides.
+- [ ] **Phase E — Sync engine + Plaid/Finnhub/Yahoo.** Port lib/sync.ts cursor-based Plaid sync (dedup without DB unique constraints — CloudKit constraint from §3 below), Plaid LinkKit, Finnhub live quotes via WebSocket, Yahoo historical via ProxyClient.
+- [ ] **Phase F — Remaining screens.** Dashboards (custom widget builder), Reports, FIRE, Goals, Insights, Review, Cashflow.
+- [ ] **Phase G — Options trading subsystem (lowest priority, scope TBD).** options.ts/option-analytics.ts/greeks.ts/payoff.ts/cboe.ts — added to web after this plan was written; not obviously mobile-relevant. Confirm with user before investing time here.
+- [ ] **Phase H — Polish.** Platform-specific layout, empty/error/offline states, background refresh, App Store/notarization prep.
 
 ---
 
