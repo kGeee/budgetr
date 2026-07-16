@@ -38,7 +38,7 @@ export default function ThanksPage() {
           <li>
             3. Follow the setup wizard to add your Plaid keys and connect a bank. Need a hand? See{" "}
             <Link href="/getting-started" className="text-[var(--brass)] hover:underline">
-              getting started
+              Getting Started
             </Link>
             .
           </li>

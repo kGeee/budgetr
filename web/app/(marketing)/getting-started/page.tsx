@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { BuyLink } from "@/components/marketing/marketing-shell";
 
 export const metadata: Metadata = {
-  title: "Getting started — budgetr",
+  title: "Getting Started — budgetr",
   description: "Install budgetr, get your free Plaid keys, and connect your first account.",
 };
 
@@ -38,7 +38,7 @@ export default function GettingStartedPage() {
   return (
     <main className="mx-auto max-w-3xl px-5 py-16 sm:px-8">
       <div className="text-center">
-        <p className="eyebrow">Getting started</p>
+        <p className="eyebrow">Getting Started</p>
         <h1 className="display-1 mt-3 font-display text-4xl sm:text-5xl">
           From download to dashboard
         </h1>

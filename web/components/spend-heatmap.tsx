@@ -218,7 +218,7 @@ export function SpendHeatmap({
       </div>
 
       <div className="overflow-x-auto pb-1">
-        <div className="flex gap-2" style={{ width: 28 + gridWidth }}>
+        <div className="mx-auto flex gap-2" style={{ width: 28 + gridWidth }}>
           {/* Weekday labels down the side. */}
           <div
             className="flex shrink-0 flex-col text-[10px] text-[var(--muted)]"

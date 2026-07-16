@@ -67,7 +67,7 @@ export function OnboardingWizard({ initial }: { initial: Initial }) {
                   this machine. Nothing leaves your computer except the calls that fetch your data.
                 </p>
                 <p className="mt-3">
-                  To pull in your accounts, budgetr uses <b>Plaid</b> (the bank-connection service).
+                  To pull in your accounts, budgetr uses <b>Plaid</b>  (the bank-connection service).
                   You&apos;ll bring your own free Plaid keys — this takes about 5 minutes.
                 </p>
                 <p className="mt-3 inline-flex items-center gap-2 text-[var(--jade)]">

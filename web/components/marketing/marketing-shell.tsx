@@ -48,7 +48,7 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
               Pricing
             </Link>
             <Link href="/getting-started" className="hover:text-[var(--paper)]">
-              Getting started
+              Getting Started
             </Link>
             <a href={SITE.repoUrl} className="hover:text-[var(--paper)]" target="_blank" rel="noopener noreferrer">
               GitHub

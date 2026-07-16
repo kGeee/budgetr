@@ -260,7 +260,7 @@ export function CategoryChart({ data }: { data: { category: string; total: numbe
   const top = data.slice(0, 8);
   const total = top.reduce((s, d) => s + d.total, 0);
   return (
-    <div className="flex flex-col items-center justify-center gap-6 sm:flex-row sm:gap-8">
+    <div className="flex min-w-0 flex-col items-center justify-center gap-6 sm:flex-row sm:gap-8">
       <div className="relative w-full max-w-[190px] shrink-0">
         <ResponsiveContainer width="100%" height={190}>
           <PieChart>
@@ -291,7 +291,7 @@ export function CategoryChart({ data }: { data: { category: string; total: numbe
           </span>
         </div>
       </div>
-      <ul className="w-full flex-1 space-y-2 text-sm sm:max-w-[260px]">
+      <ul className="w-full min-w-0 flex-1 space-y-2 text-sm sm:max-w-[260px]">
         {top.map((d, i) => (
           <li key={d.category} className="flex items-center justify-between gap-4">
             <span className="flex min-w-0 items-center gap-2.5 text-[var(--muted)]">

@@ -134,7 +134,7 @@ export default async function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <CashflowCard data={cashflow} breakdown={cashflowBreakdown} />
 
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2 min-w-0">
           <CardHeader>
             <CardTitle>Spending · 30 days</CardTitle>
           </CardHeader>

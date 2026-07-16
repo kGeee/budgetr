@@ -13,7 +13,7 @@
  *      and long singles classifyOptionLegs recognizes.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, CalendarClock, Layers, Sigma } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { PIE_COLORS } from "@/components/charts";
@@ -32,7 +32,7 @@ import {
   type RiskLevel,
 } from "@/lib/options";
 import { computeGreeks } from "@/lib/greeks";
-import { CONTRACT_SIZE, type PayoffLeg } from "@/lib/payoff";
+import { analyzePayoff, CONTRACT_SIZE, type PayoffAnalysis, type PayoffLeg } from "@/lib/payoff";
 import { expectedMove, probabilityOfProfit } from "@/lib/option-analytics";
 import { PayoffDiagram } from "@/components/payoff-diagram";
 import type { HoldingRow } from "@/components/portfolio-view";
@@ -137,16 +137,36 @@ function ExpirationCalendar({
   colorByUnderlying: Record<string, string>;
   priceFor: (u: string) => number | null;
 }) {
-  // Group legs by expiry, ascending (soonest first).
+  // Group legs by expiry (soonest first), then consolidate each expiry's legs by
+  // underlying so a ticker's positions read as one cluster — and name the
+  // structure (e.g. "Bull call spread") when classifyOptionLegs recognizes it.
   const groups = useMemo(() => {
-    const map = new Map<string, Leg[]>();
+    const byExpiry = new Map<string, Leg[]>();
     for (const leg of parsed) {
-      const arr = map.get(leg.p.expiry);
+      const arr = byExpiry.get(leg.p.expiry);
       if (arr) arr.push(leg);
-      else map.set(leg.p.expiry, [leg]);
+      else byExpiry.set(leg.p.expiry, [leg]);
     }
-    return Array.from(map.entries())
-      .map(([expiry, legs]) => ({ expiry, legs, dte: daysToExpiry(expiry) }))
+    return Array.from(byExpiry.entries())
+      .map(([expiry, legs]) => {
+        const byUnderlying = new Map<string, Leg[]>();
+        for (const leg of legs) {
+          const arr = byUnderlying.get(leg.p.underlying);
+          if (arr) arr.push(leg);
+          else byUnderlying.set(leg.p.underlying, [leg]);
+        }
+        const underlyings = Array.from(byUnderlying.entries())
+          .map(([underlying, uLegs]) => {
+            const structures = classifyOptionLegs(
+              uLegs.map(({ h, p }) => ({ parsed: p, quantity: h.quantity, costBasis: h.costBasis })),
+            );
+            // Only surface a label when the legs form one clean structure.
+            const label = structures.length === 1 ? structures[0].label : null;
+            return { underlying, legs: uLegs, label };
+          })
+          .sort((a, b) => a.underlying.localeCompare(b.underlying));
+        return { expiry, underlyings, dte: daysToExpiry(expiry) };
+      })
       .sort((a, b) => a.dte - b.dte);
   }, [parsed]);
 
@@ -162,7 +182,7 @@ function ExpirationCalendar({
         </span>
       </div>
       <ul className="divide-y divide-line/60">
-        {groups.map(({ expiry, legs, dte }) => {
+        {groups.map(({ expiry, underlyings, dte }) => {
           const level = riskLevel(dte);
           const rs = RISK_STYLE[level];
           return (
@@ -179,42 +199,55 @@ function ExpirationCalendar({
                   {rs.label}
                 </span>
               </div>
-              <ul className="mt-2.5 flex flex-wrap gap-2">
-                {legs.map(({ h, p }) => {
-                  const flag = optionRiskFlag(p, h.quantity, priceFor(p.underlying), dte);
-                  const long = (h.quantity ?? 0) >= 0;
-                  // Quantity is stored in shares (100/contract) — show contracts.
-                  const contracts = Math.abs(h.quantity ?? 0) / CONTRACT_SIZE;
-                  return (
-                    <li
-                      key={h.id}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-line/60 bg-[var(--panel)]/50 px-2 py-1 text-xs"
-                    >
+              <div className="mt-2.5 space-y-2">
+                {underlyings.map(({ underlying, legs, label }) => (
+                  <div key={underlying} className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                    <span className="inline-flex items-center gap-1.5">
                       <span
                         className="inline-block h-1.5 w-1.5 shrink-0 rounded-sm"
-                        style={{ background: colorByUnderlying[p.underlying] }}
+                        style={{ background: colorByUnderlying[underlying] }}
                       />
-                      <span className="font-medium text-[var(--brass)]">{p.underlying}</span>
-                      <span className={`mono ${long ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
-                        {long ? "+" : "−"}
-                        {contracts}
-                      </span>
-                      <span className="text-[var(--muted)]">
-                        {formatStrike(p.strike)} {p.right}
-                      </span>
-                      {flag && (
-                        <span
-                          title={FLAG_LABEL[flag]}
-                          className="inline-flex items-center gap-1 rounded-sm bg-[var(--coral)]/15 px-1 py-0.5 text-[10px] uppercase tracking-wide text-[var(--coral)]"
-                        >
-                          <AlertTriangle size={9} />
-                          {flag === "assignment" ? "Assign" : "Worthless"}
+                      <span className="font-medium text-[var(--brass)]">{underlying}</span>
+                      {label && (
+                        <span className="rounded-full border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                          {label}
                         </span>
                       )}
-                    </li>
-                  );
-                })}
-              </ul>
+                    </span>
+                    <ul className="flex flex-wrap gap-1.5">
+                      {legs.map(({ h, p }) => {
+                        const flag = optionRiskFlag(p, h.quantity, priceFor(p.underlying), dte);
+                        const long = (h.quantity ?? 0) >= 0;
+                        // Quantity is stored in shares (100/contract) — show contracts.
+                        const contracts = Math.abs(h.quantity ?? 0) / CONTRACT_SIZE;
+                        return (
+                          <li
+                            key={h.id}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-line/60 bg-[var(--panel)]/50 px-2 py-1 text-xs"
+                          >
+                            <span className={`mono ${long ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
+                              {long ? "+" : "−"}
+                              {contracts}
+                            </span>
+                            <span className="text-[var(--muted)]">
+                              {formatStrike(p.strike)} {p.right}
+                            </span>
+                            {flag && (
+                              <span
+                                title={FLAG_LABEL[flag]}
+                                className="inline-flex items-center gap-1 rounded-sm bg-[var(--coral)]/15 px-1 py-0.5 text-[10px] uppercase tracking-wide text-[var(--coral)]"
+                              >
+                                <AlertTriangle size={9} />
+                                {flag === "assignment" ? "Assign" : "Worthless"}
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ))}
+              </div>
             </li>
           );
         })}
@@ -225,20 +258,22 @@ function ExpirationCalendar({
 
 // ── Spread P&L ──────────────────────────────────────────────────────────────
 
-type SpreadCard = {
-  underlying: string;
+type ExpiryView = {
+  expiry: string;
+  dte: number;
   label: string;
   detail: string;
-  maxProfit: number | null;
-  maxProfitUnbounded: boolean;
-  maxLoss: number | null;
-  maxLossUnbounded: boolean;
-  breakevens: number[];
   payoffLegs: PayoffLeg[];
-  currentPrice: number | null;
+  analysis: PayoffAnalysis;
+  hasEconomics: boolean;
   pop: number | null;
   expMove: number | null;
-  dte: number;
+};
+
+type PositionCard = {
+  underlying: string;
+  spot: number | null;
+  expiries: ExpiryView[];
 };
 
 function SpreadPnl({
@@ -254,62 +289,76 @@ function SpreadPnl({
   ivByOcc: Record<string, number>;
   priceFor: (u: string) => number | null;
 }) {
-  // Classify per underlying, keeping only structures with computable economics.
-  const cards = useMemo<SpreadCard[]>(() => {
+  // One consolidated card per underlying: group its legs by expiry, and for each
+  // expiry sum ALL of that expiry's legs (every strike, calls + puts) into a
+  // single payoff. Keep only underlyings with at least one costed expiry.
+  const cards = useMemo<PositionCard[]>(() => {
     const byUnderlying = new Map<string, Leg[]>();
     for (const leg of parsed) {
       const arr = byUnderlying.get(leg.p.underlying);
       if (arr) arr.push(leg);
       else byUnderlying.set(leg.p.underlying, [leg]);
     }
-    const out: SpreadCard[] = [];
+
+    const out: PositionCard[] = [];
     for (const [underlying, legs] of byUnderlying) {
       const spot = priceFor(underlying);
-      const structures = classifyOptionLegs(
-        legs.map(({ h, p }) => ({ parsed: p, quantity: h.quantity, costBasis: h.costBasis })),
-      );
-      for (const st of structures) {
-        const hasEconomics =
-          st.maxProfit != null || st.maxLoss != null || st.maxProfitUnbounded || st.maxLossUnbounded;
-        if (!hasEconomics || !st.payoffLegs) continue;
 
-        // Representative IV for the model-based estimates: the leg nearest spot.
-        const legParsed = st.legIndexes.map((i) => legs[i]?.p).filter(Boolean) as ParsedOption[];
-        const ivs = legParsed
-          .map((p) => ({ p, iv: ivByOcc[p.occ] }))
+      const byExpiry = new Map<string, Leg[]>();
+      for (const leg of legs) {
+        const arr = byExpiry.get(leg.p.expiry);
+        if (arr) arr.push(leg);
+        else byExpiry.set(leg.p.expiry, [leg]);
+      }
+
+      const expiries: ExpiryView[] = [];
+      for (const [expiry, expLegs] of byExpiry) {
+        const payoffLegs: PayoffLeg[] = expLegs.map(({ h, p }) => ({
+          parsed: p,
+          quantity: h.quantity,
+          costBasis: h.costBasis,
+        }));
+        const analysis = analyzePayoff(payoffLegs);
+        const hasEconomics =
+          analysis.maxProfit != null ||
+          analysis.maxLoss != null ||
+          analysis.maxProfitUnbounded ||
+          analysis.maxLossUnbounded;
+
+        // Name the expiry's legs when they form one clean structure.
+        const structures = classifyOptionLegs(
+          expLegs.map(({ h, p }) => ({ parsed: p, quantity: h.quantity, costBasis: h.costBasis })),
+        );
+        const single = structures.length === 1 ? structures[0] : null;
+        const label = single ? single.label : `${expLegs.length}-leg position`;
+        const detail = single ? single.detail : formatOptionExpiry(expiry);
+
+        // Representative IV for the model estimates: the leg nearest spot.
+        const ivs = expLegs
+          .map(({ p }) => ({ p, iv: ivByOcc[p.occ] }))
           .filter((x): x is { p: ParsedOption; iv: number } => typeof x.iv === "number" && x.iv > 0);
         const iv =
           spot != null && ivs.length
             ? ivs.slice().sort((a, b) => Math.abs(a.p.strike - spot) - Math.abs(b.p.strike - spot))[0].iv
             : (ivs[0]?.iv ?? null);
-
-        const dte = Math.max(0, daysToExpiry(legParsed[0]?.expiry ?? ""));
+        const dte = Math.max(0, daysToExpiry(expiry));
         const T = dte / 365;
-        const analysis = {
-          maxProfit: st.maxProfit ?? null,
-          maxProfitUnbounded: st.maxProfitUnbounded ?? false,
-          maxLoss: st.maxLoss ?? null,
-          maxLossUnbounded: st.maxLossUnbounded ?? false,
-          breakevens: st.breakevens ?? [],
-          netDebit: 0,
-        };
 
-        out.push({
-          underlying,
-          label: st.label,
-          detail: st.detail,
-          maxProfit: st.maxProfit ?? null,
-          maxProfitUnbounded: st.maxProfitUnbounded ?? false,
-          maxLoss: st.maxLoss ?? null,
-          maxLossUnbounded: st.maxLossUnbounded ?? false,
-          breakevens: st.breakevens ?? [],
-          payoffLegs: st.payoffLegs,
-          currentPrice: spot,
-          pop: probabilityOfProfit(st.payoffLegs, analysis, spot, iv, T),
-          expMove: expectedMove(spot, iv, T),
+        expiries.push({
+          expiry,
           dte,
+          label,
+          detail,
+          payoffLegs,
+          analysis,
+          hasEconomics,
+          pop: probabilityOfProfit(payoffLegs, analysis, spot, iv, T),
+          expMove: expectedMove(spot, iv, T),
         });
       }
+
+      expiries.sort((a, b) => a.dte - b.dte);
+      if (expiries.some((e) => e.hasEconomics)) out.push({ underlying, spot, expiries });
     }
     return out;
   }, [parsed, ivByOcc, priceFor]);
@@ -323,74 +372,150 @@ function SpreadPnl({
         <span className="text-xs text-[var(--muted)]">payoff at expiry</span>
       </div>
       <div className="grid gap-4 p-6 lg:grid-cols-2">
-        {cards.map((c, i) => {
-          const rr =
-            c.maxProfit != null && c.maxLoss != null && c.maxLoss !== 0
-              ? c.maxProfit / c.maxLoss
-              : null;
-          return (
-            <div
-              key={`${c.underlying}:${i}`}
-              className="rounded-[var(--radius)] border border-line bg-[var(--panel)]/40 p-4"
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className="inline-block h-2 w-2 shrink-0 rounded-sm"
-                  style={{ background: colorByUnderlying[c.underlying] }}
-                />
-                <span className="font-medium text-[var(--brass)]">{c.underlying}</span>
-                <span className="text-sm text-[var(--paper)]">{c.label}</span>
-                {c.dte > 0 && (
-                  <span className="ml-auto mono text-[10px] text-[var(--muted)]">{c.dte}d</span>
-                )}
-              </div>
-              <p className="mt-0.5 text-xs text-[var(--muted)]">{c.detail}</p>
-
-              <PayoffDiagram
-                legs={c.payoffLegs}
-                currentPrice={c.currentPrice}
-                breakevens={c.breakevens}
-                className="mt-3"
-              />
-
-              <div className="mt-2 grid grid-cols-2 gap-3">
-                <Metric
-                  label="Max profit"
-                  value={c.maxProfit}
-                  currency={currency}
-                  tone="jade"
-                  unbounded={c.maxProfitUnbounded}
-                />
-                <Metric
-                  label="Max loss"
-                  value={c.maxLoss != null ? -c.maxLoss : null}
-                  currency={currency}
-                  tone="coral"
-                  unbounded={c.maxLossUnbounded}
-                />
-              </div>
-
-              <div className="mt-3 space-y-1 border-t border-line/60 pt-2.5 text-xs">
-                <Row label={c.breakevens.length > 1 ? "Breakevens" : "Breakeven"}>
-                  {c.breakevens.length
-                    ? c.breakevens.map((b) => formatStrike(Number(b.toFixed(2)))).join(" · ")
-                    : "—"}
-                </Row>
-                <Row label="Reward : risk">{rr != null ? `${rr.toFixed(2)}×` : "—"}</Row>
-                <Row label="Prob. of profit">
-                  {c.pop != null ? `${(c.pop * 100).toFixed(0)}%` : "—"}
-                </Row>
-                <Row label="Expected move (1σ)">
-                  {c.expMove != null && c.currentPrice != null
-                    ? `±${formatCurrency(c.expMove, currency)}`
-                    : "—"}
-                </Row>
-              </div>
-            </div>
-          );
-        })}
+        {cards.map((c) => (
+          <PositionPayoffCard
+            key={c.underlying}
+            card={c}
+            currency={currency}
+            color={colorByUnderlying[c.underlying]}
+          />
+        ))}
       </div>
     </Card>
+  );
+}
+
+/**
+ * One ticker's consolidated payoff. Defaults to the nearest expiry and lets you
+ * switch — each expiry shows a single curve summing all of that expiry's legs.
+ */
+function PositionPayoffCard({
+  card,
+  currency,
+  color,
+}: {
+  card: PositionCard;
+  currency: string;
+  color: string;
+}) {
+  const { underlying, spot, expiries } = card;
+  // Default to the nearest expiry with computable economics.
+  const defaultExpiry = (
+    expiries.find((e) => e.hasEconomics && e.dte >= 0) ??
+    expiries.find((e) => e.hasEconomics) ??
+    expiries[0]
+  ).expiry;
+  const [selected, setSelected] = useState(defaultExpiry);
+  const view = expiries.find((e) => e.expiry === selected) ?? expiries[0];
+  const { analysis } = view;
+  const rr =
+    analysis.maxProfit != null && analysis.maxLoss != null && analysis.maxLoss !== 0
+      ? analysis.maxProfit / analysis.maxLoss
+      : null;
+
+  return (
+    <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)]/40 p-4">
+      <div className="flex items-center gap-2">
+        <span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ background: color }} />
+        <span className="font-medium text-[var(--brass)]">{underlying}</span>
+        <span className="text-sm text-[var(--paper)]">{view.label}</span>
+        {view.dte > 0 && (
+          <span className="ml-auto mono text-[10px] text-[var(--muted)]">{view.dte}d</span>
+        )}
+      </div>
+      <p className="mt-0.5 text-xs text-[var(--muted)]">{view.detail}</p>
+
+      <ExpirySelector expiries={expiries} selected={view.expiry} onSelect={setSelected} />
+
+      <PayoffDiagram
+        legs={view.payoffLegs}
+        currentPrice={spot}
+        breakevens={analysis.breakevens}
+        className="mt-3"
+      />
+
+      <div className="mt-2 grid grid-cols-2 gap-3">
+        <Metric
+          label="Max profit"
+          value={analysis.maxProfit}
+          currency={currency}
+          tone="jade"
+          unbounded={analysis.maxProfitUnbounded}
+        />
+        <Metric
+          label="Max loss"
+          value={analysis.maxLoss != null ? -analysis.maxLoss : null}
+          currency={currency}
+          tone="coral"
+          unbounded={analysis.maxLossUnbounded}
+        />
+      </div>
+
+      <div className="mt-3 space-y-1 border-t border-line/60 pt-2.5 text-xs">
+        <Row label={analysis.breakevens.length > 1 ? "Breakevens" : "Breakeven"}>
+          {analysis.breakevens.length
+            ? analysis.breakevens.map((b) => formatStrike(Number(b.toFixed(2)))).join(" · ")
+            : "—"}
+        </Row>
+        <Row label="Reward : risk">{rr != null ? `${rr.toFixed(2)}×` : "—"}</Row>
+        <Row label="Prob. of profit">{view.pop != null ? `${(view.pop * 100).toFixed(0)}%` : "—"}</Row>
+        <Row label="Expected move (1σ)">
+          {view.expMove != null && spot != null ? `±${formatCurrency(view.expMove, currency)}` : "—"}
+        </Row>
+      </div>
+    </div>
+  );
+}
+
+/** Expiration selector — chip buttons, collapsing to a dropdown when there are many. */
+function ExpirySelector({
+  expiries,
+  selected,
+  onSelect,
+}: {
+  expiries: ExpiryView[];
+  selected: string;
+  onSelect: (expiry: string) => void;
+}) {
+  if (expiries.length < 2) return null;
+  if (expiries.length > 5) {
+    return (
+      <select
+        value={selected}
+        onChange={(e) => onSelect(e.target.value)}
+        aria-label="Expiration"
+        className="mt-2 w-full rounded-md border border-line bg-[var(--panel)] px-2 py-1.5 text-xs text-[var(--paper)]"
+      >
+        {expiries.map((e) => (
+          <option key={e.expiry} value={e.expiry}>
+            {formatOptionExpiry(e.expiry)} · {e.dte}d
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {expiries.map((e) => {
+        const active = e.expiry === selected;
+        return (
+          <button
+            key={e.expiry}
+            type="button"
+            onClick={() => onSelect(e.expiry)}
+            aria-pressed={active}
+            className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+              active
+                ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
+                : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+            }`}
+          >
+            {formatOptionExpiry(e.expiry)}
+            <span className="mono ml-1.5 text-[var(--muted)]">{e.dte}d</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

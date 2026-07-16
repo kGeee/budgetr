@@ -48,7 +48,7 @@ export function CashflowCard({
   const maxWeek = Math.max(1, ...weeks.map((w) => Math.max(w.income, w.expenses)));
 
   return (
-    <Card className="lg:col-span-3">
+    <Card className="lg:col-span-3 min-w-0">
       <CardHeader>
         <CardTitle>Income vs spending</CardTitle>
         {row && (
