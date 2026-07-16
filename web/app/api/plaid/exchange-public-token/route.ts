@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { plaid, PLAID_ENV } from "@/lib/plaid";
+import { getPlaidClient, getPlaidEnv } from "@/lib/plaid";
 import { db } from "@/db";
 import { items } from "@/db/schema";
 import { encrypt } from "@/lib/crypto";
@@ -12,16 +12,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing public_token" }, { status: 400 });
     }
 
-    const exchange = await plaid.itemPublicTokenExchange({ public_token });
+    const exchange = await getPlaidClient().itemPublicTokenExchange({ public_token });
     const accessToken = exchange.data.access_token;
     const itemId = exchange.data.item_id;
+    const plaidEnv = getPlaidEnv();
     const now = new Date();
 
     db.insert(items)
       .values({
         id: itemId,
         accessToken: encrypt(accessToken),
-        plaidEnv: PLAID_ENV,
+        plaidEnv,
         institutionId: institution?.institution_id ?? null,
         institutionName: institution?.name ?? null,
         status: "active",
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
         target: items.id,
         set: {
           accessToken: encrypt(accessToken),
-          plaidEnv: PLAID_ENV,
+          plaidEnv,
           status: "active",
           error: null,
           updatedAt: now,

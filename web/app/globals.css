@@ -70,6 +70,60 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Native form controls do not reliably inherit foreground color (notably
+   WebKit popovers and autofill). Keep every field legible in this single dark
+   theme, including option menus rendered outside the normal DOM surface. */
+input,
+select,
+textarea {
+  color: var(--paper);
+  background-color: var(--ink);
+  caret-color: var(--paper);
+  color-scheme: dark;
+}
+
+input:hover,
+input:focus,
+select:hover,
+select:focus,
+textarea:hover,
+textarea:focus {
+  color: var(--paper);
+  background-color: var(--ink);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--faint);
+  opacity: 1;
+}
+
+select option,
+select optgroup {
+  background: var(--panel-2);
+  color: var(--paper);
+}
+
+select option:hover,
+select option:focus,
+select option:checked {
+  background: var(--line-strong);
+  color: var(--paper);
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--paper);
+  box-shadow: 0 0 0 1000px var(--panel-2) inset;
+}
+
 /* Atmospheric base: a soft jade aurora bleeding from the top-left,
    plus a faint grain so the dark canvas reads like paper, not a void. */
 body::before {

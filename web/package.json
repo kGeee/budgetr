@@ -1,20 +1,20 @@
 {
   "name": "budgetr",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "budgetr — personal finance, self-hosted",
   "author": "budgetr",
   "main": "desktop/electron/main.js",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node scripts/run-next.mjs dev",
+    "build": "node scripts/run-next.mjs build",
+    "start": "node scripts/run-next.mjs start",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
     "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts",
     "dev:electron": "npm run web:rebuild && electron desktop/electron/main.js",
-    "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run electron:rebuild && CSC_IDENTITY_AUTO_DISCOVERY=${CSC_IDENTITY_AUTO_DISCOVERY:-false} electron-builder --mac",
+    "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run electron:rebuild && CSC_IDENTITY_AUTO_DISCOVERY=${CSC_IDENTITY_AUTO_DISCOVERY:-false} electron-builder --mac --publish never",
     "electron:rebuild": "electron-rebuild -f -o better-sqlite3",
     "web:rebuild": "npm rebuild better-sqlite3",
     "db:generate": "drizzle-kit generate",
@@ -25,12 +25,16 @@
     "db:studio": "drizzle-kit studio",
     "sync": "tsx --env-file-if-exists=.env.local scripts/sync.ts"
   },
+  "engines": {
+    "node": ">=20.9"
+  },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.3.0",
     "drizzle-orm": "^0.45.2",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^1.17.0",
     "next": "16.2.6",
     "plaid": "^42.2.0",
@@ -77,7 +81,10 @@
     ],
     "afterPack": "desktop/scripts/afterpack-sign.js",
     "mac": {
-      "target": "dmg",
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.finance",
       "icon": "desktop/build/icon.icns",
       "artifactName": "budgetr-mac.${ext}",
@@ -87,6 +94,11 @@
     "dmg": {
       "title": "budgetr",
       "artifactName": "budgetr-mac.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "kGeee",
+      "repo": "budgetr"
     }
   }
 }

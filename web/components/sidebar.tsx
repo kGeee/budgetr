@@ -27,7 +27,7 @@ import {
 import { formatCurrency } from "@/lib/utils";
 
 const nav: { href: string; label: string; icon: LucideIcon }[] = [
-  { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/overview", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboards", label: "Dashboards", icon: LayoutGrid },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
@@ -92,7 +92,7 @@ export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
     <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-line md:flex">
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-7">
         <Link
-          href="/"
+          href="/overview"
           className="group mb-9 flex items-center gap-3 px-2 transition-opacity hover:opacity-90"
         >
           <span className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-lg text-[var(--brass)] shadow-[var(--elev-1)] transition-colors duration-200 group-hover:border-[var(--brass)]">
@@ -210,7 +210,7 @@ export function MobileNav() {
       >
         <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <Link
-            href="/"
+            href="/overview"
             onClick={() => setOpen(false)}
             className="flex items-center gap-3"
           >

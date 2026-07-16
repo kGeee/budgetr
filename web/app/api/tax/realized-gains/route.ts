@@ -16,9 +16,9 @@ function round(n: number): string {
 /**
  * GET /api/tax/realized-gains?year=2024
  *
- * Streams a capital-gains tax worksheet as CSV (one row per realized lot, IRS
- * Form 8949-shaped) built from the reconstructed FIFO/LIFO/spec-ID lots. Omit
- * `year` to export every realized lot on record.
+ * Streams a capital-gains worksheet as CSV built from the reconstructed
+ * FIFO/LIFO/spec-ID lots. Section 1256 rows are labeled for Form 6781 rather
+ * than implied to be ordinary Form 8949 dispositions. Omit `year` to export all.
  */
 export async function GET(req: NextRequest) {
   const yearParam = req.nextUrl.searchParams.get("year");
@@ -28,8 +28,9 @@ export async function GET(req: NextRequest) {
 
   const header = [
     "Ticker",
-    "Acquired",
-    "Sold",
+    "Position",
+    "Opened",
+    "Closed",
     "Quantity",
     "Proceeds",
     "Cost Basis",
@@ -42,13 +43,18 @@ export async function GET(req: NextRequest) {
   const rows = lots.map((l) =>
     [
       l.ticker,
+      l.position === "short" ? "Written" : "Long",
       l.openDate,
       l.closeDate,
       l.quantity,
       round(l.proceeds),
       round(l.basis),
       round(l.gain),
-      l.term === "long" ? "Long-term" : "Short-term",
+      l.section1256
+        ? "Section 1256 (60% long / 40% short)"
+        : l.term === "long"
+          ? "Long-term"
+          : "Short-term",
       l.washSale ? "W" : "",
       l.washSale && l.gain < 0 ? round(-l.gain) : "",
     ].map(csvCell).join(","),

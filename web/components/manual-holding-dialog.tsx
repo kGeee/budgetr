@@ -17,8 +17,13 @@ function Modal({ onClose, children }: { onClose: () => void; children: React.Rea
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
+      role="presentation"
     >
-      <div className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)]"
+      >
         {children}
       </div>
     </div>
@@ -118,7 +123,7 @@ export function AddManualHoldingButton() {
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value)}
-                className="h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2 text-sm outline-none focus:border-[var(--brass-dim)]"
+                className="h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2 text-sm text-[var(--paper)] outline-none transition-colors hover:text-[var(--paper)] focus:border-[var(--brass-dim)] focus:text-[var(--paper)]"
               >
                 {(mode === "tickered" ? ["crypto", "stock", "other"] : ["cash", "other"]).map((t) => (
                   <option key={t} value={t}>
@@ -471,7 +476,7 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2.5 text-sm outline-none placeholder:text-[var(--faint)] focus:border-[var(--brass-dim)] ${
+      className={`h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2.5 text-sm text-[var(--paper)] outline-none transition-colors placeholder:text-[var(--faint)] hover:text-[var(--paper)] focus:border-[var(--brass-dim)] focus:text-[var(--paper)] ${
         mono ? "mono" : ""
       }`}
     />

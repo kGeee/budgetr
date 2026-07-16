@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import {
   AllocationDonut,
@@ -174,6 +175,32 @@ function dayChangePct(h: HoldingRow, quotes: Record<string, LiveQuote>): number 
     return ((q.price - q.prevClose) / q.prevClose) * 100;
   }
   return null;
+}
+
+/**
+ * Listed options exist only for individual equities and ETFs — never for cash,
+ * crypto, mutual/fixed-income funds, or an option position itself. Gates the
+ * "Options" desk chip so it stops appearing on rows like USD cash or SOL-USD.
+ */
+function isOptionable(h: HoldingRow): boolean {
+  if (!h.ticker || parseOccSymbol(h.ticker)) return false;
+  return h.securityType === "equity" || h.securityType === "etf";
+}
+
+/**
+ * Plaid security names arrive as "Issuer - Product". A few issuers repeat the
+ * same words on both sides (e.g. "SPDR S&P 500 ETF TRUST - SPDR S&P 500 ETF
+ * Trust"); collapse only those to the single name. Names whose halves genuinely
+ * differ ("Vanguard Index Funds - Vanguard S&P 500 ETF") are left untouched.
+ */
+function cleanSecurityName(name: string | null | undefined): string | null {
+  if (!name) return name ?? null;
+  const parts = name.split(" - ");
+  if (parts.length === 2) {
+    const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+    if (norm(parts[0]) === norm(parts[1])) return parts[1].trim();
+  }
+  return name;
 }
 
 function effectiveValue(h: HoldingRow, quotes: Record<string, LiveQuote>): number {
@@ -600,12 +627,27 @@ function PortfolioInner({
   const gain = costedValue - totalCost;
   const gainPct = totalCost !== 0 ? (gain / totalCost) * 100 : 0;
   const uncostedValue = total - costedValue;
+  const dayPriced = holdings
+    .map((h) => ({ value: effectiveValue(h, quotes), change: dayChangeValue(h, quotes) }))
+    .filter((row): row is { value: number; change: number } => row.change != null);
+  const dayChange = dayPriced.reduce((sum, row) => sum + row.change, 0);
+  const priorDayValue = dayPriced.reduce((sum, row) => sum + row.value - row.change, 0);
+  const dayChangePctTotal = priorDayValue !== 0 ? (dayChange / priorDayValue) * 100 : 0;
+  const dayCoverage = total !== 0
+    ? (dayPriced.reduce((sum, row) => sum + Math.abs(row.value), 0) / Math.abs(total)) * 100
+    : 0;
 
   return (
     <div className="space-y-7">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Market value" value={total} big />
-        <Stat label="Cost basis" value={totalCost} />
+        <Stat
+          label="Day change"
+          value={dayChange}
+          signed
+          pct={dayChangePctTotal}
+          detail={`${Math.min(dayCoverage, 100).toFixed(0)}% of value priced today`}
+        />
         <Stat
           label="Unrealized gain"
           value={gain}
@@ -613,6 +655,15 @@ function PortfolioInner({
           pct={gainPct}
           hint="View breakdown"
           onClick={() => setShowBreakdown(true)}
+        />
+        <Stat
+          label="Cost basis"
+          value={totalCost}
+          detail={
+            uncostedValue > 0.005
+              ? `${formatCurrency(uncostedValue)} has no basis`
+              : "All positions costed"
+          }
         />
       </div>
 
@@ -627,22 +678,6 @@ function PortfolioInner({
         />
       )}
 
-      <SectorAllocation
-        allocation={allocation}
-        total={allocationTotal}
-        activeSector={sectorFilter}
-        onSelect={setSectorFilter}
-      />
-
-      <AssetAllocation
-        rows={allocRows}
-        total={total}
-        targets={allocationTargets}
-        assetClassOverrides={assetClassOverrides}
-        geographyOverrides={geographyOverrides}
-        knownSectors={sectorOptions}
-      />
-
       <Card className="p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <span className="eyebrow">Portfolio value</span>
@@ -655,14 +690,29 @@ function PortfolioInner({
 
       <BenchmarkComparison comparison={comparison} />
 
+      <AssetAllocation
+        rows={allocRows}
+        total={total}
+        targets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
+        knownSectors={sectorOptions}
+      />
+
+      <SectorAllocation
+        allocation={allocation}
+        total={allocationTotal}
+        activeSector={sectorFilter}
+        onSelect={setSectorFilter}
+      />
 
       <Card className="overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <span className="eyebrow">Holdings</span>
             <StatusBadge status={status} />
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             {sectorFilter ? (
               <button
                 onClick={() => setSectorFilter(null)}
@@ -679,11 +729,29 @@ function PortfolioInner({
                 {holdings.length} {holdings.length === 1 ? "position" : "positions"}
               </span>
             )}
-            <ColumnsMenu visible={visibleCols} onToggle={toggleColumn} onReset={resetColumns} />
+            {/* Column controls drive the table only; the mobile card view ignores them. */}
+            <span className="hidden md:inline-flex">
+              <ColumnsMenu visible={visibleCols} onToggle={toggleColumn} onReset={resetColumns} />
+            </span>
             <AddManualHoldingButton />
           </div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Mobile: a compact card per position (the wide table can't fit a phone). */}
+        <ul className="divide-y divide-line/60 md:hidden">
+          {items.map((it) =>
+            it.kind === "holding" ? (
+              <HoldingCardMobile key={it.h.id} h={it.h} m={it.m} />
+            ) : (
+              <OptionGroupCardMobile key={`optc:${it.underlying}`} underlying={it.underlying} legs={it.legs} m={it.m} />
+            ),
+          )}
+          {holdings.length === 0 && (
+            <li className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+              No holdings yet. Connect a brokerage account and hit Sync.
+            </li>
+          )}
+        </ul>
+        <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-line text-left">
@@ -827,7 +895,22 @@ function HoldingRowView({
           <div className="flex flex-col gap-1">
             <span className="inline-flex items-center gap-2">
               <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-              <span className="text-[var(--muted)]">{h.securityName}</span>
+              {isOptionable(h) && (
+                <Link
+                  href={`/investments/options/${encodeURIComponent(h.ticker as string)}`}
+                  title={`Options desk for ${h.ticker}`}
+                  className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+                >
+                  Options
+                  <ArrowUpRight size={10} />
+                </Link>
+              )}
+              <span
+                className="max-w-[240px] truncate text-[var(--muted)]"
+                title={h.securityName ?? undefined}
+              >
+                {cleanSecurityName(h.securityName)}
+              </span>
               {h.manual && (
                 <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
                   {h.securityType ?? "manual"}
@@ -895,6 +978,101 @@ function HoldingRowView({
         </tr>
       )}
     </>
+  );
+}
+
+/** Shared "options →" chip used by the mobile holding cards. */
+function OptionsChip({ ticker }: { ticker: string }) {
+  return (
+    <Link
+      href={`/investments/options/${encodeURIComponent(ticker)}`}
+      title={`Options desk for ${ticker}`}
+      className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+    >
+      options
+      <ArrowUpRight size={10} />
+    </Link>
+  );
+}
+
+const signedColor = (n: number | null) =>
+  n == null ? "text-[var(--faint)]" : n >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]";
+const fmtPct = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
+const fmtSigned = (n: number | null, currency: string) =>
+  n == null ? "—" : `${n >= 0 ? "+" : "−"}${formatMoney(Math.abs(n), currency)}`;
+
+/** Metric row shared by the mobile cards: right value, colored day %, and a summary line. */
+function MobileCardBody({ m }: { m: RowMetrics }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
+      {m.qty != null && (
+        <span>
+          Qty <span className="mono text-[var(--paper)]/80">{m.qty.toLocaleString()}</span>
+        </span>
+      )}
+      <span>
+        P&amp;L <span className={`mono ${signedColor(m.pnl)}`}>{fmtSigned(m.pnl, m.currency)}</span>
+      </span>
+      <span className="mono">{m.weight.toFixed(1)}%</span>
+    </div>
+  );
+}
+
+/** Compact card for one holding — the mobile stand-in for the wide table row. */
+function HoldingCardMobile({ h, m }: { h: HoldingRow; m: RowMetrics }) {
+  return (
+    <li className="px-4 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+            {isOptionable(h) && <OptionsChip ticker={h.ticker as string} />}
+          </div>
+          {h.securityName && (
+            <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+              {cleanSecurityName(h.securityName)}
+            </p>
+          )}
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="mono text-[var(--paper)]">{formatMoney(m.value, m.currency)}</p>
+          <p className={`mono text-xs ${signedColor(m.day)}`}>{fmtPct(m.day)}</p>
+        </div>
+      </div>
+      <MobileCardBody m={m} />
+    </li>
+  );
+}
+
+/** Compact card for a grouped option position (the mobile stand-in for OptionGroupRow). */
+function OptionGroupCardMobile({
+  underlying,
+  legs,
+  m,
+}: {
+  underlying: string;
+  legs: HoldingRow[];
+  m: RowMetrics;
+}) {
+  return (
+    <li className="px-4 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-[var(--brass)]">{underlying}</span>
+            <OptionsChip ticker={underlying} />
+          </div>
+          <p className="mt-0.5 text-xs text-[var(--muted)]">
+            {legs.length} {legs.length === 1 ? "leg" : "legs"}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="mono text-[var(--paper)]">{formatMoney(m.value, m.currency)}</p>
+          <p className={`mono text-xs ${signedColor(m.day)}`}>{fmtPct(m.day)}</p>
+        </div>
+      </div>
+      <MobileCardBody m={m} />
+    </li>
   );
 }
 
@@ -1042,9 +1220,15 @@ function OptionGroupRow({
         <td className="py-3.5 pr-3 pl-1">
           <span className="inline-flex flex-wrap items-center gap-2">
             <span className="font-medium text-[var(--brass)]">{underlying}</span>
-            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+            <Link
+              href={`/investments/options/${encodeURIComponent(underlying)}`}
+              onClick={(e) => e.stopPropagation()}
+              title={`Options desk for ${underlying}`}
+              className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+            >
               options
-            </span>
+              <ArrowUpRight size={10} />
+            </Link>
             <span className="text-[var(--muted)]">{summary}</span>
             {Number.isFinite(soonestDte) && (
               <span
@@ -1244,7 +1428,7 @@ function GainBreakdownModal({
                   <tr key={h.id} className="border-b border-line/60 last:border-0">
                     <td className="px-5 py-2.5">
                       <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-                      <span className="ml-2 text-[var(--muted)]">{h.securityName}</span>
+                      <span className="ml-2 text-[var(--muted)]">{cleanSecurityName(h.securityName)}</span>
                     </td>
                     <td className="mono px-5 py-2.5 text-right">
                       {formatMoney(value, h.currency)}
@@ -1890,6 +2074,7 @@ function Stat({
   signed,
   pct,
   hint,
+  detail,
   onClick,
 }: {
   label: string;
@@ -1898,6 +2083,7 @@ function Stat({
   signed?: boolean;
   pct?: number;
   hint?: string;
+  detail?: string;
   onClick?: () => void;
 }) {
   const positive = value >= 0;
@@ -1922,6 +2108,7 @@ function Stat({
           {Math.abs(pct).toFixed(2)}%
         </p>
       )}
+      {detail && <p className="mt-1 text-xs text-[var(--muted)]">{detail}</p>}
     </>
   );
 

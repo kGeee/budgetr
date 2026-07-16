@@ -8,6 +8,10 @@ data. **Everything runs and stays on your machine** — the SQLite file never le
 
 ## Quick start
 
+Node.js 20.9 or newer is required by Next.js 16. The npm scripts will use a
+compatible Homebrew Node installation when an older system Node appears first
+on macOS; `BUDGETR_NODE_BINARY` can point to another compatible executable.
+
 ```bash
 cd web
 npm install

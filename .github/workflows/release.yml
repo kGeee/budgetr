@@ -74,7 +74,15 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: web/dist/budgetr-mac.dmg
+          # The DMG is the first-install download; the .zip + latest-mac.yml
+          # (+ .blockmap) are the auto-update feed electron-updater reads from
+          # the latest GitHub Release. Auto-update only activates on a
+          # Developer ID-signed & notarized build (see the signing model above).
+          files: |
+            web/dist/budgetr-mac.dmg
+            web/dist/budgetr-mac.zip
+            web/dist/latest-mac.yml
+            web/dist/*.blockmap
           generate_release_notes: true
           body: |
             **macOS (Apple Silicon / M-series only for now).** Download

@@ -81,6 +81,70 @@ describe("computeRealizedLots", () => {
     ]);
     expect(lots).toHaveLength(0); // sell has no lot to match
   });
+
+  it("realizes a written option when it is purchased to close", () => {
+    const lots = computeRealizedLots([
+      {
+        ...sell("short-open", "2025-01-02", 1, 378.78),
+        name: "PUT S & P 500 - SOLDTOOPEN",
+        quantity: 1,
+      },
+      {
+        ...buy("short-close", "2025-01-03", 1, 101.22),
+        name: "PUT S & P 500 - PURCHASETOCLOSE",
+      },
+    ]);
+
+    expect(lots).toHaveLength(1);
+    expect(lots[0]).toMatchObject({
+      position: "short",
+      proceeds: 378.78,
+      basis: 101.22,
+    });
+    expect(lots[0].gain).toBeCloseTo(277.56);
+  });
+
+  it("closes long and short options at zero when they expire", () => {
+    const longOpen = { ...buy("long-open", "2025-01-02", 1, 301.22), name: "PURCHASETOOPEN" };
+    const shortOpen = {
+      ...sell("short-open", "2025-01-02", 1, 123.78),
+      name: "SOLDTOOPEN",
+      quantity: 1,
+    };
+    const expiredLong: LedgerTxn = {
+      ...sell("long-expiry", "2025-01-03", 1, 0),
+      name: "OPTIONEXPIRATION",
+      type: "transfer",
+    };
+    const expiredShort: LedgerTxn = {
+      ...buy("short-expiry", "2025-01-03", 1, 0),
+      name: "OPTIONEXPIRATION",
+      type: "transfer",
+    };
+
+    const lots = computeRealizedLots([longOpen, shortOpen, expiredLong, expiredShort]);
+    expect(lots).toHaveLength(2);
+    expect(lots.find((l) => l.position === "long")?.gain).toBe(-301.22);
+    expect(lots.find((l) => l.position === "short")?.gain).toBe(123.78);
+  });
+
+  it("uses stored option cash amounts without applying a second contract multiplier", () => {
+    const lots = computeRealizedLots([
+      { ...buy("o", "2025-01-02", 1, 301.22), name: "PURCHASETOOPEN", price: 3 },
+      { ...sell("c", "2025-01-03", 1, 808.78), name: "SOLDTOCLOSE", price: 8.1 },
+    ]);
+    expect(lots[0].gain).toBeCloseTo(507.56);
+  });
+
+  it("splits SPXW Section 1256 gain 60% long-term and 40% short-term", () => {
+    const ticker = "SPXW250103P06000000";
+    const lots = computeRealizedLots([
+      { ...buy("o", "2025-01-02", 1, 300), ticker, name: "PURCHASETOOPEN" },
+      { ...sell("c", "2025-01-03", 1, 800), ticker, name: "SOLDTOCLOSE" },
+    ]);
+    expect(lots[0].section1256).toBe(true);
+    expect(summarize(lots)).toMatchObject({ shortTerm: 200, longTerm: 300, total: 500 });
+  });
 });
 
 describe("summaries", () => {

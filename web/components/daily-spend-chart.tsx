@@ -67,6 +67,7 @@ export function DailySpendChart({
           dataKey="spent"
           radius={[3, 3, 0, 0]}
           maxBarSize={18}
+          isAnimationActive={false}
           cursor={clickable ? "pointer" : undefined}
           onClick={
             onSelectDate

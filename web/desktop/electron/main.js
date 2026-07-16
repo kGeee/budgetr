@@ -306,7 +306,28 @@ function createWindow() {
  */
 function buildMenu() {
   const template = [
-    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+    ...(process.platform === "darwin"
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              {
+                label: "Check for Updates…",
+                click: () => checkForUpdates({ manual: true }),
+              },
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : []),
     { role: "fileMenu" },
     { role: "editMenu" },
     { role: "viewMenu" },
@@ -338,6 +359,110 @@ function buildMenu() {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// ── Auto-update ─────────────────────────────────────────────────────────────
+// electron-updater pulls new releases from the GitHub Releases feed (configured
+// via build.publish in package.json, baked into app-update.yml at pack time).
+// The app updates the whole bundle; the user's database and budgetr.env live in
+// userData and are untouched, and migrations re-run on the next launch.
+//
+// IMPORTANT: macOS auto-update (Squirrel.Mac) only works on a build signed with
+// a Developer ID and notarized. On the current ad-hoc/unsigned builds the check
+// simply errors — we swallow that (unless the user explicitly asked), so nothing
+// breaks; it starts working once the signing secrets are in place.
+let autoUpdater = null;
+let updaterWired = false;
+let manualCheck = false;
+
+function updaterLog(msg) {
+  try {
+    fs.appendFileSync(serverLogPath(), `[updater ${new Date().toISOString()}] ${msg}\n`);
+  } catch {
+    /* best effort — logging must never take the app down */
+  }
+}
+
+function initAutoUpdater() {
+  if (updaterWired) return autoUpdater;
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch (err) {
+    updaterLog(`electron-updater unavailable: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = { info: updaterLog, warn: updaterLog, error: updaterLog, debug: () => {} };
+
+  autoUpdater.on("error", (err) => {
+    updaterLog(`error: ${err && err.message ? err.message : err}`);
+    if (manualCheck) {
+      manualCheck = false;
+      dialog.showMessageBox({
+        type: "info",
+        message: "Couldn’t check for updates",
+        detail: "budgetr will try again automatically later. See server.log for details.",
+        buttons: ["OK"],
+      });
+    }
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    if (manualCheck) {
+      manualCheck = false;
+      dialog.showMessageBox({
+        type: "info",
+        message: "budgetr is up to date",
+        detail: `You’re on version ${app.getVersion()}.`,
+        buttons: ["OK"],
+      });
+    }
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    updaterLog(`update available: ${info && info.version} (downloading)`);
+  });
+
+  autoUpdater.on("update-downloaded", async (info) => {
+    manualCheck = false;
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      buttons: ["Restart now", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      message: `budgetr ${info && info.version ? info.version : ""} is ready to install`,
+      detail: "Restart to finish updating. Your data and settings are kept.",
+    });
+    if (response === 0) {
+      quitting = true;
+      stopServer();
+      autoUpdater.quitAndInstall();
+    }
+  });
+
+  updaterWired = true;
+  return autoUpdater;
+}
+
+function checkForUpdates({ manual = false } = {}) {
+  if (!app.isPackaged) {
+    if (manual) {
+      dialog.showMessageBox({
+        type: "info",
+        message: "Updates are disabled in development",
+        detail: "Run a packaged build to test auto-update.",
+        buttons: ["OK"],
+      });
+    }
+    return;
+  }
+  const updater = initAutoUpdater();
+  if (!updater) return;
+  manualCheck = manual;
+  Promise.resolve(updater.checkForUpdates()).catch((err) =>
+    updaterLog(`check failed: ${err && err.message ? err.message : err}`),
+  );
 }
 
 async function boot() {
@@ -379,6 +504,11 @@ async function boot() {
   try {
     await waitForServer(serverUrl);
     if (mainWindow) await mainWindow.loadURL(serverUrl);
+    // Check for updates once the app has settled, then every 6 hours.
+    if (app.isPackaged) {
+      setTimeout(() => checkForUpdates(), 8000);
+      setInterval(() => checkForUpdates(), 6 * 60 * 60 * 1000);
+    }
   } catch (err) {
     if (mainWindow) {
       await mainWindow.loadFile(path.join(__dirname, "loading.html"), {
