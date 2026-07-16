@@ -681,12 +681,12 @@ function PortfolioInner({
       />
 
       <Card className="overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <span className="eyebrow">Holdings</span>
             <StatusBadge status={status} />
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             {sectorFilter ? (
               <button
                 onClick={() => setSectorFilter(null)}
@@ -703,11 +703,29 @@ function PortfolioInner({
                 {holdings.length} {holdings.length === 1 ? "position" : "positions"}
               </span>
             )}
-            <ColumnsMenu visible={visibleCols} onToggle={toggleColumn} onReset={resetColumns} />
+            {/* Column controls drive the table only; the mobile card view ignores them. */}
+            <span className="hidden md:inline-flex">
+              <ColumnsMenu visible={visibleCols} onToggle={toggleColumn} onReset={resetColumns} />
+            </span>
             <AddManualHoldingButton />
           </div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Mobile: a compact card per position (the wide table can't fit a phone). */}
+        <ul className="divide-y divide-line/60 md:hidden">
+          {items.map((it) =>
+            it.kind === "holding" ? (
+              <HoldingCardMobile key={it.h.id} h={it.h} m={it.m} />
+            ) : (
+              <OptionGroupCardMobile key={`optc:${it.underlying}`} underlying={it.underlying} legs={it.legs} m={it.m} />
+            ),
+          )}
+          {holdings.length === 0 && (
+            <li className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+              No holdings yet. Connect a brokerage account and hit Sync.
+            </li>
+          )}
+        </ul>
+        <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-line text-left">
@@ -929,6 +947,100 @@ function HoldingRowView({
         </tr>
       )}
     </>
+  );
+}
+
+/** Shared "options →" chip used by the mobile holding cards. */
+function OptionsChip({ ticker }: { ticker: string }) {
+  return (
+    <Link
+      href={`/investments/options/${encodeURIComponent(ticker)}`}
+      title={`Options desk for ${ticker}`}
+      className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+    >
+      options
+      <ArrowUpRight size={10} />
+    </Link>
+  );
+}
+
+const signedColor = (n: number | null) =>
+  n == null ? "text-[var(--faint)]" : n >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]";
+const fmtPct = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
+const fmtSigned = (n: number | null, currency: string) =>
+  n == null ? "—" : `${n >= 0 ? "+" : "−"}${formatMoney(Math.abs(n), currency)}`;
+
+/** Metric row shared by the mobile cards: right value, colored day %, and a summary line. */
+function MobileCardBody({ m }: { m: RowMetrics }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
+      {m.qty != null && (
+        <span>
+          Qty <span className="mono text-[var(--paper)]/80">{m.qty.toLocaleString()}</span>
+        </span>
+      )}
+      <span>
+        P&amp;L <span className={`mono ${signedColor(m.pnl)}`}>{fmtSigned(m.pnl, m.currency)}</span>
+      </span>
+      <span className="mono">{m.weight.toFixed(1)}%</span>
+    </div>
+  );
+}
+
+/** Compact card for one holding — the mobile stand-in for the wide table row. */
+function HoldingCardMobile({ h, m }: { h: HoldingRow; m: RowMetrics }) {
+  const isOption = h.ticker ? Boolean(parseOccSymbol(h.ticker)) : false;
+  return (
+    <li className="px-4 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+            {h.ticker && !isOption && <OptionsChip ticker={h.ticker} />}
+          </div>
+          {h.securityName && (
+            <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{h.securityName}</p>
+          )}
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="mono text-[var(--paper)]">{formatMoney(m.value, m.currency)}</p>
+          <p className={`mono text-xs ${signedColor(m.day)}`}>{fmtPct(m.day)}</p>
+        </div>
+      </div>
+      <MobileCardBody m={m} />
+    </li>
+  );
+}
+
+/** Compact card for a grouped option position (the mobile stand-in for OptionGroupRow). */
+function OptionGroupCardMobile({
+  underlying,
+  legs,
+  m,
+}: {
+  underlying: string;
+  legs: HoldingRow[];
+  m: RowMetrics;
+}) {
+  return (
+    <li className="px-4 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-[var(--brass)]">{underlying}</span>
+            <OptionsChip ticker={underlying} />
+          </div>
+          <p className="mt-0.5 text-xs text-[var(--muted)]">
+            {legs.length} {legs.length === 1 ? "leg" : "legs"}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="mono text-[var(--paper)]">{formatMoney(m.value, m.currency)}</p>
+          <p className={`mono text-xs ${signedColor(m.day)}`}>{fmtPct(m.day)}</p>
+        </div>
+      </div>
+      <MobileCardBody m={m} />
+    </li>
   );
 }
 

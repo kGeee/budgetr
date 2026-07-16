@@ -831,7 +831,9 @@ function ChainTable({
                   {h}
                 </th>
               ))}
-              <th className="px-3 py-2 text-center font-medium text-[var(--paper)]">Strike</th>
+              <th className="sticky left-0 z-10 bg-[var(--panel)] px-3 py-2 text-center font-medium text-[var(--paper)] shadow-[1px_0_0_var(--line),-1px_0_0_var(--line)]">
+                  Strike
+                </th>
               {["Bid", "Ask", "Δ", "IV", "Vol", "OI"].map((h) => (
                 <th key={`p-${h}`} className="px-2 py-2 text-right font-medium">
                   {h}
@@ -858,7 +860,9 @@ function ChainTable({
                   <Cell2 value={callG} digits={2} on={callHeld} itm={callItm} />
                   <Cell2 value={call?.bid ?? null} digits={2} on={callHeld} itm={callItm} />
                   <Cell2 value={call?.ask ?? null} digits={2} on={callHeld} itm={callItm} />
-                  <td className="px-3 py-1.5 text-center mono font-medium text-[var(--paper)]">
+                  <td
+                    className={`sticky left-0 z-10 px-3 py-1.5 text-center mono font-medium text-[var(--paper)] shadow-[1px_0_0_var(--line),-1px_0_0_var(--line)] ${atSpot ? "bg-[var(--panel-2)]" : "bg-[var(--panel)]"}`}
+                  >
                     {formatStrike(k)}
                   </td>
                   <Cell2 value={put?.bid ?? null} digits={2} on={putHeld} itm={putItm} />
