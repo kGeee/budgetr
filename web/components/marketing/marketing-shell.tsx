@@ -61,7 +61,7 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
 }
 
 /** Primary purchase/download CTA — paid checkout when configured, else the free
- * GitHub download. External link (Lemon Squeezy / GitHub) so it opens directly. */
+ * GitHub download. External link (Polar / GitHub) so it opens directly. */
 export function BuyLink({ className = "", label }: { className?: string; label?: string }) {
   const paid = hasCheckout();
   const text = label ?? (paid ? `Buy · ${SITE.price}` : "Download");

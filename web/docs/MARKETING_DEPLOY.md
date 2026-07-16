@@ -1,15 +1,16 @@
-# Marketing site deployment + Lemon Squeezy
+# Marketing site deployment + Polar
 
 The public marketing site (landing, `/pricing`, `/getting-started`, `/thanks`)
 is the **same Next.js app** built in "marketing-only" mode. Purchases run through
-a **hosted Lemon Squeezy checkout** — the app itself has no license server and
-never phones home (data stays on the user's Mac). Lemon Squeezy takes payment,
-emails the license key + receipt, and redirects the buyer to `/thanks`.
+a **hosted Polar checkout** — the app itself has no license server and never
+phones home (data stays on the user's Mac). Polar (a merchant of record, so it
+handles VAT/sales tax) takes payment, issues + emails the license key, and
+redirects the buyer to `/thanks`.
 
 So there are two setup tracks, both mostly configuration:
 
-1. **Lemon Squeezy** — create the product, get the checkout URL, point its
-   redirect at `/thanks`.
+1. **Polar** — create the product, get the checkout link, point its success URL
+   at `/thanks`.
 2. **Vercel** — deploy this repo in marketing mode with the right env vars.
 
 ---
@@ -40,7 +41,7 @@ GitHub download, so the page is never a dead end.
 | Variable | Required | Purpose | Example |
 | --- | --- | --- | --- |
 | `MARKETING_ONLY` | ✅ | Enables marketing mode (build + runtime). | `1` |
-| `NEXT_PUBLIC_CHECKOUT_URL` | ✅ (to sell) | Lemon Squeezy hosted checkout URL — the "Buy" CTA. Unset ⇒ free-download fallback. | `https://budgetr.lemonsqueezy.com/buy/xxxxxxxx-xxxx-...` |
+| `NEXT_PUBLIC_CHECKOUT_URL` | ✅ (to sell) | Polar hosted checkout link — the "Buy" CTA. Unset ⇒ free-download fallback. | `https://buy.polar.sh/polar_cl_xxxxxxxx` |
 | `NEXT_PUBLIC_SITE_URL` | ✅ | Canonical origin for OpenGraph / `metadataBase`. | `https://budgetr.app` |
 | `NEXT_PUBLIC_PRICE` | optional | Display price (default `$29`). | `$29` |
 | `NEXT_PUBLIC_DOWNLOAD_URL` | optional | Free-download target (default: latest GitHub Release). | `https://github.com/kGeee/budgetr/releases/latest` |
@@ -50,29 +51,33 @@ them you must redeploy (a rebuild), not just restart.
 
 ---
 
-## Part A — Lemon Squeezy
+## Part A — Polar
 
-1. Create a **store** at <https://app.lemonsqueezy.com> (Settings → Stores).
-2. **Products → New product** → *Single payment* (one-time). Set the price
+1. Create an **organization** at <https://polar.sh> (Polar is a merchant of
+   record — it collects and remits VAT/sales tax for you).
+2. **Products → New product** → **one-time payment** (fixed price). Set the price
    (match `NEXT_PUBLIC_PRICE`), name ("budgetr — lifetime license"), and a
    description.
-3. Enable **License keys** on the product (Product → License keys) so each order
-   issues a key and emails it to the buyer. (Honor-system — the app doesn't
-   validate the key; it's the buyer's proof of purchase.)
-4. **Share → Checkout** to get the hosted checkout URL → this is
-   `NEXT_PUBLIC_CHECKOUT_URL`.
-5. Set the **redirect / "Thank you" URL** to `https://<your-domain>/thanks` so
-   buyers land on our page (which mirrors the DMG download + setup steps).
-6. Add the DMG download + "your key is emailed" note to the Lemon Squeezy order
-   confirmation email as well (the app is delivered by public GitHub Release, so
-   no digital-file upload is needed — just link the DMG).
-7. Go **live**: switch the store out of test mode and generate a live checkout
-   URL (test-mode URLs only accept test cards).
+3. Add a **License Key** benefit to the product so each order issues a key and
+   emails it to the buyer. (Honor-system — the app doesn't validate the key; it's
+   the buyer's proof of purchase.)
+4. Create a **Checkout Link** for the product (Product → Share / Checkout Links)
+   → this URL is `NEXT_PUBLIC_CHECKOUT_URL`.
+5. Set the checkout's **Success URL** to `https://budgetr.dev/thanks` so buyers
+   land on our page (which mirrors the DMG download + setup steps). Polar appends
+   `?checkout_id=…` to it; the page ignores it.
+6. The DMG is delivered by public GitHub Release, so no file upload is needed —
+   but you can also add a **File Download** benefit or a note linking the DMG in
+   Polar's order confirmation email.
+7. Go **live**: create a **production** organization/token (Polar has separate
+   sandbox and production environments — sandbox checkout links only take test
+   cards).
 
 _No webhook is required for the honor-system model._ If you later want to record
-orders or gate downloads, add a `/api/webhooks/lemonsqueezy` route that verifies
-the `X-Signature` HMAC against a `LEMONSQUEEZY_WEBHOOK_SECRET` — ask and we'll
-wire it.
+orders or gate downloads, add a `/api/webhooks/polar` route. Polar signs
+webhooks with the **Standard Webhooks** spec (HMAC over the raw body, verified
+with the endpoint's secret — the `@polar-sh/nextjs` adapter's `Webhooks()`
+handler does this for you) — ask and we'll wire it.
 
 ---
 
@@ -90,7 +95,7 @@ CLI needed.
    | `MARKETING_ONLY` | `1` |
    | `NEXT_PUBLIC_SITE_URL` | `https://budgetr.dev` |
    | `NEXT_PUBLIC_PRICE` | `$29` (optional) |
-   | `NEXT_PUBLIC_CHECKOUT_URL` | _(add once Lemon Squeezy is live)_ |
+   | `NEXT_PUBLIC_CHECKOUT_URL` | _(add once the Polar checkout link is live)_ |
 4. **Deploy.**
 5. **Domain** → Project → Settings → **Domains** → add `budgetr.dev` (and
    `www.budgetr.dev` → redirect to apex). Vercel shows the DNS records to set at

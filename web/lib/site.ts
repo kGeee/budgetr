@@ -1,8 +1,8 @@
 /**
  * Public marketing-site config. Purchase + download are driven by env so the
- * same build works before and after the Lemon Squeezy product exists:
+ * same build works before and after the Polar product exists:
  *
- *   NEXT_PUBLIC_CHECKOUT_URL  — Lemon Squeezy hosted checkout (the "Buy" CTA).
+ *   NEXT_PUBLIC_CHECKOUT_URL  — Polar hosted checkout link (the "Buy" CTA).
  *                               When unset, the CTA falls back to the free
  *                               GitHub download so the page is never a dead end.
  *   NEXT_PUBLIC_DOWNLOAD_URL  — direct DMG link (defaults to the latest GitHub

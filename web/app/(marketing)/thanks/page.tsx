@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-// Post-checkout landing (Lemon Squeezy redirect target). The DMG + license key
+// Post-checkout landing (Polar success/redirect target). The DMG + license key
 // are also emailed by the merchant; this page mirrors the download + next steps.
 export default function ThanksPage() {
   return (
