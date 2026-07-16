@@ -177,6 +177,32 @@ function dayChangePct(h: HoldingRow, quotes: Record<string, LiveQuote>): number 
   return null;
 }
 
+/**
+ * Listed options exist only for individual equities and ETFs — never for cash,
+ * crypto, mutual/fixed-income funds, or an option position itself. Gates the
+ * "Options" desk chip so it stops appearing on rows like USD cash or SOL-USD.
+ */
+function isOptionable(h: HoldingRow): boolean {
+  if (!h.ticker || parseOccSymbol(h.ticker)) return false;
+  return h.securityType === "equity" || h.securityType === "etf";
+}
+
+/**
+ * Plaid security names arrive as "Issuer - Product". A few issuers repeat the
+ * same words on both sides (e.g. "SPDR S&P 500 ETF TRUST - SPDR S&P 500 ETF
+ * Trust"); collapse only those to the single name. Names whose halves genuinely
+ * differ ("Vanguard Index Funds - Vanguard S&P 500 ETF") are left untouched.
+ */
+function cleanSecurityName(name: string | null | undefined): string | null {
+  if (!name) return name ?? null;
+  const parts = name.split(" - ");
+  if (parts.length === 2) {
+    const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+    if (norm(parts[0]) === norm(parts[1])) return parts[1].trim();
+  }
+  return name;
+}
+
 function effectiveValue(h: HoldingRow, quotes: Record<string, LiveQuote>): number {
   const price = effectivePrice(h, quotes);
   if (price != null && h.quantity != null) return price * h.quantity;
@@ -869,9 +895,9 @@ function HoldingRowView({
           <div className="flex flex-col gap-1">
             <span className="inline-flex items-center gap-2">
               <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-              {h.ticker && !parseOccSymbol(h.ticker) && (
+              {isOptionable(h) && (
                 <Link
-                  href={`/investments/options/${encodeURIComponent(h.ticker)}`}
+                  href={`/investments/options/${encodeURIComponent(h.ticker as string)}`}
                   title={`Options desk for ${h.ticker}`}
                   className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
                 >
@@ -879,7 +905,12 @@ function HoldingRowView({
                   <ArrowUpRight size={10} />
                 </Link>
               )}
-              <span className="text-[var(--muted)]">{h.securityName}</span>
+              <span
+                className="max-w-[240px] truncate text-[var(--muted)]"
+                title={h.securityName ?? undefined}
+              >
+                {cleanSecurityName(h.securityName)}
+              </span>
               {h.manual && (
                 <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
                   {h.securityType ?? "manual"}
@@ -989,17 +1020,18 @@ function MobileCardBody({ m }: { m: RowMetrics }) {
 
 /** Compact card for one holding — the mobile stand-in for the wide table row. */
 function HoldingCardMobile({ h, m }: { h: HoldingRow; m: RowMetrics }) {
-  const isOption = h.ticker ? Boolean(parseOccSymbol(h.ticker)) : false;
   return (
     <li className="px-4 py-3.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-            {h.ticker && !isOption && <OptionsChip ticker={h.ticker} />}
+            {isOptionable(h) && <OptionsChip ticker={h.ticker as string} />}
           </div>
           {h.securityName && (
-            <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{h.securityName}</p>
+            <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+              {cleanSecurityName(h.securityName)}
+            </p>
           )}
         </div>
         <div className="shrink-0 text-right">
@@ -1396,7 +1428,7 @@ function GainBreakdownModal({
                   <tr key={h.id} className="border-b border-line/60 last:border-0">
                     <td className="px-5 py-2.5">
                       <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-                      <span className="ml-2 text-[var(--muted)]">{h.securityName}</span>
+                      <span className="ml-2 text-[var(--muted)]">{cleanSecurityName(h.securityName)}</span>
                     </td>
                     <td className="mono px-5 py-2.5 text-right">
                       {formatMoney(value, h.currency)}
