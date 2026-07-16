@@ -1,6 +1,8 @@
-budgetr.dev {
-	# budgetr.dev resolves only via /etc/hosts, so public ACME (Let's Encrypt)
-	# can't validate it — use Caddy's locally-trusted internal CA instead.
+# Local dashboard hostname. budgetr.dev is now the PUBLIC marketing domain
+# (deployed on Vercel), so the local always-on server uses budgetr.localhost
+# instead — mapped to 127.0.0.1 in /etc/hosts. The .localhost TLD can't get a
+# public cert, so use Caddy's locally-trusted internal CA.
+budgetr.localhost {
 	tls internal
 	reverse_proxy localhost:3000
 }

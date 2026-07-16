@@ -11,10 +11,12 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3"],
   turbopack: { root: projectRoot },
   outputFileTracingRoot: projectRoot,
-  // A marketing-only build (MARKETING_ONLY=1) writes to a separate output dir so
-  // it can be previewed / deployed without clobbering the local app's `.next`
-  // that the launchd `next start` service serves.
-  distDir: process.env.MARKETING_ONLY ? ".next-marketing" : ".next",
+  // A LOCAL marketing-only build (MARKETING_ONLY=1) writes to a separate output
+  // dir so it can be previewed without clobbering the local app's `.next` that
+  // the launchd `next start` service serves. On Vercel (VERCEL=1) there's no such
+  // conflict, and a non-standard distDir only confuses the platform's Next build
+  // — so there we always use the standard `.next`.
+  distDir: process.env.MARKETING_ONLY && !process.env.VERCEL ? ".next-marketing" : ".next",
   // The desktop shell loads the dev server via http://127.0.0.1:<port>, but Next
   // serves its dev resources (HMR / Fast Refresh client chunks) under the
   // `localhost` origin and 403s cross-origin requests by default. Without this
