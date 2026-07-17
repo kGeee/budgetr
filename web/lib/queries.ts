@@ -19,11 +19,13 @@ import {
   savedFilters,
   savingsContributions,
   securities,
+  stockSplits,
   taxLotOverrides,
   vendorGroupMembers,
   vendorGroups,
   type SavedFilter,
 } from "@/db/schema";
+import { applySplits, type StockSplit } from "@/lib/import/splits";
 import type { SavingsContribution, Dashboard, DashboardWidget } from "@/db/schema";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
@@ -1569,8 +1571,21 @@ export type InvestmentTxnRow = {
 };
 
 /** All investment transactions (buys/sells/dividends), newest first, with ticker. */
-export function getInvestmentTransactions(): InvestmentTxnRow[] {
+/** All stock splits, as the pure shape lib/import/splits.ts consumes. */
+export function getStockSplits(): StockSplit[] {
   return db
+    .select({
+      ticker: stockSplits.ticker,
+      date: stockSplits.date,
+      numerator: stockSplits.numerator,
+      denominator: stockSplits.denominator,
+    })
+    .from(stockSplits)
+    .all();
+}
+
+export function getInvestmentTransactions(): InvestmentTxnRow[] {
+  const rows = db
     .select({
       id: investmentTransactions.id,
       date: investmentTransactions.date,
@@ -1594,6 +1609,11 @@ export function getInvestmentTransactions(): InvestmentTxnRow[] {
     .where(eq(accounts.excluded, false))
     .orderBy(desc(investmentTransactions.date))
     .all();
+
+  // Restate pre-split quantities/prices into current terms before any consumer
+  // (tax lots, dividends, the investments table) sees them. No-op when there are
+  // no splits, so Plaid-only setups are unaffected. See lib/import/splits.ts.
+  return applySplits(rows, getStockSplits());
 }
 
 // ── Realized gains / tax lots ─────────────────────────────────────────────────
