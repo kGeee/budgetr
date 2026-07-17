@@ -50,6 +50,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { IvSurface } from "@/components/iv-surface";
 import { OptionsAnalytics } from "@/components/options-analytics";
+import { StrategyBuilder } from "@/components/strategy-builder";
 import { useLivePrices } from "@/components/live-prices";
 import type { HoldingRow } from "@/components/portfolio-view";
 import { formatCurrency } from "@/lib/utils";
@@ -269,6 +270,14 @@ export function OptionsChainView({
           heldOccs={heldOccs}
         />
       )}
+
+      <StrategyBuilder
+        ticker={ticker}
+        contracts={contracts}
+        selectedExpiry={selectedExpiry}
+        spot={spot}
+        currency={currency}
+      />
 
       {heldLegs.length > 0 && (
         <div className="space-y-4">
