@@ -258,13 +258,26 @@ function readThemeChoice() {
     .catch(() => "dark");
 }
 
-/** Drive the native chrome (traffic lights, window background) from the choice. */
-function applyTheme(choice) {
+/**
+ * Repaint the frameless window's backing colour for the resolved theme. Never
+ * touches `nativeTheme.themeSource` — assigning that emits `updated`, so doing
+ * it from the `updated` handler would re-enter and spin the main process.
+ */
+function syncBackground(choice) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  nativeTheme.themeSource = choice === "light" ? "light" : choice === "system" ? "system" : "dark";
   const resolved =
     choice === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : choice;
   mainWindow.setBackgroundColor(THEME_BG[resolved] ?? THEME_BG.dark);
+}
+
+/** Drive the native chrome (traffic lights, window background) from the choice. */
+function applyTheme(choice) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const source = choice === "light" ? "light" : choice === "system" ? "system" : "dark";
+  // Only assign when it actually changes: every assignment emits `updated`, and
+  // an unconditional write here would feed that listener back into this function.
+  if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source;
+  syncBackground(choice);
 }
 
 function createWindow() {
@@ -299,8 +312,11 @@ function createWindow() {
       if (cookie.name === "theme") readThemeChoice().then(applyTheme);
     });
     nativeTheme.on("updated", () => {
+      // Background only — calling applyTheme() here would re-assign themeSource,
+      // re-emit `updated`, and spin the main process (which starves input
+      // routing: the renderer keeps painting while clicks never arrive).
       readThemeChoice().then((choice) => {
-        if (choice === "system") applyTheme(choice);
+        if (choice === "system") syncBackground(choice);
       });
     });
   }

@@ -27,11 +27,21 @@
         color: var(--paper);
         font-family:
           -apple-system, BlinkMacSystemFont, "Hanken Grotesk", "Segoe UI", sans-serif;
-        /* The whole surface is the window drag region (frameless window). */
-        -webkit-app-region: drag;
         -webkit-user-select: none;
         user-select: none;
       }
+      /*
+        Deliberately NO `-webkit-app-region: drag` on <body>.
+        This splash is loaded into the SAME window that then navigates to the
+        app, and Electron does not reliably recompute draggable regions across
+        that navigation — a full-surface drag region here survives the swap and
+        silently swallows real mouse clicks over the loaded app (the OS treats
+        them as window drags). It's invisible to the DOM: no element receives
+        the event, elementFromPoint still reports the button, and the console
+        stays clean, which makes it brutal to diagnose. The splash lasts ~1-3s
+        and doesn't need to be draggable; the app's own header supplies the drag
+        handle once it loads (see the injected CSS in main.js).
+      */
       .wrap {
         display: flex;
         flex-direction: column;
