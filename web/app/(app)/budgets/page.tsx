@@ -88,7 +88,7 @@ export default function BudgetsPage() {
               <span className="flex items-center gap-1.5">
                 <span
                   className="h-2 w-2 rounded-full"
-                  style={{ background: aheadOfPace ? "#f0897b" : "#6fe3a6" }}
+                  style={{ background: aheadOfPace ? "var(--coral)" : "var(--jade)" }}
                 />
                 Spent
               </span>

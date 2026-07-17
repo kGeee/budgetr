@@ -19,7 +19,18 @@
   --brass: #cbb07c; /* premium hairline accents */
   --brass-dim: #8a7748;
 
+  /* Semantic chrome tokens (tokenized so they flip in light mode): text on
+     accent fills, the modal scrim, and the recharts palette. */
+  --on-jade: #06120c;
+  --on-brass: #1a1505;
+  --blue: #7fb2e0;
+  --scrim: rgba(0, 0, 0, 0.5);
+  --chart-grid: #212a27;
+  --chart-tooltip-bg: #101413;
+  --chart-dot-stroke: #090c0b;
+
   --radius: 18px;
+  color-scheme: dark; /* native controls + scrollbars follow the theme */
 
   /* Motion — one easing + duration vocabulary so every transition shares a rhythm. */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -36,6 +47,82 @@
   --elev-3:
     0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
     0 34px 64px -24px rgba(0, 0, 0, 0.92);
+}
+
+/*
+  Light theme — "warm paper": ivory canvas, deep-forest ink, brass hairlines —
+  the inverse of the dark "Private Ledger". Same token names as :root, with
+  accents deepened for contrast on a light surface. Applied on an explicit
+  choice, or under `system` when the OS prefers light. The two blocks are kept
+  in sync deliberately (plain CSS has no shared-block mechanism across a media
+  query boundary).
+*/
+:root[data-theme="light"] {
+  --ink: #f3f0e8;
+  --panel: #fbf9f3;
+  --panel-2: #eae5d8;
+  --line: #ddd7c8;
+  --line-strong: #c8c0ac;
+  --paper: #1b2320;
+  --muted: #5c655d;
+  --faint: #8a9187;
+  --jade: #1f9d68;
+  --jade-deep: #16794f;
+  --coral: #cf5747;
+  --brass: #977c39;
+  --brass-dim: #b9a877;
+  --on-jade: #f6faf4;
+  --on-brass: #fbf7ec;
+  --blue: #3f7fbf;
+  --scrim: rgba(20, 18, 10, 0.35);
+  --chart-grid: #ddd7c8;
+  --chart-tooltip-bg: #fbf9f3;
+  --chart-dot-stroke: #f3f0e8;
+  --elev-1:
+    0 1px 0 0 rgba(255, 255, 255, 0.7) inset,
+    0 6px 16px -10px rgba(60, 50, 20, 0.22);
+  --elev-2:
+    0 1px 0 0 rgba(255, 255, 255, 0.8) inset,
+    0 16px 34px -18px rgba(60, 50, 20, 0.2);
+  --elev-3:
+    0 1px 0 0 rgba(255, 255, 255, 0.9) inset,
+    0 34px 64px -24px rgba(60, 50, 20, 0.26);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --ink: #f3f0e8;
+    --panel: #fbf9f3;
+    --panel-2: #eae5d8;
+    --line: #ddd7c8;
+    --line-strong: #c8c0ac;
+    --paper: #1b2320;
+    --muted: #5c655d;
+    --faint: #8a9187;
+    --jade: #1f9d68;
+    --jade-deep: #16794f;
+    --coral: #cf5747;
+    --brass: #977c39;
+    --brass-dim: #b9a877;
+    --on-jade: #f6faf4;
+    --on-brass: #fbf7ec;
+    --blue: #3f7fbf;
+    --scrim: rgba(20, 18, 10, 0.35);
+    --chart-grid: #ddd7c8;
+    --chart-tooltip-bg: #fbf9f3;
+    --chart-dot-stroke: #f3f0e8;
+    --elev-1:
+      0 1px 0 0 rgba(255, 255, 255, 0.7) inset,
+      0 6px 16px -10px rgba(60, 50, 20, 0.22);
+    --elev-2:
+      0 1px 0 0 rgba(255, 255, 255, 0.8) inset,
+      0 16px 34px -18px rgba(60, 50, 20, 0.2);
+    --elev-3:
+      0 1px 0 0 rgba(255, 255, 255, 0.9) inset,
+      0 34px 64px -24px rgba(60, 50, 20, 0.26);
+    color-scheme: light;
+  }
 }
 
 @theme inline {
@@ -79,7 +166,6 @@ textarea {
   color: var(--paper);
   background-color: var(--ink);
   caret-color: var(--paper);
-  color-scheme: dark;
 }
 
 input:hover,
@@ -223,8 +309,8 @@ body::after {
 }
 
 ::selection {
-  background: rgba(111, 227, 166, 0.25);
-  color: #fff;
+  background: color-mix(in srgb, var(--jade) 30%, transparent);
+  color: var(--paper);
 }
 
 ::-webkit-scrollbar {

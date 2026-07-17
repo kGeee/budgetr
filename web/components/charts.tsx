@@ -23,12 +23,12 @@ import { formatCompactCurrency, formatCurrency } from "@/lib/utils";
 
 // Editorial palette: jade + brass anchored, harmonious cool/warm spread.
 export const PIE_COLORS = [
-  "#6fe3a6", "#cbb07c", "#7fb2e0", "#f0897b", "#b59ce0",
-  "#5fc9c0", "#e0c36f", "#9ad17f", "#e08fb8", "#8b948c",
+  "var(--jade)", "var(--brass)", "var(--blue)", "var(--coral)", "#b59ce0",
+  "#5fc9c0", "#e0c36f", "#9ad17f", "#e08fb8", "var(--muted)",
 ];
 
-const GRID = "#212a27";
-const tick = { fill: "#8b948c", fontSize: 11, fontFamily: "var(--font-mono)" };
+const GRID = "var(--chart-grid)";
+const tick = { fill: "var(--muted)", fontSize: 11, fontFamily: "var(--font-mono)" };
 
 /**
  * A Y-axis domain framed to the data with ~8% headroom on each side, so a line
@@ -48,16 +48,16 @@ function framedDomain(values: number[]): [number, number] {
 }
 
 const tooltipStyle = {
-  background: "#101413",
-  border: "1px solid #303b37",
+  background: "var(--chart-tooltip-bg)",
+  border: "1px solid var(--line-strong)",
   borderRadius: 12,
   fontSize: 12,
-  color: "#ece7da",
+  color: "var(--paper)",
   padding: "8px 12px",
   boxShadow: "0 30px 60px -32px rgba(0,0,0,0.9)",
   fontFamily: "var(--font-mono)",
 };
-const labelStyle = { color: "#8b948c", marginBottom: 2 };
+const labelStyle = { color: "var(--muted)", marginBottom: 2 };
 
 export function NetWorthChart({ data }: { data: { date: string; netWorth: number }[] }) {
   if (data.length === 0)
@@ -67,8 +67,8 @@ export function NetWorthChart({ data }: { data: { date: string; netWorth: number
       <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
         <defs>
           <linearGradient id="nw" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6fe3a6" stopOpacity={0.28} />
-            <stop offset="100%" stopColor="#6fe3a6" stopOpacity={0} />
+            <stop offset="0%" stopColor="var(--jade)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--jade)" stopOpacity={0} />
           </linearGradient>
         </defs>
         <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
@@ -92,18 +92,18 @@ export function NetWorthChart({ data }: { data: { date: string; netWorth: number
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
-          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value) => [formatCurrency(Number(value)), "Net worth"]}
           labelFormatter={(d) => format(parseISO(d as string), "PP")}
         />
         <Area
           type="monotone"
           dataKey="netWorth"
-          stroke="#6fe3a6"
+          stroke="var(--jade)"
           strokeWidth={2.5}
           fill="url(#nw)"
           isAnimationActive={false}
-          activeDot={{ r: 4, fill: "#6fe3a6", stroke: "#090c0b", strokeWidth: 2 }}
+          activeDot={{ r: 4, fill: "var(--jade)", stroke: "var(--chart-dot-stroke)", strokeWidth: 2 }}
         />
       </AreaChart>
     </ResponsiveContainer>
@@ -130,7 +130,9 @@ export function CashflowChart({
       }
     : undefined;
   const dim = (month: string, base: string) =>
-    selectedMonth && month !== selectedMonth ? `${base}66` : base;
+    selectedMonth && month !== selectedMonth
+      ? `color-mix(in srgb, ${base} 40%, transparent)`
+      : base;
   return (
     <ResponsiveContainer width="100%" height={260}>
       <BarChart data={data} margin={{ left: 4, right: 8, top: 8 }} barGap={4}>
@@ -168,7 +170,7 @@ export function CashflowChart({
           onClick={handleClick}
         >
           {data.map((d) => (
-            <Cell key={d.month} fill={dim(d.month, "#6fe3a6")} />
+            <Cell key={d.month} fill={dim(d.month, "var(--jade)")} />
           ))}
         </Bar>
         <Bar
@@ -180,7 +182,7 @@ export function CashflowChart({
           onClick={handleClick}
         >
           {data.map((d) => (
-            <Cell key={d.month} fill={dim(d.month, "#f0897b")} />
+            <Cell key={d.month} fill={dim(d.month, "var(--coral)")} />
           ))}
         </Bar>
       </BarChart>
@@ -246,7 +248,11 @@ export function MonthlySpendChart({
           {data.map((d) => (
             <Cell
               key={d.month}
-              fill={selectedMonth && d.month !== selectedMonth ? "#cbb07c66" : "#cbb07c"}
+              fill={
+                selectedMonth && d.month !== selectedMonth
+                  ? "color-mix(in srgb, var(--brass) 40%, transparent)"
+                  : "var(--brass)"
+              }
             />
           ))}
         </Bar>
@@ -322,8 +328,8 @@ export function PortfolioChart({ data }: { data: { date: string; value: number }
       <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
         <defs>
           <linearGradient id="pf" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#cbb07c" stopOpacity={0.28} />
-            <stop offset="100%" stopColor="#cbb07c" stopOpacity={0} />
+            <stop offset="0%" stopColor="var(--brass)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--brass)" stopOpacity={0} />
           </linearGradient>
         </defs>
         <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
@@ -345,18 +351,18 @@ export function PortfolioChart({ data }: { data: { date: string; value: number }
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
-          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value) => [formatCurrency(Number(value)), "Value"]}
           labelFormatter={(d) => format(parseISO(d as string), "PP")}
         />
         <Area
           type="monotone"
           dataKey="value"
-          stroke="#cbb07c"
+          stroke="var(--brass)"
           strokeWidth={2.5}
           fill="url(#pf)"
           isAnimationActive={false}
-          activeDot={{ r: 4, fill: "#cbb07c", stroke: "#090c0b", strokeWidth: 2 }}
+          activeDot={{ r: 4, fill: "var(--brass)", stroke: "var(--chart-dot-stroke)", strokeWidth: 2 }}
         />
       </AreaChart>
     </ResponsiveContainer>
@@ -369,7 +375,7 @@ export function PortfolioChart({ data }: { data: { date: string; value: number }
  */
 export function ValueAreaChart({
   data,
-  color = "#cbb07c",
+  color = "var(--brass)",
   gradientId = "val",
   valueLabel = "Value",
   height = 280,
@@ -430,7 +436,7 @@ export function ValueAreaChart({
           strokeWidth={2.5}
           fill={`url(#${gradientId})`}
           isAnimationActive={false}
-          activeDot={{ r: 4, fill: color, stroke: "#090c0b", strokeWidth: 2 }}
+          activeDot={{ r: 4, fill: color, stroke: "var(--chart-dot-stroke)", strokeWidth: 2 }}
         />
       </AreaChart>
     </ResponsiveContainer>
@@ -439,8 +445,8 @@ export function ValueAreaChart({
 
 /** Rebased-to-100 comparison line colors, shared by chart + legend. */
 const BENCHMARK_LINES = [
-  { key: "portfolio", label: "Portfolio", color: "#cbb07c" },
-  { key: "spy", label: "SPY", color: "#7fb2e0" },
+  { key: "portfolio", label: "Portfolio", color: "var(--brass)" },
+  { key: "spy", label: "SPY", color: "var(--blue)" },
   { key: "qqq", label: "QQQ", color: "#b59ce0" },
 ] as const;
 
@@ -497,7 +503,7 @@ export function BenchmarkLineChart({
           <Tooltip
             contentStyle={tooltipStyle}
             labelStyle={labelStyle}
-            cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+            cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
             formatter={(value, name) => {
               const line = BENCHMARK_LINES.find((l) => l.key === name);
               const v = Number(value);
@@ -516,7 +522,7 @@ export function BenchmarkLineChart({
               dot={false}
               connectNulls
               isAnimationActive={false}
-              activeDot={{ r: 4, fill: l.color, stroke: "#090c0b", strokeWidth: 2 }}
+              activeDot={{ r: 4, fill: l.color, stroke: "var(--chart-dot-stroke)", strokeWidth: 2 }}
             />
           ))}
         </LineChart>
@@ -538,7 +544,7 @@ export function BudgetPaceChart({
 }) {
   if (data.length === 0)
     return <Empty label="No budget set" hint="Set category budgets to track pace." />;
-  const spendColor = over ? "#f0897b" : "#6fe3a6";
+  const spendColor = over ? "var(--coral)" : "var(--jade)";
   return (
     <ResponsiveContainer width="100%" height={240}>
       <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
@@ -561,7 +567,7 @@ export function BudgetPaceChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
-          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value, name) => [
             value == null ? "—" : formatCurrency(Number(value)),
             name === "pace" ? "Budget pace" : "Spent",
@@ -571,7 +577,7 @@ export function BudgetPaceChart({
         <Line
           type="monotone"
           dataKey="pace"
-          stroke="#8b948c"
+          stroke="var(--muted)"
           strokeWidth={1.5}
           strokeDasharray="4 4"
           dot={false}
@@ -630,7 +636,7 @@ export function ForecastChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
-          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value, name) => [
             value == null ? "—" : formatCurrency(Number(value)),
             name === "actual" ? "Actual" : "Projected",
@@ -640,15 +646,15 @@ export function ForecastChart({
         {today && (
           <ReferenceLine
             x={today}
-            stroke="#8b948c"
+            stroke="var(--muted)"
             strokeDasharray="3 3"
-            label={{ value: "Today", position: "insideTopRight", fill: "#8b948c", fontSize: 10 }}
+            label={{ value: "Today", position: "insideTopRight", fill: "var(--muted)", fontSize: 10 }}
           />
         )}
         <Line
           type="monotone"
           dataKey="actual"
-          stroke="#6fe3a6"
+          stroke="var(--jade)"
           strokeWidth={2.5}
           dot={false}
           connectNulls={false}
@@ -657,7 +663,7 @@ export function ForecastChart({
         <Line
           type="monotone"
           dataKey="projected"
-          stroke="#cbb07c"
+          stroke="var(--brass)"
           strokeWidth={2}
           strokeDasharray="5 4"
           dot={false}
@@ -708,7 +714,7 @@ export function FireProjectionChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
-          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value, name) => [
             value == null ? "—" : formatCurrency(Number(value)),
             name === "actual" ? "Net worth" : "Projected",
@@ -718,12 +724,12 @@ export function FireProjectionChart({
         {fireNumber > 0 && (
           <ReferenceLine
             y={fireNumber}
-            stroke="#6fe3a6"
+            stroke="var(--jade)"
             strokeDasharray="4 4"
             label={{
               value: `FIRE ${formatCompactCurrency(fireNumber)}`,
               position: "insideTopLeft",
-              fill: "#6fe3a6",
+              fill: "var(--jade)",
               fontSize: 10,
             }}
           />
@@ -731,7 +737,7 @@ export function FireProjectionChart({
         <Line
           type="monotone"
           dataKey="actual"
-          stroke="#6fe3a6"
+          stroke="var(--jade)"
           strokeWidth={2.5}
           dot={false}
           connectNulls={false}
@@ -740,7 +746,7 @@ export function FireProjectionChart({
         <Line
           type="monotone"
           dataKey="projected"
-          stroke="#cbb07c"
+          stroke="var(--brass)"
           strokeWidth={2}
           strokeDasharray="5 4"
           dot={false}
@@ -764,7 +770,7 @@ export function Sparkline({
 }) {
   if (data.length < 2) return null;
   const up = data[data.length - 1].close >= data[0].close;
-  const color = up ? "#6fe3a6" : "#f0897b";
+  const color = up ? "var(--jade)" : "var(--coral)";
   return (
     <ResponsiveContainer width={width} height={height}>
       <LineChart data={data} margin={{ top: 2, bottom: 2, left: 0, right: 0 }}>
@@ -856,7 +862,7 @@ export function TickerPriceChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
-          cursor={{ stroke: "#cbb07c", strokeWidth: 1, strokeDasharray: "3 3" }}
+          cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value, name) => [
             formatCurrency(Number(value)),
             name === "buy" ? "Buy" : name === "sell" ? "Sell" : "Close",
@@ -866,7 +872,7 @@ export function TickerPriceChart({
         <Line
           type="monotone"
           dataKey="close"
-          stroke="#cbb07c"
+          stroke="var(--brass)"
           strokeWidth={2}
           dot={false}
           isAnimationActive={false}
@@ -876,7 +882,7 @@ export function TickerPriceChart({
           stroke="transparent"
           strokeWidth={0}
           legendType="none"
-          dot={{ r: 4, fill: "#6fe3a6", stroke: "#090c0b", strokeWidth: 1.5 }}
+          dot={{ r: 4, fill: "var(--jade)", stroke: "var(--chart-dot-stroke)", strokeWidth: 1.5 }}
           isAnimationActive={false}
           connectNulls={false}
         />
@@ -885,7 +891,7 @@ export function TickerPriceChart({
           stroke="transparent"
           strokeWidth={0}
           legendType="none"
-          dot={{ r: 4, fill: "#f0897b", stroke: "#090c0b", strokeWidth: 1.5 }}
+          dot={{ r: 4, fill: "var(--coral)", stroke: "var(--chart-dot-stroke)", strokeWidth: 1.5 }}
           isAnimationActive={false}
           connectNulls={false}
         />
@@ -944,7 +950,7 @@ export function AllocationDonut({
         dominantBaseline="central"
         fontSize={11}
         fontFamily="var(--font-mono)"
-        fill="#8b948c"
+        fill="var(--muted)"
       >
         {payload.sector} · {(percent * 100).toFixed(0)}%
       </text>

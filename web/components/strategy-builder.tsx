@@ -31,6 +31,7 @@ import { daysToExpiry, formatOptionExpiry, formatStrike } from "@/lib/options";
 import { computeGreeks } from "@/lib/greeks";
 import { probabilityOfProfit } from "@/lib/option-analytics";
 import { analyzePayoff, CONTRACT_SIZE, type PayoffAnalysis, type PayoffLeg } from "@/lib/payoff";
+import { useChartTheme } from "@/lib/chart-theme";
 import { atmIv, contractsForExpiry } from "@/lib/option-chain-analytics";
 import {
   generateStrategies,
@@ -41,20 +42,6 @@ import {
 } from "@/lib/strategy";
 import type { OptionQuote } from "@/lib/yahoo";
 
-const GRID = "#212a27";
-const tick = { fill: "#8b948c", fontSize: 11, fontFamily: "var(--font-mono)" };
-const tooltipStyle = {
-  background: "#101413",
-  border: "1px solid #303b37",
-  borderRadius: 12,
-  fontSize: 12,
-  color: "#ece7da",
-  padding: "8px 12px",
-  boxShadow: "0 30px 60px -32px rgba(0,0,0,0.9)",
-  fontFamily: "var(--font-mono)",
-} as const;
-const JADE = "#6fe3a6";
-const CORAL = "#f0897b";
 
 const BIASES: { key: Bias; label: string; hint: string }[] = [
   { key: "bullish", label: "Bullish", hint: "up" },
@@ -276,7 +263,6 @@ export function StrategyBuilder({
                   spot={spot!}
                   sigma={sigma!}
                   T={T}
-                  evCenter={bias === "bullish" || bias === "bearish" ? target! : spot!}
                   currency={currency}
                 />
               )}
@@ -395,7 +381,6 @@ function SafetyPanel({
   spot,
   sigma,
   T,
-  evCenter,
   currency,
 }: {
   title: string;
@@ -408,10 +393,13 @@ function SafetyPanel({
   spot: number;
   sigma: number;
   T: number;
-  evCenter: number;
   currency: string;
 }) {
-  const dist = useMemo(() => pnlDistribution(legs, evCenter, sigma, T), [legs, evCenter, sigma, T]);
+  const ct = useChartTheme();
+  // Driftless / market-implied: the terminal distribution is centered on spot
+  // (forward = spot), matching the probability-of-profit convention — not the
+  // user's target, which would bias the P&L distribution optimistically.
+  const dist = useMemo(() => pnlDistribution(legs, spot, sigma, T), [legs, spot, sigma, T]);
   const greeks = useMemo(
     () => netGreeks(legs, expiryContracts, spot, sigma),
     [legs, expiryContracts, spot, sigma],
@@ -432,7 +420,7 @@ function SafetyPanel({
           <Shield size={13} className="text-[var(--brass)]" />
           {title}
         </span>
-        <span className="text-xs text-[var(--muted)]">estimates · lognormal @ your view</span>
+        <span className="text-xs text-[var(--muted)]">estimates · market-implied (lognormal)</span>
       </div>
       <div className="grid gap-6 p-6 lg:grid-cols-2">
         <div>
@@ -441,26 +429,29 @@ function SafetyPanel({
           {dist && dist.bins.length ? (
             <ResponsiveContainer width="100%" height={170}>
               <BarChart data={dist.bins} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
-                <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+                <CartesianGrid stroke={ct.grid} strokeDasharray="2 4" vertical={false} />
                 <XAxis
                   dataKey="pnl"
                   type="number"
                   domain={["dataMin", "dataMax"]}
-                  tick={tick}
+                  tick={ct.tick}
                   tickFormatter={(v) => compact(v, currency)}
                   tickLine={false}
-                  axisLine={{ stroke: GRID }}
+                  axisLine={{ stroke: ct.grid }}
                 />
-                <YAxis tick={tick} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} tickLine={false} axisLine={false} width={38} />
+                <YAxis tick={ct.tick} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} tickLine={false} axisLine={false} width={38} />
                 <Tooltip
-                  contentStyle={tooltipStyle}
+                  contentStyle={ct.tooltipStyle}
+                  labelStyle={ct.labelStyle}
+                  itemStyle={{ color: ct.paper }}
+                  cursor={{ fill: "color-mix(in srgb, var(--paper) 8%, transparent)" }}
                   formatter={(value) => [`${(Number(value) * 100).toFixed(1)}%`, "Probability"]}
                   labelFormatter={(l) => `P&L ${compact(Number(l), currency)}`}
                 />
-                <ReferenceLine x={0} stroke="#303b37" />
+                <ReferenceLine x={0} stroke={ct.gridStrong} />
                 <Bar dataKey="prob" isAnimationActive={false}>
                   {dist.bins.map((b, i) => (
-                    <Cell key={i} fill={b.pnl >= 0 ? JADE : CORAL} fillOpacity={0.85} />
+                    <Cell key={i} fill={b.pnl >= 0 ? ct.jade : ct.coral} fillOpacity={0.85} />
                   ))}
                 </Bar>
               </BarChart>
@@ -662,7 +653,6 @@ function ManualBuilder({
           spot={spot}
           sigma={sigma}
           T={T}
-          evCenter={spot}
           currency={currency}
         />
       )}

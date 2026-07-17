@@ -181,7 +181,7 @@ export function RealizedGainsView({
                 aria-pressed={globalMethod === m.value}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                   globalMethod === m.value
-                    ? "bg-[var(--brass)] text-[#0f0b04]"
+                    ? "bg-[var(--brass)] text-[var(--on-brass)]"
                     : "text-[var(--muted)] hover:text-[var(--paper)]"
                 }`}
               >
