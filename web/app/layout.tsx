@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Hanken_Grotesk, Spline_Sans_Mono } from "next/font/google";
 import { THEME_SCRIPT } from "@/lib/theme";
+import { SITE } from "@/lib/site";
 import "./globals.css";
 
 // The root layout is deliberately thin: just <html>/<body>, fonts, and global
@@ -28,8 +29,27 @@ const mono = Spline_Sans_Mono({
 });
 
 export const metadata: Metadata = {
+  // Absolute base so the auto-generated opengraph-image / twitter-image URLs
+  // (and any other relative metadata assets) resolve to the public origin.
+  metadataBase: new URL(SITE.siteUrl),
   title: "budgetr — private ledger",
-  description: "Net worth, spending & income — read-only, on your machine.",
+  description: SITE.description,
+  // The share card + its <meta> image tags come from app/opengraph-image.png and
+  // app/twitter-image.png (Next file conventions); these fill in the text fields
+  // so a shared budgetr.dev link renders a rich card everywhere.
+  openGraph: {
+    type: "website",
+    siteName: "budgetr",
+    title: "budgetr — private personal finance for macOS",
+    description: SITE.description,
+    url: SITE.siteUrl,
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "budgetr — private personal finance for macOS",
+    description: SITE.description,
+  },
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
