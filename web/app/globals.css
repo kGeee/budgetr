@@ -21,6 +21,11 @@
 
   --radius: 18px;
 
+  /* Tell the UA every native control + popup (select menus, date pickers,
+     scrollbars, form fields) is on a dark surface, so their default text and
+     hover highlights render light-on-dark instead of black. */
+  color-scheme: dark;
+
   /* Motion — one easing + duration vocabulary so every transition shares a rhythm. */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur: 200ms;
@@ -60,6 +65,9 @@
 
 html {
   background: var(--ink);
+  scroll-behavior: smooth;
+  /* Keep in-page anchors (#features, #screens) clear of the sticky top nav. */
+  scroll-padding-top: 5.5rem;
 }
 
 body {
@@ -96,19 +104,6 @@ input::placeholder,
 textarea::placeholder {
   color: var(--faint);
   opacity: 1;
-}
-
-select option,
-select optgroup {
-  background: var(--panel-2);
-  color: var(--paper);
-}
-
-select option:hover,
-select option:focus,
-select option:checked {
-  background: var(--line-strong);
-  color: var(--paper);
 }
 
 input:-webkit-autofill,
