@@ -70,7 +70,7 @@ export function BuyLink({ className = "", label }: { className?: string; label?:
       href={primaryCtaHref()}
       target="_blank"
       rel="noopener noreferrer"
-      className={`inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[#06120c] transition hover:brightness-105 ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[var(--on-jade)] transition hover:brightness-105 ${className}`}
     >
       {text}
       <ArrowUpRight size={15} />

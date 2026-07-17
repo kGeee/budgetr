@@ -186,9 +186,9 @@ function Stepper({ step }: { step: number }) {
             <span
               className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-medium transition-colors ${
                 i < step
-                  ? "bg-[var(--jade)] text-[#06120c]"
+                  ? "bg-[var(--jade)] text-[var(--on-jade)]"
                   : i === step
-                    ? "bg-[var(--brass)] text-[#0d0a04]"
+                    ? "bg-[var(--brass)] text-[var(--on-brass)]"
                     : "border border-line text-[var(--faint)]"
               }`}
             >

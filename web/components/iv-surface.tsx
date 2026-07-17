@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatStrike } from "@/lib/options";
+import { useResolvedTheme } from "@/lib/chart-theme";
 import type { IvSurface as IvSurfaceData } from "@/lib/option-chain-analytics";
 
 // ── Scene constants (world units, roughly ±1.2) ─────────────────────────────
@@ -355,10 +356,12 @@ export function IvSurface({
     ctx.fillText("IV", lgX + lgW / 2, lgY + lgH + 3);
   }, [empty, width, height, yaw, pitch, surface, E, S]);
 
-  // Redraw whenever inputs change (rotation, size, data, theme handled on mount).
+  // Redraw whenever inputs change — rotation, size, data, and the resolved theme
+  // (the canvas reads CSS-var colours live, so a flip needs an explicit repaint).
+  const themeMode = useResolvedTheme();
   useEffect(() => {
     draw();
-  }, [draw]);
+  }, [draw, themeMode]);
 
   // ── Pointer interaction: orbit yaw / pitch ─────────────────────────────────
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {

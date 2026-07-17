@@ -62,7 +62,7 @@ export type StrategyCandidate = {
   capital: number;
   /** Probability of profit at expiry (market-implied, driftless). */
   pop: number | null;
-  /** Expected P&L at expiry under your outcome view (lognormal centered there). */
+  /** Expected P&L at expiry — market-implied (driftless lognormal, forward = spot). */
   ev: number | null;
   definedRisk: boolean;
   withinBudget: boolean;
@@ -242,7 +242,6 @@ function build(
     legs: LegSpec[];
     definedRisk: boolean;
     capital?: (analysis: PayoffAnalysis, legs: StrategyLeg[]) => number;
-    evCenter: number;
     risk: RiskInputs;
   },
 ): StrategyCandidate | null {
@@ -272,7 +271,9 @@ function build(
     : analysis.maxLoss ?? Math.abs(netDebit);
   const T = ctx.T;
   const pop = probabilityOfProfit(payoffLegs, analysis, ctx.spot, ctx.sigma, T);
-  const dist = pnlDistribution(payoffLegs, spec.evCenter, ctx.sigma, T);
+  // Driftless / market-implied EV (forward = spot), consistent with POP — the
+  // user's target drives strategy + strike selection, not the probability model.
+  const dist = pnlDistribution(payoffLegs, ctx.spot, ctx.sigma, T);
   const ev = dist?.ev ?? null;
   const withinBudget =
     capital <= spec.risk.budget && (analysis.maxLoss ?? Infinity) <= spec.risk.maxLoss;
@@ -370,7 +371,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
         bias,
         legs: [{ right: "call", strike: near(spot), contracts: 1 }],
         definedRisk: true,
-        evCenter: target,
         risk,
       }),
       build(ctx, {
@@ -382,7 +382,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           { right: "call", strike: near(Math.max(target, spot + em)), contracts: -1 },
         ],
         definedRisk: true,
-        evCenter: target,
         risk,
       }),
       build(ctx, {
@@ -394,7 +393,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           { right: "put", strike: near(spot - 2 * em), contracts: 1 },
         ],
         definedRisk: true,
-        evCenter: target,
         risk,
       }),
       build(ctx, {
@@ -404,7 +402,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
         legs: [{ right: "put", strike: near(spot - em), contracts: -1 }],
         definedRisk: true,
         capital: (_a, legs) => cashSecuredCapital(legs),
-        evCenter: target,
         risk,
       }),
     );
@@ -416,7 +413,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
         bias,
         legs: [{ right: "put", strike: near(spot), contracts: 1 }],
         definedRisk: true,
-        evCenter: target,
         risk,
       }),
       build(ctx, {
@@ -428,7 +424,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           { right: "put", strike: near(Math.min(target, spot - em)), contracts: -1 },
         ],
         definedRisk: true,
-        evCenter: target,
         risk,
       }),
       build(ctx, {
@@ -440,7 +435,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           { right: "call", strike: near(spot + 2 * em), contracts: 1 },
         ],
         definedRisk: true,
-        evCenter: target,
         risk,
       }),
     );
@@ -457,7 +451,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           { right: "call", strike: near(spot + 2 * em), contracts: 1 },
         ],
         definedRisk: true,
-        evCenter: spot,
         risk,
       }),
       build(ctx, {
@@ -471,7 +464,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           { right: "call", strike: near(spot + 2 * em), contracts: 1 },
         ],
         definedRisk: true,
-        evCenter: spot,
         risk,
       }),
     );
@@ -487,7 +479,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           ],
           definedRisk: false,
           capital: (_a, legs) => cashSecuredCapital(legs) + spot * CONTRACT_SIZE * 0.2,
-          evCenter: spot,
           risk,
         }),
       );
@@ -504,7 +495,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           { right: "put", strike: near(spot), contracts: 1 },
         ],
         definedRisk: true,
-        evCenter: spot,
         risk,
       }),
       build(ctx, {
@@ -516,7 +506,6 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
           { right: "put", strike: near(spot - em), contracts: 1 },
         ],
         definedRisk: true,
-        evCenter: spot,
         risk,
       }),
     );

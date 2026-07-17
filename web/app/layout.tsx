@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Hanken_Grotesk, Spline_Sans_Mono } from "next/font/google";
+import { THEME_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 // The root layout is deliberately thin: just <html>/<body>, fonts, and global
@@ -45,7 +46,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#080b0a",
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#080b0a" },
+    { media: "(prefers-color-scheme: light)", color: "#f3f0e8" },
+  ],
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -53,8 +57,18 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
-      <body>{children}</body>
+    <html
+      lang="en"
+      data-theme="dark"
+      suppressHydrationWarning
+      className={`${display.variable} ${sans.variable} ${mono.variable}`}
+    >
+      <body>
+        {/* Apply the saved theme before first paint so there's no flash of the
+            wrong palette; the toggle keeps the cookie + <html> attribute in sync. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {children}
+      </body>
     </html>
   );
 }

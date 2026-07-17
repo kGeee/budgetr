@@ -5,6 +5,8 @@ import { SyncButton } from "@/components/sync-button";
 import { RegisterSW } from "@/components/register-sw";
 import { ScaleInit, ObfuscationToggle } from "@/components/obfuscation";
 import { CurrencyInit, CurrencySwitcher } from "@/components/currency-switcher";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 import { getAccounts, getDisplayCurrencyRates } from "@/lib/queries";
 import { OBF_COOKIE, hiddenFromCookie, setHidden } from "@/lib/scale";
 import {
@@ -33,6 +35,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   // Seed the display currency + cached FX rates from the cookie/DB before any
   // server component formats money this request.
+  const theme = themeFromCookie(cookieStore.get(THEME_COOKIE)?.value);
   const displayCurrency = currencyFromCookie(cookieStore.get(CURRENCY_COOKIE)?.value);
   const ratesMap = getDisplayCurrencyRates(RATES_BASE);
   setDisplayCurrency(displayCurrency);
@@ -53,6 +56,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <MobileNav />
             <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
               <CurrencySwitcher current={displayCurrency} />
+              <ThemeToggle initialTheme={theme} />
               <ObfuscationToggle initialHidden={obfHidden} />
               <SyncButton />
             </div>

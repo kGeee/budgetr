@@ -9,7 +9,7 @@
 // writable per-user directory rather than the read-only app bundle, and (2)
 // migrations run on launch so a fresh install comes up with the right schema.
 
-const { app, BrowserWindow, dialog, shell, Menu } = require("electron");
+const { app, BrowserWindow, dialog, shell, Menu, nativeTheme, session } = require("electron");
 const path = require("node:path");
 const net = require("node:net");
 const fs = require("node:fs");
@@ -242,13 +242,39 @@ function waitForServer(url, { timeout = 60000, interval = 300 } = {}) {
   });
 }
 
+// Canvas color per theme (matches --ink dark / light in globals.css) — used for
+// the frameless window's pre-paint background so light mode doesn't frame dark.
+const THEME_BG = { dark: "#080b0a", light: "#f3f0e8" };
+let themeWatchersAttached = false;
+
+/** Read the web app's `theme` cookie (dark | light | system), defaulting dark. */
+function readThemeChoice() {
+  return session.defaultSession.cookies
+    .get({ name: "theme" })
+    .then((cookies) => {
+      const v = cookies[0]?.value;
+      return v === "light" || v === "system" ? v : "dark";
+    })
+    .catch(() => "dark");
+}
+
+/** Drive the native chrome (traffic lights, window background) from the choice. */
+function applyTheme(choice) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  nativeTheme.themeSource = choice === "light" ? "light" : choice === "system" ? "system" : "dark";
+  const resolved =
+    choice === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : choice;
+  mainWindow.setBackgroundColor(THEME_BG[resolved] ?? THEME_BG.dark);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 940,
     minHeight: 600,
-    // Match the app canvas (--ink) so there's no white flash before paint.
+    // Match the app canvas (--ink) so there's no white flash before paint. The
+    // saved theme is applied a moment later once the cookie is read (below).
     backgroundColor: "#080b0a",
     // "Frameless" but still usable: drops the title bar, keeps the macOS
     // traffic-light controls inset over the content.
@@ -263,6 +289,21 @@ function createWindow() {
 
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.loadFile(path.join(__dirname, "loading.html"));
+
+  // Follow the saved theme: apply once now, then whenever the in-app toggle
+  // rewrites the cookie or (under "system") the OS appearance flips.
+  readThemeChoice().then(applyTheme);
+  if (!themeWatchersAttached) {
+    themeWatchersAttached = true;
+    session.defaultSession.cookies.on("changed", (_e, cookie) => {
+      if (cookie.name === "theme") readThemeChoice().then(applyTheme);
+    });
+    nativeTheme.on("updated", () => {
+      readThemeChoice().then((choice) => {
+        if (choice === "system") applyTheme(choice);
+      });
+    });
+  }
 
   // The window is frameless (titleBarStyle: hiddenInset) with no title bar to
   // grab, so out of the box you can't move it and the macOS traffic lights sit

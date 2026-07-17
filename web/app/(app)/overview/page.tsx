@@ -184,7 +184,7 @@ export default async function Dashboard() {
               </p>
               <Link
                 href="/budgets"
-                className="mt-4 inline-flex items-center rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[#06120c] hover:brightness-105"
+                className="mt-4 inline-flex items-center rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[var(--on-jade)] hover:brightness-105"
               >
                 Set budgets
               </Link>
