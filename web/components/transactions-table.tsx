@@ -55,7 +55,7 @@ export function TransactionsTable({
           <button
             disabled={pending}
             onClick={reviewSelected}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-3.5 py-1.5 text-sm font-medium text-[#06120c] transition hover:brightness-105 active:scale-[0.98]"
+            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-3.5 py-1.5 text-sm font-medium text-[var(--on-jade)] transition hover:brightness-105 active:scale-[0.98]"
           >
             <Check size={14} /> Review {selected.size}
           </button>

@@ -142,7 +142,7 @@ export function TransactionDetail({
       {/* Scrim */}
       <div
         onClick={onClose}
-        className={`fixed inset-0 z-30 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${
+        className={`fixed inset-0 z-30 bg-[var(--scrim)] backdrop-blur-[2px] transition-opacity duration-200 ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
         aria-hidden
@@ -211,7 +211,7 @@ export function TransactionDetail({
                             {catSuggestion.count} past)
                           </span>
                         </span>
-                        <span className="shrink-0 rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[#1a1505]">
+                        <span className="shrink-0 rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[var(--on-brass)]">
                           Apply
                         </span>
                       </button>
@@ -264,7 +264,7 @@ export function TransactionDetail({
                             setCatOffer(null);
                             act(() => applyCategoryToVendor(t.id, o.categoryId));
                           }}
-                          className="rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[#1a1505] hover:brightness-105"
+                          className="rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[var(--on-brass)] hover:brightness-105"
                         >
                           Apply
                         </button>
@@ -338,7 +338,7 @@ export function TransactionDetail({
                 className={`flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-all active:scale-[0.99] ${
                   t.reviewed
                     ? "border border-line bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--paper)]"
-                    : "bg-[var(--jade)] text-[#06120c] hover:brightness-105"
+                    : "bg-[var(--jade)] text-[var(--on-jade)] hover:brightness-105"
                 }`}
               >
                 <Check size={16} />
@@ -470,7 +470,7 @@ function TagEditor({
               setRuleOffer(null);
               onAct(() => createTagRuleFromTransaction(transaction.id, name));
             }}
-            className="rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[#1a1505] hover:brightness-105"
+            className="rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[var(--on-brass)] hover:brightness-105"
           >
             Yes
           </button>
@@ -731,7 +731,7 @@ function SplitEditor({
         <button
           onClick={save}
           disabled={pending || !balanced}
-          className="flex-1 rounded-full bg-[var(--brass)] px-3 py-1.5 text-xs font-medium text-[#1a1505] transition hover:brightness-105 disabled:opacity-40"
+          className="flex-1 rounded-full bg-[var(--brass)] px-3 py-1.5 text-xs font-medium text-[var(--on-brass)] transition hover:brightness-105 disabled:opacity-40"
         >
           Save splits
         </button>

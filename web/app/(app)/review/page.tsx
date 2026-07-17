@@ -3,9 +3,7 @@ import {
   endOfYear,
   format,
   startOfMonth,
-  startOfWeek,
   startOfYear,
-  subDays,
   subMonths,
   subYears,
 } from "date-fns";
@@ -99,11 +97,9 @@ export default async function ReviewPage({
   const now = new Date();
   const p = resolvePeriod(period, now);
 
-  // Calendar heatmap window: the trailing ~53 weeks, aligned back to a Sunday so
-  // the grid columns are whole weeks. Independent of the selected review period.
-  const heatmapEnd = iso(now);
-  const heatmapStart = iso(startOfWeek(subDays(now, 364), { weekStartsOn: 0 }));
-  const heatmap = getDailySpendRange(heatmapStart, heatmapEnd);
+  // Day-level spend scoped to the selected period — the review page's daily-spend
+  // chart follows the period tabs (daily bars for short spans, weekly beyond).
+  const periodSpend = getDailySpendRange(p.start, p.end);
   const allCategories = getCategories();
 
   const totals = getPeriodTotals(p.start, p.end);
@@ -153,9 +149,9 @@ export default async function ReviewPage({
       shifts={shifts}
       monthlySpend={monthlySpend}
       year={p.year}
-      heatmap={heatmap}
-      heatmapStart={heatmapStart}
-      heatmapEnd={heatmapEnd}
+      periodSpend={periodSpend}
+      periodStart={p.start}
+      periodEnd={p.end}
       allCategories={allCategories}
     />
   );

@@ -1,18 +1,22 @@
-import { Coins, KeyRound, Mail } from "lucide-react";
+import { cookies } from "next/headers";
+import { Coins, KeyRound, Mail, SunMoon } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { CurrencySwitcher } from "@/components/currency-switcher";
+import { ThemeSegmented } from "@/components/theme-toggle";
 import { ReportScheduleForm } from "@/components/report-schedule-form";
 import { ApiKeysForm } from "@/components/api-keys-form";
 import { getDisplayCurrencySetting } from "@/lib/queries";
 import { getReportSchedule } from "@/lib/actions-reports";
 import { getFinnhubKey, getPlaidConfig } from "@/lib/app-config";
 import { hasPlaidCredentials } from "@/lib/plaid";
+import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const schedule = await getReportSchedule();
+  const theme = themeFromCookie((await cookies()).get(THEME_COOKIE)?.value);
   const displayCurrency = getDisplayCurrencySetting();
   const plaidCfg = getPlaidConfig();
   const clientIdHint = plaidCfg.clientId ? `••••${plaidCfg.clientId.slice(-4)}` : null;
@@ -59,6 +63,21 @@ export default async function SettingsPage() {
             amounts are shown.
           </p>
           <CurrencySwitcher current={displayCurrency} />
+        </div>
+      </Card>
+
+      {/* Appearance */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <SunMoon size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <p className="max-w-md text-sm text-[var(--muted)]">
+            Choose the interface theme. <span className="text-[var(--paper)]">System</span> follows
+            your operating system&apos;s light/dark setting.
+          </p>
+          <ThemeSegmented initialTheme={theme} />
         </div>
       </Card>
 

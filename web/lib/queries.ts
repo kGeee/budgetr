@@ -15,6 +15,7 @@ import {
   investmentTransactions,
   items,
   manualHoldings,
+  wallets,
   savedFilters,
   savingsContributions,
   securities,
@@ -1495,9 +1496,13 @@ export type ManualHoldingRow = {
   costBasis: number | null;
   manualValue: number | null;
   currency: string | null;
+  /** Set when imported from a connected wallet (else null = user-entered). */
+  walletId: string | null;
+  /** The connected wallet's label, used to group these under a "wallet" account. */
+  walletLabel: string | null;
 };
 
-/** User-entered off-Plaid holdings (crypto, fixed-value assets), newest first. */
+/** User-entered + wallet-imported off-Plaid holdings, newest first. */
 export function getManualHoldings(): ManualHoldingRow[] {
   return db
     .select({
@@ -1509,9 +1514,41 @@ export function getManualHoldings(): ManualHoldingRow[] {
       costBasis: manualHoldings.costBasis,
       manualValue: manualHoldings.manualValue,
       currency: manualHoldings.isoCurrencyCode,
+      walletId: manualHoldings.walletId,
+      walletLabel: wallets.label,
     })
     .from(manualHoldings)
+    .leftJoin(wallets, eq(manualHoldings.walletId, wallets.id))
     .orderBy(desc(manualHoldings.createdAt))
+    .all();
+}
+
+export type WalletRow = {
+  id: string;
+  chain: string;
+  address: string;
+  label: string;
+  lastSyncedAt: Date | null;
+  lastValueUsd: number | null;
+  lastTokenCount: number | null;
+  lastError: string | null;
+};
+
+/** Connected crypto wallets, newest first. */
+export function getWallets(): WalletRow[] {
+  return db
+    .select({
+      id: wallets.id,
+      chain: wallets.chain,
+      address: wallets.address,
+      label: wallets.label,
+      lastSyncedAt: wallets.lastSyncedAt,
+      lastValueUsd: wallets.lastValueUsd,
+      lastTokenCount: wallets.lastTokenCount,
+      lastError: wallets.lastError,
+    })
+    .from(wallets)
+    .orderBy(desc(wallets.createdAt))
     .all();
 }
 

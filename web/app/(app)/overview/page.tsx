@@ -134,7 +134,7 @@ export default async function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <CashflowCard data={cashflow} breakdown={cashflowBreakdown} />
 
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2 min-w-0">
           <CardHeader>
             <CardTitle>Spending · 30 days</CardTitle>
           </CardHeader>
@@ -184,7 +184,7 @@ export default async function Dashboard() {
               </p>
               <Link
                 href="/budgets"
-                className="mt-4 inline-flex items-center rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[#06120c] hover:brightness-105"
+                className="mt-4 inline-flex items-center rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[var(--on-jade)] hover:brightness-105"
               >
                 Set budgets
               </Link>

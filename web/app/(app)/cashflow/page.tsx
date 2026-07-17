@@ -123,7 +123,7 @@ export default function CashflowPage() {
           <span className="eyebrow">Balance forecast · {monthLabel}</span>
           <span className="flex items-center gap-3 text-xs text-[var(--muted)]">
             <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full" style={{ background: "#6fe3a6" }} />
+              <span className="h-2 w-2 rounded-full" style={{ background: "var(--jade)" }} />
               Actual
             </span>
             <span className="flex items-center gap-1.5">

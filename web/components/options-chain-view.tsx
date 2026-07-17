@@ -50,6 +50,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { IvSurface } from "@/components/iv-surface";
 import { OptionsAnalytics } from "@/components/options-analytics";
+import { StrategyBuilder } from "@/components/strategy-builder";
 import { useLivePrices } from "@/components/live-prices";
 import type { HoldingRow } from "@/components/portfolio-view";
 import { formatCurrency } from "@/lib/utils";
@@ -60,6 +61,7 @@ import {
   parseOccSymbol,
 } from "@/lib/options";
 import { computeGreeks } from "@/lib/greeks";
+import { useChartTheme } from "@/lib/chart-theme";
 import { expectedMove } from "@/lib/option-analytics";
 import type { OptionQuote } from "@/lib/yahoo";
 import {
@@ -80,24 +82,8 @@ import {
   type GreekKey,
 } from "@/lib/option-chain-analytics";
 
-// Shared recharts styling — mirrors components/charts.tsx so the new charts read
-// as the same system (the module-level consts there aren't exported).
-const GRID = "#212a27";
-const tick = { fill: "#8b948c", fontSize: 11, fontFamily: "var(--font-mono)" };
-const tooltipStyle = {
-  background: "#101413",
-  border: "1px solid #303b37",
-  borderRadius: 12,
-  fontSize: 12,
-  color: "#ece7da",
-  padding: "8px 12px",
-  boxShadow: "0 30px 60px -32px rgba(0,0,0,0.9)",
-  fontFamily: "var(--font-mono)",
-} as const;
-const JADE = "#6fe3a6";
-const CORAL = "#f0897b";
-const BRASS = "#cbb07c";
-const BLUE = "#7fb2e0";
+// Recharts colors come from the theme via useChartTheme() so they adapt to
+// light/dark; each chart sub-component reads `ct` and uses ct.grid/jade/etc.
 
 type ChartTab = "smile" | "term" | "oi" | "volume" | "greek" | "gex" | "surface";
 type ExpiryFilter = "all" | ExpiryKind | "weekly";
@@ -269,6 +255,14 @@ export function OptionsChainView({
           heldOccs={heldOccs}
         />
       )}
+
+      <StrategyBuilder
+        ticker={ticker}
+        contracts={contracts}
+        selectedExpiry={selectedExpiry}
+        spot={spot}
+        currency={currency}
+      />
 
       {heldLegs.length > 0 && (
         <div className="space-y-4">
@@ -479,6 +473,7 @@ function SmileChart({
   expiry: string | null;
   spot: number | null;
 }) {
+  const ct = useChartTheme();
   const data = useMemo(
     () => (expiry ? volatilitySmile(contracts, expiry, spot) : []),
     [contracts, expiry, spot],
@@ -494,25 +489,25 @@ function SmileChart({
   return (
     <ResponsiveContainer width="100%" height={320}>
       <LineChart data={rows} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
-        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+        <CartesianGrid stroke={ct.grid} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="strike"
           type="number"
           domain={["dataMin", "dataMax"]}
-          tick={tick}
+          tick={ct.tick}
           tickFormatter={(v) => formatStrike(v)}
           tickLine={false}
-          axisLine={{ stroke: GRID }}
+          axisLine={{ stroke: ct.grid }}
         />
         <YAxis
-          tick={tick}
+          tick={ct.tick}
           tickFormatter={(v) => `${v.toFixed(0)}%`}
           tickLine={false}
           axisLine={false}
           width={44}
         />
         <Tooltip
-          contentStyle={tooltipStyle}
+          contentStyle={ct.tooltipStyle}
           formatter={(value, name) => {
             const v = Number(value);
             return [Number.isFinite(v) ? `${v.toFixed(1)}%` : "—", name === "call" ? "Call IV" : "Put IV"];
@@ -520,10 +515,10 @@ function SmileChart({
           labelFormatter={(l) => `Strike ${formatStrike(Number(l))}`}
         />
         {spot != null && (
-          <ReferenceLine x={spot} stroke={BRASS} strokeDasharray="4 4" label={{ value: "spot", fill: BRASS, fontSize: 10, position: "top" }} />
+          <ReferenceLine x={spot} stroke={ct.brass} strokeDasharray="4 4" label={{ value: "spot", fill: ct.brass, fontSize: 10, position: "top" }} />
         )}
-        <Line type="monotone" dataKey="call" stroke={JADE} strokeWidth={2} dot={false} connectNulls name="call" />
-        <Line type="monotone" dataKey="put" stroke={CORAL} strokeWidth={2} dot={false} connectNulls name="put" />
+        <Line type="monotone" dataKey="call" stroke={ct.jade} strokeWidth={2} dot={false} connectNulls name="call" />
+        <Line type="monotone" dataKey="put" stroke={ct.coral} strokeWidth={2} dot={false} connectNulls name="put" />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -531,6 +526,7 @@ function SmileChart({
 
 // IV term structure — ATM IV vs DTE across all expiries.
 function TermChart({ contracts, spot }: { contracts: OptionQuote[]; spot: number | null }) {
+  const ct = useChartTheme();
   const rows = useMemo(
     () =>
       ivTermStructure(contracts, spot)
@@ -542,23 +538,23 @@ function TermChart({ contracts, spot }: { contracts: OptionQuote[]; spot: number
   return (
     <ResponsiveContainer width="100%" height={320}>
       <LineChart data={rows} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
-        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+        <CartesianGrid stroke={ct.grid} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="dte"
           type="number"
           domain={["dataMin", "dataMax"]}
-          tick={tick}
+          tick={ct.tick}
           tickFormatter={(v) => `${v}d`}
           tickLine={false}
-          axisLine={{ stroke: GRID }}
+          axisLine={{ stroke: ct.grid }}
         />
-        <YAxis tick={tick} tickFormatter={(v) => `${v.toFixed(0)}%`} tickLine={false} axisLine={false} width={44} />
+        <YAxis tick={ct.tick} tickFormatter={(v) => `${v.toFixed(0)}%`} tickLine={false} axisLine={false} width={44} />
         <Tooltip
-          contentStyle={tooltipStyle}
+          contentStyle={ct.tooltipStyle}
           formatter={(value) => [`${Number(value).toFixed(1)}%`, "ATM IV"]}
           labelFormatter={(l) => `${l}d to expiry`}
         />
-        <Line type="monotone" dataKey="iv" stroke={BRASS} strokeWidth={2} dot={{ r: 2.5, fill: BRASS }} />
+        <Line type="monotone" dataKey="iv" stroke={ct.brass} strokeWidth={2} dot={{ r: 2.5, fill: ct.brass }} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -576,6 +572,7 @@ function FlowChart({
   spot: number | null;
   metric: "oi" | "volume";
 }) {
+  const ct = useChartTheme();
   const { rows, pain } = useMemo(() => {
     if (!expiry) return { rows: [], pain: null as number | null };
     const flow = flowByStrike(contracts, expiry).map((f) => ({
@@ -590,26 +587,26 @@ function FlowChart({
   return (
     <ResponsiveContainer width="100%" height={320}>
       <BarChart data={rows} margin={{ left: 4, right: 12, top: 8, bottom: 4 }} barGap={0}>
-        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+        <CartesianGrid stroke={ct.grid} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="strike"
           type="number"
           domain={["dataMin", "dataMax"]}
-          tick={tick}
+          tick={ct.tick}
           tickFormatter={(v) => formatStrike(v)}
           tickLine={false}
-          axisLine={{ stroke: GRID }}
+          axisLine={{ stroke: ct.grid }}
         />
-        <YAxis tick={tick} tickFormatter={(v) => compactNum(v)} tickLine={false} axisLine={false} width={48} />
+        <YAxis tick={ct.tick} tickFormatter={(v) => compactNum(v)} tickLine={false} axisLine={false} width={48} />
         <Tooltip
-          contentStyle={tooltipStyle}
+          contentStyle={ct.tooltipStyle}
           formatter={(value, name) => [compactNum(Number(value)), name === "call" ? "Calls" : "Puts"]}
           labelFormatter={(l) => `Strike ${formatStrike(Number(l))}`}
         />
-        {spot != null && <ReferenceLine x={spot} stroke={BRASS} strokeDasharray="4 4" label={{ value: "spot", fill: BRASS, fontSize: 10, position: "top" }} />}
-        {pain != null && <ReferenceLine x={pain} stroke={BLUE} strokeDasharray="2 2" label={{ value: "max pain", fill: BLUE, fontSize: 10, position: "insideTopRight" }} />}
-        <Bar dataKey="call" fill={JADE} fillOpacity={0.85} name="call" />
-        <Bar dataKey="put" fill={CORAL} fillOpacity={0.85} name="put" />
+        {spot != null && <ReferenceLine x={spot} stroke={ct.brass} strokeDasharray="4 4" label={{ value: "spot", fill: ct.brass, fontSize: 10, position: "top" }} />}
+        {pain != null && <ReferenceLine x={pain} stroke={ct.blue} strokeDasharray="2 2" label={{ value: "max pain", fill: ct.blue, fontSize: 10, position: "insideTopRight" }} />}
+        <Bar dataKey="call" fill={ct.jade} fillOpacity={0.85} name="call" />
+        <Bar dataKey="put" fill={ct.coral} fillOpacity={0.85} name="put" />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -625,6 +622,7 @@ function GreekChart({
   expiry: string | null;
   spot: number | null;
 }) {
+  const ct = useChartTheme();
   const [greek, setGreek] = useState<GreekKey>("delta");
   const rows = useMemo(() => {
     if (!expiry) return [];
@@ -664,28 +662,28 @@ function GreekChart({
       ) : (
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={rows} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
-            <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+            <CartesianGrid stroke={ct.grid} strokeDasharray="2 4" vertical={false} />
             <XAxis
               dataKey="strike"
               type="number"
               domain={["dataMin", "dataMax"]}
-              tick={tick}
+              tick={ct.tick}
               tickFormatter={(v) => formatStrike(v)}
               tickLine={false}
-              axisLine={{ stroke: GRID }}
+              axisLine={{ stroke: ct.grid }}
             />
-            <YAxis tick={tick} tickLine={false} axisLine={false} width={52} />
+            <YAxis tick={ct.tick} tickLine={false} axisLine={false} width={52} />
             <Tooltip
-              contentStyle={tooltipStyle}
+              contentStyle={ct.tooltipStyle}
               formatter={(value, name) => {
                 const v = Number(value);
                 return [Number.isFinite(v) ? v.toFixed(4) : "—", name === "call" ? "Call" : "Put"];
               }}
               labelFormatter={(l) => `Strike ${formatStrike(Number(l))}`}
             />
-            {spot != null && <ReferenceLine x={spot} stroke={BRASS} strokeDasharray="4 4" />}
-            <Line type="monotone" dataKey="call" stroke={JADE} strokeWidth={2} dot={false} connectNulls name="call" />
-            <Line type="monotone" dataKey="put" stroke={CORAL} strokeWidth={2} dot={false} connectNulls name="put" />
+            {spot != null && <ReferenceLine x={spot} stroke={ct.brass} strokeDasharray="4 4" />}
+            <Line type="monotone" dataKey="call" stroke={ct.jade} strokeWidth={2} dot={false} connectNulls name="call" />
+            <Line type="monotone" dataKey="put" stroke={ct.coral} strokeWidth={2} dot={false} connectNulls name="put" />
           </LineChart>
         </ResponsiveContainer>
       )}
@@ -703,6 +701,7 @@ function GexChart({
   expiry: string | null;
   spot: number | null;
 }) {
+  const ct = useChartTheme();
   const rows = useMemo(
     () => (expiry ? gammaExposureByStrike(contracts, expiry, spot) : []),
     [contracts, expiry, spot],
@@ -712,27 +711,27 @@ function GexChart({
   return (
     <ResponsiveContainer width="100%" height={320}>
       <ComposedChart data={rows} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
-        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+        <CartesianGrid stroke={ct.grid} strokeDasharray="2 4" vertical={false} />
         <XAxis
           dataKey="strike"
           type="number"
           domain={["dataMin", "dataMax"]}
-          tick={tick}
+          tick={ct.tick}
           tickFormatter={(v) => formatStrike(v)}
           tickLine={false}
-          axisLine={{ stroke: GRID }}
+          axisLine={{ stroke: ct.grid }}
         />
-        <YAxis tick={tick} tickFormatter={(v) => compactNum(v)} tickLine={false} axisLine={false} width={52} />
+        <YAxis tick={ct.tick} tickFormatter={(v) => compactNum(v)} tickLine={false} axisLine={false} width={52} />
         <Tooltip
-          contentStyle={tooltipStyle}
+          contentStyle={ct.tooltipStyle}
           formatter={(value) => [compactSigned(Number(value)), "GEX"]}
           labelFormatter={(l) => `Strike ${formatStrike(Number(l))}`}
         />
-        <ReferenceLine y={0} stroke="#303b37" />
-        {spot != null && <ReferenceLine x={spot} stroke={BRASS} strokeDasharray="4 4" label={{ value: "spot", fill: BRASS, fontSize: 10, position: "top" }} />}
+        <ReferenceLine y={0} stroke={ct.gridStrong} />
+        {spot != null && <ReferenceLine x={spot} stroke={ct.brass} strokeDasharray="4 4" label={{ value: "spot", fill: ct.brass, fontSize: 10, position: "top" }} />}
         <Bar dataKey="gex" name="gex">
           {rows.map((r) => (
-            <Cell key={r.strike} fill={r.gex >= 0 ? JADE : CORAL} fillOpacity={0.85} />
+            <Cell key={r.strike} fill={r.gex >= 0 ? ct.jade : ct.coral} fillOpacity={0.85} />
           ))}
         </Bar>
       </ComposedChart>

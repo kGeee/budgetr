@@ -2,7 +2,8 @@ import { Card } from "@/components/ui/card";
 import { PlaidLink } from "@/components/plaid-link";
 import { PageHead } from "@/components/page-head";
 import { AccountVisibilityToggle } from "@/components/account-visibility-toggle";
-import { getAccounts } from "@/lib/queries";
+import { ConnectWalletButton, WalletsCard } from "@/components/connect-wallet-dialog";
+import { getAccounts, getWallets } from "@/lib/queries";
 import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
 
@@ -17,6 +18,7 @@ const TYPE_LABEL: Record<string, string> = {
 
 export default function AccountsPage() {
   const accounts = getAccounts();
+  const wallets = getWallets();
 
   const byInstitution = new Map<string, typeof accounts>();
   for (const a of accounts) {
@@ -38,7 +40,15 @@ export default function AccountsPage() {
 
   return (
     <div className="space-y-7">
-      <PageHead title="Accounts" action={<PlaidLink />} />
+      <PageHead
+        title="Accounts"
+        action={
+          <div className="flex items-center gap-2">
+            <ConnectWalletButton />
+            <PlaidLink />
+          </div>
+        }
+      />
 
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-display text-3xl tabular">
@@ -50,13 +60,16 @@ export default function AccountsPage() {
         </span>
       </div>
 
-      {accounts.length === 0 && (
+      {accounts.length === 0 && wallets.length === 0 && (
         <Card>
           <p className="text-sm text-[var(--muted)]">
-            No accounts connected yet. Use “Connect account” to link your card, brokerage, and bank.
+            No accounts connected yet. Use “Connect account” to link your card, brokerage, and bank,
+            or “Connect wallet” to import an on-chain crypto address.
           </p>
         </Card>
       )}
+
+      <WalletsCard wallets={wallets} />
 
       <div className="space-y-5">
         {[...byInstitution.entries()].map(([institution, accts]) => {

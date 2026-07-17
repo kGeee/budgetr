@@ -67,7 +67,7 @@ export function OnboardingWizard({ initial }: { initial: Initial }) {
                   this machine. Nothing leaves your computer except the calls that fetch your data.
                 </p>
                 <p className="mt-3">
-                  To pull in your accounts, budgetr uses <b>Plaid</b> (the bank-connection service).
+                  To pull in your accounts, budgetr uses <b>Plaid</b>  (the bank-connection service).
                   You&apos;ll bring your own free Plaid keys — this takes about 5 minutes.
                 </p>
                 <p className="mt-3 inline-flex items-center gap-2 text-[var(--jade)]">
@@ -186,9 +186,9 @@ function Stepper({ step }: { step: number }) {
             <span
               className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-medium transition-colors ${
                 i < step
-                  ? "bg-[var(--jade)] text-[#06120c]"
+                  ? "bg-[var(--jade)] text-[var(--on-jade)]"
                   : i === step
-                    ? "bg-[var(--brass)] text-[#0d0a04]"
+                    ? "bg-[var(--brass)] text-[var(--on-brass)]"
                     : "border border-line text-[var(--faint)]"
               }`}
             >

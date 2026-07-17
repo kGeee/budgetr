@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHead } from "@/components/page-head";
 import { CategoryChart, MonthlySpendChart } from "@/components/charts";
 import { CategoryIcon } from "@/components/category-pill";
-import { SpendHeatmap } from "@/components/spend-heatmap";
+import { PeriodSpendChart } from "@/components/period-spend-chart";
 import { formatMoney } from "@/lib/utils";
 import type {
   BiggestPurchase,
@@ -49,9 +49,9 @@ export function ReviewView({
   shifts,
   monthlySpend,
   year,
-  heatmap,
-  heatmapStart,
-  heatmapEnd,
+  periodSpend,
+  periodStart,
+  periodEnd,
   allCategories,
 }: {
   period: Period;
@@ -64,9 +64,9 @@ export function ReviewView({
   shifts: CategoryShift[];
   monthlySpend: { month: string; spent: number }[];
   year: number;
-  heatmap: { date: string; spent: number }[];
-  heatmapStart: string;
-  heatmapEnd: string;
+  periodSpend: { date: string; spent: number }[];
+  periodStart: string;
+  periodEnd: string;
   allCategories: CategoryRow[];
 }) {
   const empty = totals.txCount === 0;
@@ -145,16 +145,17 @@ export function ReviewView({
         )}
       </Card>
 
-      {/* Daily-spend calendar — trailing year, period-independent. */}
+      {/* Daily spend — scoped to the selected period. */}
       <Card>
         <CardHeader>
-          <CardTitle>Daily spend · trailing year</CardTitle>
+          <CardTitle>Daily spend · {label}</CardTitle>
           <CalendarDays size={15} className="text-[var(--brass)]" />
         </CardHeader>
-        <SpendHeatmap
-          data={heatmap}
-          start={heatmapStart}
-          end={heatmapEnd}
+        <PeriodSpendChart
+          data={periodSpend}
+          start={periodStart}
+          end={periodEnd}
+          label={label}
           categories={allCategories}
         />
       </Card>

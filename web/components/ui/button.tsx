@@ -7,7 +7,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "bg-[var(--jade)] text-[#06120c] hover:brightness-105 hover:shadow-[0_8px_24px_-10px_rgba(111,227,166,0.6)]",
+          "bg-[var(--jade)] text-[var(--on-jade)] hover:brightness-105 hover:shadow-[0_8px_24px_-10px_rgba(111,227,166,0.6)]",
         secondary:
           "border border-line bg-[var(--panel)] text-[var(--paper)] hover:border-[var(--line-strong)] hover:bg-[var(--panel-2)]",
         outline:

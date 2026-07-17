@@ -87,7 +87,7 @@ export function MatchesReview({ suggestions }: { suggestions: MatchSuggestion[] 
                 <button
                   disabled={pending}
                   onClick={() => act(s, () => confirmMatch(s.a.id, s.b.id, s.kind))}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-3.5 py-1.5 text-sm font-medium text-[#06120c] transition hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-3.5 py-1.5 text-sm font-medium text-[var(--on-jade)] transition hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
                 >
                   <Check size={14} /> Link
                 </button>

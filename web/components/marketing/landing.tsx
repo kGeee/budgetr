@@ -18,7 +18,7 @@ export function MarketingLanding() {
   return (
     <main>
       {/* Hero */}
-      <section className="mx-auto max-w-6xl px-5 pb-16 pt-16 text-center sm:px-8 sm:pt-24">
+      <section className="mx-auto max-w-6xl px-5 pb-10 pt-12 text-center sm:px-8 sm:pt-16">
         <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-3xl text-[var(--brass)] shadow-[var(--elev-1)]">
           ₿
         </span>
@@ -30,10 +30,10 @@ export function MarketingLanding() {
         <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
           <BuyLink />
           <Link
-            href="/getting-started"
+            href="#screens"
             className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)]"
           >
-            See how it works
+            See the app
           </Link>
         </div>
         <p className="mt-5 inline-flex items-center gap-2 text-xs text-[var(--muted)]">
@@ -42,11 +42,9 @@ export function MarketingLanding() {
         </p>
       </section>
 
-      {/* Hero screenshot */}
-      <HeroShot />
-
-      {/* Features */}
-      <section id="features" className="mx-auto max-w-6xl px-5 py-8 sm:px-8">
+      {/* Features — the perks, surfaced right under the hero so they land above
+          the fold instead of behind the screenshot. */}
+      <section id="features" className="mx-auto max-w-6xl px-5 pb-6 pt-2 sm:px-8">
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
             <Card key={f.title} className="p-6">
@@ -57,6 +55,9 @@ export function MarketingLanding() {
           ))}
         </div>
       </section>
+
+      {/* Hero screenshot */}
+      <HeroShot />
 
       {/* Privacy band */}
       <section className="mx-auto max-w-6xl px-5 py-12 sm:px-8">
@@ -112,28 +113,28 @@ export function MarketingLanding() {
         </div>
       </section>
 
-      {/* Pricing + CTA */}
+      {/* Closing CTA — one clean price moment (full breakdown + FAQ live on
+          /pricing; this isn't a second pricing table). */}
       <section className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
-        <Card className="mx-auto max-w-md p-8 text-center">
-          <p className="eyebrow">One-time purchase</p>
-          <p className="mt-3 font-display text-5xl tabular">{SITE.price}</p>
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            {hasCheckout() ? "Lifetime license · free updates" : "Free while in preview"}
+        <Card className="mx-auto max-w-xl p-8 text-center sm:p-12">
+          <p className="eyebrow">Ready when you are</p>
+          <h2 className="display-2 mt-3 font-display text-3xl sm:text-4xl">
+            Own it for {SITE.price}
+          </h2>
+          <p className="mx-auto mt-3 max-w-md text-[var(--muted)]">
+            {hasCheckout()
+              ? "One-time purchase — every feature, free updates, and your data never leaves your Mac."
+              : "Free while in preview — every feature, and your data never leaves your Mac."}
           </p>
-          <ul className="mt-6 space-y-2 text-left text-sm">
-            {["Every feature — budgets, investments, options, tax lots", "macOS app, notarized & signed", "Your data stays on your Mac"].map((t) => (
-              <li key={t} className="flex items-center gap-2.5">
-                <ShieldCheck size={14} className="shrink-0 text-[var(--jade)]" />
-                <span className="text-[var(--paper)]/90">{t}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-8 flex justify-center">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <BuyLink />
+            <Link
+              href="/pricing"
+              className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)]"
+            >
+              Pricing &amp; FAQ
+            </Link>
           </div>
-          <Link href="/pricing" className="mt-4 inline-block text-xs text-[var(--brass)] hover:underline">
-            Full pricing & FAQ →
-          </Link>
         </Card>
       </section>
     </main>
