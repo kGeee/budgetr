@@ -25,9 +25,11 @@ export default function ThanksPage() {
       </p>
 
       <Card className="mt-8 p-6 text-left">
+        {/* Centered CTA to line up with the centered hero above; the steps below
+            stay left-aligned because a numbered list reads better ragged-right. */}
         <a
           href={SITE.directDmgUrl}
-          className="inline-flex items-center gap-2 rounded-full bg-[var(--jade)] px-5 py-2.5 text-sm font-medium text-[var(--on-jade)] transition hover:brightness-105"
+          className="mx-auto flex w-fit items-center gap-2 rounded-full bg-[var(--jade)] px-5 py-2.5 text-sm font-medium text-[var(--on-jade)] transition hover:brightness-105"
         >
           <Download size={16} />
           Download budgetr for macOS
