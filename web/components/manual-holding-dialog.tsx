@@ -15,7 +15,7 @@ import {
 function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       role="presentation"
     >
@@ -184,6 +184,7 @@ export function EditManualHoldingButton({
   quantity: q0,
   costBasis: c0,
   value: v0,
+  fromWallet = false,
 }: {
   id: string;
   name: string;
@@ -191,6 +192,8 @@ export function EditManualHoldingButton({
   quantity: number | null;
   costBasis: number | null;
   value: number | null;
+  /** Wallet-imported: quantity is synced from chain, so only cost basis is editable. */
+  fromWallet?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -205,7 +208,12 @@ export function EditManualHoldingButton({
       await updateManualHolding(
         id,
         isTickered
-          ? { name: name.trim() || initialName, quantity: num(quantity), costBasis: num(cost) }
+          ? {
+              name: name.trim() || initialName,
+              // Wallet quantity is chain-authoritative — don't overwrite it.
+              ...(fromWallet ? {} : { quantity: num(quantity) }),
+              costBasis: num(cost),
+            }
           : { name: name.trim() || initialName, manualValue: num(value) },
       );
       setOpen(false);
@@ -235,8 +243,16 @@ export function EditManualHoldingButton({
             </Field>
             {isTickered ? (
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Quantity">
-                  <Input value={quantity} onChange={setQuantity} mono />
+                <Field
+                  label="Quantity"
+                  hint={fromWallet ? "Synced from chain" : undefined}
+                >
+                  <Input
+                    value={quantity}
+                    onChange={setQuantity}
+                    mono
+                    readOnly={fromWallet}
+                  />
                 </Field>
                 <Field label="Cost basis (opt)">
                   <Input value={cost} onChange={setCost} mono />
@@ -465,20 +481,23 @@ function Input({
   onChange,
   placeholder,
   mono,
+  readOnly,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   mono?: boolean;
+  readOnly?: boolean;
 }) {
   return (
     <input
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      readOnly={readOnly}
       className={`h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2.5 text-sm text-[var(--paper)] outline-none transition-colors placeholder:text-[var(--faint)] hover:text-[var(--paper)] focus:border-[var(--brass-dim)] focus:text-[var(--paper)] ${
-        mono ? "mono" : ""
-      }`}
+        readOnly ? "opacity-60 cursor-not-allowed" : ""
+      } ${mono ? "mono" : ""}`}
     />
   );
 }

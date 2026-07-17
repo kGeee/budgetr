@@ -78,8 +78,11 @@ export default async function InvestmentsPage() {
       ticker: m.symbol,
       securityName: m.name,
       securityType: m.type,
-      accountName: "Manual",
+      // Wallet-imported tokens group under the wallet's label as their own
+      // "account"; hand-entered holdings stay under "Manual".
+      accountName: m.walletLabel ?? "Manual",
       manual: true,
+      fromWallet: Boolean(m.walletId),
       sectorKey,
       sector: sectors[sectorKey] ?? null,
     };

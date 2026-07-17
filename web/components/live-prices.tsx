@@ -64,6 +64,10 @@ export function LivePricesProvider({
     const syms = symbolsKey ? symbolsKey.split(",") : [];
     if (syms.length === 0) return;
 
+    // Crypto (`*-USD`) is priced via CoinGecko's REST snapshot, not the Finnhub
+    // trade stream, so it's excluded from WS subscribe/unsubscribe.
+    const wsSyms = syms.filter((s) => !/-USD$/.test(s));
+
     let cancelled = false;
     let ws: WebSocket | null = null;
     let token: string | null = null;
@@ -84,11 +88,9 @@ export function LivePricesProvider({
         };
         if (cancelled) return false;
 
-        if (!data.enabled) {
-          setConnStatus("disabled");
-          return false;
-        }
-
+        // Seed the snapshot regardless of whether Finnhub streaming is enabled —
+        // crypto quotes (CoinGecko) come back even with no Finnhub key, and a
+        // crypto-only portfolio should still show priced holdings.
         token = data.wsToken;
         const seed: Record<string, LiveQuote> = {};
         for (const [sym, q] of Object.entries(data.quotes ?? {})) {
@@ -103,6 +105,12 @@ export function LivePricesProvider({
         }
         if (Object.keys(seed).length > 0) {
           setQuotes((prev) => ({ ...prev, ...seed }));
+        }
+
+        // No Finnhub key → no live equity stream. Quotes are still seeded above.
+        if (!data.enabled) {
+          setConnStatus("disabled");
+          return false;
         }
         return true;
       } catch {
@@ -119,7 +127,7 @@ export function LivePricesProvider({
         if (cancelled) return;
         setConnStatus("live");
         reconnectDelay = 2_000;
-        for (const s of syms) {
+        for (const s of wsSyms) {
           ws?.send(JSON.stringify({ type: "subscribe", symbol: s }));
         }
       };
@@ -175,7 +183,7 @@ export function LivePricesProvider({
       if (ws) {
         try {
           if (ws.readyState === WebSocket.OPEN) {
-            for (const s of syms) {
+            for (const s of wsSyms) {
               ws.send(JSON.stringify({ type: "unsubscribe", symbol: s }));
             }
           }

@@ -26,7 +26,10 @@ import {
   transactions,
   vendorGroupMembers,
   vendorGroups,
+  wallets,
 } from "@/db/schema";
+import { isValidAddress, type Chain } from "@/lib/onchain";
+import { syncWallet, type WalletSyncResult } from "@/lib/wallet-sync";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { applyTagRules } from "@/lib/tag-rules";
 import { cleanTransactionName } from "@/lib/utils";
@@ -802,6 +805,80 @@ export async function updateManualHolding(
 /** Remove an off-account holding. */
 export async function deleteManualHolding(id: string) {
   db.delete(manualHoldings).where(eq(manualHoldings.id, id)).run();
+  revalidateAll();
+}
+
+// ── Connected crypto wallets ─────────────────────────────────────────────────
+
+export type ConnectWalletResult =
+  | { ok: true; sync: WalletSyncResult }
+  | { ok: false; error: string };
+
+const CHAINS: Chain[] = ["bitcoin", "ethereum", "solana"];
+
+/**
+ * Connect a read-only on-chain wallet and pull its (junk-filtered) balances.
+ * Idempotent per (chain, address): re-connecting the same address re-syncs it.
+ */
+export async function connectWallet(input: {
+  chain: string;
+  address: string;
+  label?: string | null;
+}): Promise<ConnectWalletResult> {
+  const chain = input.chain as Chain;
+  const address = input.address?.trim();
+  if (!CHAINS.includes(chain)) return { ok: false, error: "Unsupported chain." };
+  if (!address || !isValidAddress(chain, address)) {
+    return { ok: false, error: "That doesn't look like a valid address for this chain." };
+  }
+
+  const id = `wallet:${chain}:${address}`;
+  const label = input.label?.trim() || `${chain[0].toUpperCase()}${chain.slice(1)} wallet`;
+  const now = new Date();
+
+  db.insert(wallets)
+    .values({ id, chain, address, label, createdAt: now, updatedAt: now })
+    .onConflictDoUpdate({ target: wallets.id, set: { label, updatedAt: now } })
+    .run();
+
+  try {
+    const sync = await syncWallet({ id, chain, address });
+    revalidateAll();
+    return { ok: true, sync };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : "Sync failed.";
+    db.update(wallets).set({ lastError: error, updatedAt: new Date() }).where(eq(wallets.id, id)).run();
+    revalidateAll();
+    return { ok: false, error };
+  }
+}
+
+/** Re-pull balances for an already-connected wallet. */
+export async function resyncWallet(id: string): Promise<ConnectWalletResult> {
+  const w = db.select().from(wallets).where(eq(wallets.id, id)).get();
+  if (!w) return { ok: false, error: "Wallet not found." };
+  try {
+    const sync = await syncWallet({ id: w.id, chain: w.chain, address: w.address });
+    revalidateAll();
+    return { ok: true, sync };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : "Sync failed.";
+    db.update(wallets).set({ lastError: error, updatedAt: new Date() }).where(eq(wallets.id, id)).run();
+    revalidateAll();
+    return { ok: false, error };
+  }
+}
+
+/** Disconnect a wallet and remove its imported holdings. */
+export async function removeWallet(id: string) {
+  // The wallet_id FK was added via ALTER TABLE, which SQLite can't attach an
+  // ON DELETE action to — so delete child holdings first, then the wallet,
+  // atomically. (Deleting the wallet while rows reference it would otherwise
+  // fail the foreign-key constraint.)
+  db.transaction((tx) => {
+    tx.delete(manualHoldings).where(eq(manualHoldings.walletId, id)).run();
+    tx.delete(wallets).where(eq(wallets.id, id)).run();
+  });
   revalidateAll();
 }
 

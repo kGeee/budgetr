@@ -192,7 +192,7 @@ export function MobileNav() {
 
       {/* Dimmed click-away backdrop. Stays mounted so open/close can animate. */}
       <div
-        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-200 md:hidden ${
+        className={`fixed inset-0 z-40 bg-[var(--scrim)] backdrop-blur-[2px] transition-opacity duration-200 md:hidden ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
         onClick={() => setOpen(false)}

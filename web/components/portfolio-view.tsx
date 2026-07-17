@@ -62,6 +62,8 @@ export type HoldingRow = {
   accountName: string | null;
   /** True for user-entered off-Plaid holdings (crypto, fixed-value assets). */
   manual?: boolean;
+  /** True when imported from a connected wallet (quantity is chain-synced). */
+  fromWallet?: boolean;
   /** Symbol-scoped key the sector assignment is stored under (see sectorKeyFor). */
   sectorKey: string;
   /** Currently assigned sector, or null when untagged. */
@@ -646,7 +648,12 @@ function PortfolioInner({
           value={dayChange}
           signed
           pct={dayChangePctTotal}
-          detail={`${Math.min(dayCoverage, 100).toFixed(0)}% of value priced today`}
+          detail={`${Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote`}
+          detailTitle={
+            "Day change is computed only from holdings with a live intraday quote " +
+            "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
+            "funds, and untracked symbols are excluded, so this share is below 100%."
+          }
         />
         <Stat
           label="Unrealized gain"
@@ -925,11 +932,16 @@ function HoldingRowView({
                     quantity={h.quantity}
                     costBasis={h.costBasis}
                     value={h.value}
+                    fromWallet={h.fromWallet}
                   />
-                  <DeleteManualHoldingButton
-                    id={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                  />
+                  {/* Wallet holdings are removed by disconnecting the wallet
+                      (Accounts page), not per-row, so no delete here. */}
+                  {!h.fromWallet && (
+                    <DeleteManualHoldingButton
+                      id={h.id}
+                      name={h.securityName ?? h.ticker ?? "holding"}
+                    />
+                  )}
                 </span>
               )}
               {!h.manual && (
@@ -1385,7 +1397,7 @@ function GainBreakdownModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
@@ -2075,6 +2087,7 @@ function Stat({
   pct,
   hint,
   detail,
+  detailTitle,
   onClick,
 }: {
   label: string;
@@ -2084,6 +2097,7 @@ function Stat({
   pct?: number;
   hint?: string;
   detail?: string;
+  detailTitle?: string;
   onClick?: () => void;
 }) {
   const positive = value >= 0;
@@ -2108,7 +2122,14 @@ function Stat({
           {Math.abs(pct).toFixed(2)}%
         </p>
       )}
-      {detail && <p className="mt-1 text-xs text-[var(--muted)]">{detail}</p>}
+      {detail && (
+        <p
+          className={`mt-1 text-xs text-[var(--muted)]${detailTitle ? " cursor-help" : ""}`}
+          title={detailTitle}
+        >
+          {detail}
+        </p>
+      )}
     </>
   );
 

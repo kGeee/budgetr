@@ -22,8 +22,8 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
             <Link href="/#features" className="hover:text-[var(--paper)]">
               Features
             </Link>
-            <Link href="/pricing" className="hover:text-[var(--paper)]">
-              Pricing
+            <Link href="/#screens" className="hover:text-[var(--paper)]">
+              The app
             </Link>
             <Link href="/getting-started" className="hover:text-[var(--paper)]">
               Getting started
@@ -44,11 +44,11 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
             <span>Read-only · data stays on your machine.</span>
           </div>
           <div className="flex flex-wrap items-center gap-5">
-            <Link href="/pricing" className="hover:text-[var(--paper)]">
-              Pricing
-            </Link>
             <Link href="/getting-started" className="hover:text-[var(--paper)]">
-              Getting started
+              Getting Started
+            </Link>
+            <Link href="/pricing" className="hover:text-[var(--paper)]">
+              Pricing &amp; FAQ
             </Link>
             <a href={SITE.repoUrl} className="hover:text-[var(--paper)]" target="_blank" rel="noopener noreferrer">
               GitHub
@@ -70,7 +70,7 @@ export function BuyLink({ className = "", label }: { className?: string; label?:
       href={primaryCtaHref()}
       target="_blank"
       rel="noopener noreferrer"
-      className={`inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[#06120c] transition hover:brightness-105 ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[var(--on-jade)] transition hover:brightness-105 ${className}`}
     >
       {text}
       <ArrowUpRight size={15} />

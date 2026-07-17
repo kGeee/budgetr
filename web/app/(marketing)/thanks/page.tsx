@@ -27,7 +27,7 @@ export default function ThanksPage() {
       <Card className="mt-8 p-6 text-left">
         <a
           href={SITE.directDmgUrl}
-          className="inline-flex items-center gap-2 rounded-full bg-[var(--jade)] px-5 py-2.5 text-sm font-medium text-[#06120c] transition hover:brightness-105"
+          className="inline-flex items-center gap-2 rounded-full bg-[var(--jade)] px-5 py-2.5 text-sm font-medium text-[var(--on-jade)] transition hover:brightness-105"
         >
           <Download size={16} />
           Download budgetr for macOS
@@ -38,7 +38,7 @@ export default function ThanksPage() {
           <li>
             3. Follow the setup wizard to add your Plaid keys and connect a bank. Need a hand? See{" "}
             <Link href="/getting-started" className="text-[var(--brass)] hover:underline">
-              getting started
+              Getting Started
             </Link>
             .
           </li>

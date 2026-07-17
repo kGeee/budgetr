@@ -352,6 +352,25 @@ export const investmentTransactions = sqliteTable(
  * Kept in its own table so the Plaid holdings prune in lib/sync.ts can never
  * touch them.
  */
+/**
+ * A connected read-only crypto wallet (an on-chain address we import balances
+ * from). Tokens fetched from a wallet are stored as `manual_holdings` rows tagged
+ * with `walletId`, so they ride the same off-Plaid render + valuation path and
+ * are never touched by the Plaid prune. Re-syncing replaces those rows.
+ */
+export const wallets = sqliteTable("wallets", {
+  id: text("id").primaryKey(), // `wallet:${chain}:${address}`
+  chain: text("chain").notNull(), // bitcoin | ethereum | solana
+  address: text("address").notNull(),
+  label: text("label").notNull(),
+  lastSyncedAt: integer("last_synced_at", { mode: "timestamp" }),
+  lastValueUsd: real("last_value_usd"), // snapshot total at last sync (display only)
+  lastTokenCount: integer("last_token_count"), // kept-token count at last sync
+  lastError: text("last_error"), // last sync failure message, or null
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const manualHoldings = sqliteTable("manual_holdings", {
   id: text("id").primaryKey(),
   // Market symbol Yahoo understands (BTC-USD, ETH-USD, a stock ticker). Null
@@ -363,6 +382,13 @@ export const manualHoldings = sqliteTable("manual_holdings", {
   costBasis: real("cost_basis"),
   manualValue: real("manual_value"), // fixed-value assets
   isoCurrencyCode: text("iso_currency_code"),
+  // Set when this row was imported from a connected wallet (else null =
+  // user-entered). NOTE: this FK was added via ALTER TABLE, so SQLite carries no
+  // ON DELETE action — removeWallet() deletes these rows explicitly. Re-sync
+  // replaces the set.
+  walletId: text("wallet_id").references(() => wallets.id),
+  // On-chain token contract / mint address (natives + user rows leave this null).
+  contractAddress: text("contract_address"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
@@ -721,6 +747,7 @@ export type Security = typeof securities.$inferSelect;
 export type Holding = typeof holdings.$inferSelect;
 export type InvestmentTransaction = typeof investmentTransactions.$inferSelect;
 export type ManualHolding = typeof manualHoldings.$inferSelect;
+export type Wallet = typeof wallets.$inferSelect;
 export type BalanceSnapshot = typeof balanceSnapshots.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
