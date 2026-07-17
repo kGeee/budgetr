@@ -22,8 +22,8 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
             <Link href="/#features" className="hover:text-[var(--paper)]">
               Features
             </Link>
-            <Link href="/pricing" className="hover:text-[var(--paper)]">
-              Pricing
+            <Link href="/#screens" className="hover:text-[var(--paper)]">
+              The app
             </Link>
             <Link href="/getting-started" className="hover:text-[var(--paper)]">
               Getting started
@@ -44,11 +44,11 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
             <span>Read-only · data stays on your machine.</span>
           </div>
           <div className="flex flex-wrap items-center gap-5">
-            <Link href="/pricing" className="hover:text-[var(--paper)]">
-              Pricing
-            </Link>
             <Link href="/getting-started" className="hover:text-[var(--paper)]">
               Getting Started
+            </Link>
+            <Link href="/pricing" className="hover:text-[var(--paper)]">
+              Pricing &amp; FAQ
             </Link>
             <a href={SITE.repoUrl} className="hover:text-[var(--paper)]" target="_blank" rel="noopener noreferrer">
               GitHub
