@@ -6,12 +6,17 @@ import { db } from "@/db";
 import { stockSplits } from "@/db/schema";
 import {
   reconcileOfx,
+  reconcileCsv,
   commitOfxImport,
+  commitCsvImport,
   revertBatch,
   type ReconcileSummary,
   type CommitResult,
 } from "@/lib/import/import-service";
+import type { CsvMapping } from "@/lib/import/csv-adapter";
 import { createImportAccount } from "@/lib/import/account";
+
+const isOfx = (text: string) => /<OFX>/i.test(text.slice(0, 4000));
 
 /**
  * Server Actions for trade import (OFX/QFX). The client reads the file as text
@@ -23,18 +28,42 @@ function revalidateAll() {
   revalidatePath("/", "layout");
 }
 
-export type PreviewResult = ReconcileSummary | { error: string };
+export type NeedsMapping = {
+  needsMapping: true;
+  headers: string[];
+  sampleRows: Record<string, string>[];
+};
+export type PreviewResult = ReconcileSummary | NeedsMapping | { error: string };
 
-/** Parse + reconcile a file for the preview screen. No DB writes. */
+/**
+ * Parse + reconcile a file for the preview screen (no DB writes). OFX/QFX and CSV
+ * are auto-detected; an unrecognized CSV comes back as `needsMapping` so the UI
+ * can show the column-mapper.
+ */
 export async function previewImportAction(fileText: string): Promise<PreviewResult> {
   try {
-    const summary = reconcileOfx(fileText);
-    if (summary.rowsParsed === 0) {
-      return { error: "No investment transactions found in this file. Is it an OFX/QFX investment export?" };
+    if (isOfx(fileText)) {
+      const summary = reconcileOfx(fileText);
+      return summary.rowsParsed === 0
+        ? { error: "No investment transactions found. Is this an OFX/QFX investment export?" }
+        : summary;
     }
-    return summary;
+    const res = reconcileCsv(fileText);
+    if ("needsMapping" in res) return res;
+    return res.rowsParsed === 0 ? { error: "No trades found in this CSV." } : res;
   } catch (e) {
-    return { error: (e as Error)?.message || "Could not read this file as OFX/QFX." };
+    return { error: (e as Error)?.message || "Could not read this file." };
+  }
+}
+
+/** Re-reconcile a CSV once the user has mapped its columns. */
+export async function previewCsvMappedAction(fileText: string, mapping: CsvMapping): Promise<PreviewResult> {
+  try {
+    const res = reconcileCsv(fileText, { mapping });
+    if ("needsMapping" in res) return { error: "Map at least a date, symbol, and quantity column." };
+    return res.rowsParsed === 0 ? { error: "That mapping produced no trades — check the columns." } : res;
+  } catch (e) {
+    return { error: (e as Error)?.message || "Could not apply that mapping." };
   }
 }
 
@@ -45,10 +74,13 @@ export async function commitImportAction(input: {
   fileText: string;
   accountId: string;
   fileName?: string | null;
+  mapping?: CsvMapping; // present for a column-mapped CSV
 }): Promise<CommitActionResult> {
   if (!input.accountId) return { error: "Choose a destination account first." };
   try {
-    const result = commitOfxImport(input);
+    const result = isOfx(input.fileText)
+      ? commitOfxImport(input)
+      : commitCsvImport({ ...input, mapping: input.mapping });
     revalidateAll();
     return result;
   } catch (e) {

@@ -8,12 +8,15 @@
  */
 import { createHash } from "node:crypto";
 import { db } from "@/db";
-import { importBatches, investmentTransactions, stockSplits } from "@/db/schema";
+import { importBatches, importProfiles, investmentTransactions, stockSplits } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { parseOfx } from "@/lib/import/ofx";
 import { canonicalizeOfx, type CanonicalTrade } from "@/lib/import/canonicalize";
 import { tradeFingerprint } from "@/lib/import/fingerprint";
 import { findOrCreateSecurity } from "@/lib/import/securities";
+import { parseCsv } from "@/lib/import/csv";
+import { csvToCanonical, type CsvMapping } from "@/lib/import/csv-adapter";
+import { BROKERS, detectBroker, resolveMapping, type BrokerProfile } from "@/lib/import/brokers";
 
 export type ReconcilePosition = { ticker: string; quantity: number; buys: number; sells: number };
 export type ReconcileWarning = { level: "warn" | "info"; message: string; ticker?: string };
@@ -118,50 +121,65 @@ export function reconcileOfx(fileText: string): ReconcileSummary {
 
 export type CommitResult = { batchId: string; imported: number; skipped: number; duplicates: number };
 
-/**
- * Commit an OFX/QFX file into an account. Idempotent: re-committing the same file
- * re-derives the same trade ids and the onConflictDoNothing upsert no-ops, so a
- * double import never doubles a position.
- */
-export function commitOfxImport(input: {
-  fileText: string;
+type CommitInput = {
+  trades: CanonicalTrade[];
   accountId: string;
-  fileName?: string | null;
-}): CommitResult {
-  const doc = parseOfx(input.fileText);
-  const trades = canonicalizeOfx(doc);
-  const fileHash = hashFile(input.fileText);
-  const now = new Date();
+  source: "ofx" | "csv";
+  broker: string | null;
+  fileName: string | null;
+  fileHash: string;
+  dtStart: string | null;
+  dtEnd: string | null;
+  /** Rows the parser/adapter dropped before commit (e.g. non-trade CSV rows). */
+  preSkipped?: number;
+};
 
+/**
+ * The shared, idempotent commit used by both OFX and CSV. Re-committing the same
+ * file re-derives the same trade ids (FITID for OFX, content hash for CSV), so the
+ * onConflictDoNothing upsert no-ops and a double import never doubles a position.
+ * CSV trades have no FITID, so genuinely-identical same-day rows are disambiguated
+ * by a stable occurrence index.
+ */
+export function commitTrades(input: CommitInput): CommitResult {
+  const now = new Date();
   const batchId = `imp_batch_${crypto.randomUUID().slice(0, 8)}`;
+
   db.insert(importBatches)
     .values({
       id: batchId,
-      source: "ofx",
-      broker: doc.brokerId ?? null,
+      source: input.source,
+      broker: input.broker,
       accountId: input.accountId,
-      fileName: input.fileName ?? null,
-      fileHash,
-      rowsParsed: trades.length,
+      fileName: input.fileName,
+      fileHash: input.fileHash,
+      rowsParsed: input.trades.length,
       rowsImported: 0,
-      dateStart: doc.dtStart,
-      dateEnd: doc.dtEnd,
-      symbolCount: new Set(trades.map((t) => t.ticker).filter(Boolean)).size,
+      dateStart: input.dtStart,
+      dateEnd: input.dtEnd,
+      symbolCount: new Set(input.trades.map((t) => t.ticker).filter(Boolean)).size,
       status: "committed",
       createdAt: now,
     })
     .run();
 
   let imported = 0;
-  let skipped = 0;
+  let skipped = input.preSkipped ?? 0;
   let duplicates = 0;
+  const seqByKey = new Map<string, number>();
 
   db.transaction((tx) => {
-    for (const t of trades) {
+    for (const t of input.trades) {
       if (!t.ticker) {
         skipped++;
         continue;
       }
+      // Occurrence index for FITID-less (CSV) trades so identical same-day rows
+      // get distinct-but-stable ids.
+      const key = `${t.date}|${t.ticker}|${t.quantity}|${t.amount}|${t.side}`;
+      const seq = seqByKey.get(key) ?? 0;
+      seqByKey.set(key, seq + 1);
+
       const securityId = findOrCreateSecurity({
         symbol: t.ticker,
         name: t.securityName,
@@ -175,6 +193,7 @@ export function commitOfxImport(input: {
         amount: t.amount,
         side: t.side,
         fitid: t.fitid,
+        seq,
       });
       const res = tx
         .insert(investmentTransactions)
@@ -203,6 +222,158 @@ export function commitOfxImport(input: {
   });
 
   return { batchId, imported, skipped, duplicates };
+}
+
+/** Commit an OFX/QFX file into an account. */
+export function commitOfxImport(input: {
+  fileText: string;
+  accountId: string;
+  fileName?: string | null;
+}): CommitResult {
+  const doc = parseOfx(input.fileText);
+  return commitTrades({
+    trades: canonicalizeOfx(doc),
+    accountId: input.accountId,
+    source: "ofx",
+    broker: doc.brokerId ?? null,
+    fileName: input.fileName ?? null,
+    fileHash: hashFile(input.fileText),
+    dtStart: doc.dtStart,
+    dtEnd: doc.dtEnd,
+  });
+}
+
+// ── CSV ───────────────────────────────────────────────────────────────────────
+
+export type CsvDetection = {
+  broker: { key: string; label: string } | null;
+  headers: string[];
+  sampleRows: Record<string, string>[];
+};
+
+/** Parse a CSV's header and auto-detect a known broker (for the UI's next step). */
+export function detectCsv(fileText: string): CsvDetection {
+  const { headers, rows } = parseCsv(fileText);
+  const broker = detectBroker(headers);
+  return {
+    broker: broker ? { key: broker.key, label: broker.label } : null,
+    headers,
+    sampleRows: rows.slice(0, 5),
+  };
+}
+
+/**
+ * Resolve a CSV's mapping, in order: an explicit user mapping, a named broker, an
+ * auto-detected broker, then a previously-saved profile matched by header
+ * fingerprint (so the same unrecognized export "just works" the second time).
+ */
+function mappingFor(headers: string[], opts: { brokerKey?: string; mapping?: CsvMapping }): CsvMapping | null {
+  if (opts.mapping) return opts.mapping;
+  if (opts.brokerKey) {
+    const b = detectBrokerByKey(opts.brokerKey);
+    if (b) return resolveMapping(headers, b);
+  }
+  const auto = detectBroker(headers);
+  if (auto) return resolveMapping(headers, auto);
+  return findProfileMapping(headers);
+}
+
+function detectBrokerByKey(key: string): BrokerProfile | undefined {
+  return BROKERS.find((b) => b.key === key);
+}
+
+/** Stable fingerprint of a header set (order-independent). */
+function headerFingerprint(headers: string[]): string {
+  const norm = headers.map((h) => h.trim().toLowerCase()).sort().join("|");
+  return createHash("sha256").update(norm).digest("hex").slice(0, 24);
+}
+
+function findProfileMapping(headers: string[]): CsvMapping | null {
+  const row = db
+    .select()
+    .from(importProfiles)
+    .where(eq(importProfiles.headerFingerprint, headerFingerprint(headers)))
+    .get();
+  if (!row) return null;
+  try {
+    return { columns: JSON.parse(row.mapping), sign: (row.signConvention as CsvMapping["sign"]) ?? "action" };
+  } catch {
+    return null;
+  }
+}
+
+/** Remember a hand-built mapping so the next upload of the same format auto-maps. */
+function saveProfile(headers: string[], mapping: CsvMapping): void {
+  const fp = headerFingerprint(headers);
+  if (findProfileMapping(headers)) return; // already saved
+  db.insert(importProfiles)
+    .values({
+      id: `prof_${crypto.randomUUID().slice(0, 8)}`,
+      broker: null,
+      name: `Custom (${headers.length} columns)`,
+      headerFingerprint: fp,
+      mapping: JSON.stringify(mapping.columns),
+      signConvention: mapping.sign,
+      createdAt: new Date(),
+    })
+    .run();
+}
+
+/** Parse + reconcile a CSV. No DB writes. Returns null mapping-error if unmappable. */
+export function reconcileCsv(
+  fileText: string,
+  opts: { brokerKey?: string; mapping?: CsvMapping } = {},
+): ReconcileSummary | { needsMapping: true; headers: string[]; sampleRows: Record<string, string>[] } {
+  const { headers, rows } = parseCsv(fileText);
+  const mapping = mappingFor(headers, opts);
+  if (!mapping) return { needsMapping: true, headers, sampleRows: rows.slice(0, 5) };
+
+  const { trades, skipped } = csvToCanonical(rows, mapping);
+  const dates = trades.map((t) => t.date).sort();
+  const summary = buildReconcile(trades, {
+    broker: detectBroker(headers)?.label ?? null,
+    fileHash: hashFile(fileText),
+    dateStart: dates[0] ?? null,
+    dateEnd: dates[dates.length - 1] ?? null,
+  });
+  if (skipped > 0) {
+    summary.warnings.push({
+      level: "info",
+      message: `${skipped} non-trade row(s) (dividends, transfers, or unrecognized actions) were skipped.`,
+    });
+  }
+  return summary;
+}
+
+/** Commit a CSV file into an account with a broker key or explicit mapping. */
+export function commitCsvImport(input: {
+  fileText: string;
+  accountId: string;
+  fileName?: string | null;
+  brokerKey?: string;
+  mapping?: CsvMapping;
+}): CommitResult {
+  const { headers, rows } = parseCsv(input.fileText);
+  const mapping = mappingFor(headers, input);
+  if (!mapping) throw new Error("Could not map this CSV's columns — set the mapping first.");
+
+  // A hand-built mapping is worth remembering for next time (only when this
+  // wasn't already a known broker / saved profile).
+  if (input.mapping && !detectBroker(headers)) saveProfile(headers, input.mapping);
+
+  const { trades, skipped } = csvToCanonical(rows, mapping);
+  const dates = trades.map((t) => t.date).sort();
+  return commitTrades({
+    trades,
+    accountId: input.accountId,
+    source: "csv",
+    broker: detectBroker(headers)?.label ?? null,
+    fileName: input.fileName ?? null,
+    fileHash: hashFile(input.fileText),
+    dtStart: dates[0] ?? null,
+    dtEnd: dates[dates.length - 1] ?? null,
+    preSkipped: skipped,
+  });
 }
 
 /** Undo an import: delete its trades and mark the batch reverted (audit kept). */

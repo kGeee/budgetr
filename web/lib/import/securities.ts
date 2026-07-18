@@ -39,25 +39,28 @@ export function findOrCreateSecurity(sec: ImportSecurity): string {
   const symbol = sec.symbol.trim().toUpperCase();
   const id = importSecurityId(symbol);
 
-  db.insert(securities)
-    .values({
-      id,
-      tickerSymbol: symbol,
-      name: sec.name ?? null,
-      type: sec.type ?? null,
-      closePrice: sec.closePrice ?? null,
-      isoCurrencyCode: sec.isoCurrencyCode ?? null,
-    })
-    .onConflictDoUpdate({
-      target: securities.id,
-      set: {
-        // Enrich only — never null out fields a previous import/sync populated.
-        ...(sec.name ? { name: sec.name } : {}),
-        ...(sec.type ? { type: sec.type } : {}),
-        ...(sec.closePrice != null ? { closePrice: sec.closePrice } : {}),
-      },
-    })
-    .run();
+  // Enrich only — never null out fields a previous import/sync populated.
+  const enrich: Partial<{ name: string; type: string; closePrice: number }> = {};
+  if (sec.name) enrich.name = sec.name;
+  if (sec.type) enrich.type = sec.type;
+  if (sec.closePrice != null) enrich.closePrice = sec.closePrice;
+
+  const insert = db.insert(securities).values({
+    id,
+    tickerSymbol: symbol,
+    name: sec.name ?? null,
+    type: sec.type ?? null,
+    closePrice: sec.closePrice ?? null,
+    isoCurrencyCode: sec.isoCurrencyCode ?? null,
+  });
+
+  // drizzle rejects an empty `set:`, so when there's nothing to enrich (common
+  // for CSV rows that carry no security name) just leave the existing row.
+  if (Object.keys(enrich).length > 0) {
+    insert.onConflictDoUpdate({ target: securities.id, set: enrich }).run();
+  } else {
+    insert.onConflictDoNothing({ target: securities.id }).run();
+  }
 
   return id;
 }
