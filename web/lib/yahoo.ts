@@ -67,6 +67,44 @@ export async function getDailyCloses(ticker: string, months = 12): Promise<Price
   }
 }
 
+/** A corporate split event fetched from Yahoo. Ratio is shares-after : before. */
+export type SplitEvent = { date: string; numerator: number; denominator: number };
+
+/**
+ * Fetch a ticker's split history from Yahoo's chart API (`events=split`). Returns
+ * [] on any failure so callers degrade gracefully. Used to auto-suggest the
+ * corporate actions an imported trade history needs to reconcile correctly.
+ */
+export async function getSplitEvents(ticker: string, years = 20): Promise<SplitEvent[]> {
+  const sym = ticker.trim().toUpperCase();
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+    sym,
+  )}?range=${years}y&interval=1mo&events=split`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      next: { revalidate: 86400 }, // 1d — split history rarely changes
+    });
+    if (!res.ok) return [];
+
+    const j = (await res.json()) as {
+      chart?: { result?: { events?: { splits?: Record<string, { date: number; numerator: number; denominator: number }> } }[] };
+    };
+    const splits = j.chart?.result?.[0]?.events?.splits ?? {};
+    return Object.values(splits)
+      .map((s) => ({
+        date: new Date(s.date * 1000).toISOString().slice(0, 10),
+        numerator: s.numerator,
+        denominator: s.denominator,
+      }))
+      .filter((s) => s.numerator > 0 && s.denominator > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Yahoo Finance option chain — free, no API key.
  *

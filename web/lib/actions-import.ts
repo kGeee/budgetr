@@ -10,11 +10,14 @@ import {
   commitOfxImport,
   commitCsvImport,
   revertBatch,
+  listStockSplits,
+  importedTickers,
   type ReconcileSummary,
   type CommitResult,
 } from "@/lib/import/import-service";
 import type { CsvMapping } from "@/lib/import/csv-adapter";
 import { createImportAccount } from "@/lib/import/account";
+import { detectSplits, type SplitSuggestion } from "@/lib/import/split-detect";
 
 const isOfx = (text: string) => /<OFX>/i.test(text.slice(0, 4000));
 
@@ -137,4 +140,21 @@ export async function deleteStockSplitAction(id: string): Promise<{ ok: true }> 
   db.delete(stockSplits).where(eq(stockSplits.id, id)).run();
   revalidateAll();
   return { ok: true };
+}
+
+/** Suggest splits (from Yahoo) that the imported tickers need but aren't recorded. */
+export async function detectSplitsAction(): Promise<SplitSuggestion[] | { error: string }> {
+  try {
+    const tickers = importedTickers();
+    if (tickers.length === 0) return [];
+    const existing = listStockSplits().map((s) => ({
+      ticker: s.ticker,
+      date: s.date,
+      numerator: s.numerator,
+      denominator: s.denominator,
+    }));
+    return await detectSplits(tickers, existing);
+  } catch (e) {
+    return { error: (e as Error)?.message || "Could not fetch split data." };
+  }
 }
