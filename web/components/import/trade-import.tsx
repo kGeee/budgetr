@@ -17,9 +17,11 @@ import {
 } from "@/lib/actions-import";
 import type { ReconcileSummary } from "@/lib/import/import-service";
 import type { CommitResult } from "@/lib/import/import-service";
+import type { CsvMapping } from "@/lib/import/csv-adapter";
+import { ColumnMapper } from "@/components/import/column-mapper";
 
 type ManualAccount = { id: string; name: string; subtype: string | null };
-type Phase = "choose" | "preview" | "done";
+type Phase = "choose" | "mapping" | "preview" | "done";
 
 const jade =
   "inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)] px-4 py-2 text-sm font-medium text-[var(--on-jade)] transition hover:brightness-105 active:scale-[0.98] disabled:opacity-50";
@@ -36,6 +38,10 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
   const [fileName, setFileName] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<ReconcileSummary | null>(null);
+  const [mapping, setMapping] = useState<CsvMapping | null>(null);
+  const [needsMapping, setNeedsMapping] = useState<{ headers: string[]; sampleRows: Record<string, string>[] } | null>(
+    null,
+  );
   const [result, setResult] = useState<CommitResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -45,6 +51,8 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
     setFileText(null);
     setFileName(null);
     setSummary(null);
+    setMapping(null);
+    setNeedsMapping(null);
     setResult(null);
     setError(null);
     if (fileInput.current) fileInput.current.value = "";
@@ -60,6 +68,9 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
       if ("error" in res) {
         setError(res.error);
         setSummary(null);
+      } else if ("needsMapping" in res) {
+        setNeedsMapping({ headers: res.headers, sampleRows: res.sampleRows });
+        setPhase("mapping");
       } else {
         setSummary(res);
         setPhase("preview");
@@ -76,7 +87,7 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
         const created = await createImportAccountAction(newName || "Imported brokerage", "brokerage");
         destId = created.id;
       }
-      const res = await commitImportAction({ fileText, accountId: destId, fileName });
+      const res = await commitImportAction({ fileText, accountId: destId, fileName, mapping: mapping ?? undefined });
       if ("error" in res) {
         setError(res.error);
       } else {
@@ -110,6 +121,25 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
             <RotateCcw size={14} /> Import another
           </button>
         </div>
+      </Card>
+    );
+  }
+
+  // ── column mapping (unrecognized CSV) ──────────────────────────────────────
+  if (phase === "mapping" && needsMapping && fileText) {
+    return (
+      <Card className="p-6 sm:p-8">
+        <ColumnMapper
+          fileText={fileText}
+          headers={needsMapping.headers}
+          sampleRows={needsMapping.sampleRows}
+          onMapped={(s, m) => {
+            setSummary(s);
+            setMapping(m);
+            setPhase("preview");
+          }}
+          onCancel={reset}
+        />
       </Card>
     );
   }
@@ -194,9 +224,10 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
       <p className="eyebrow">Import trade history</p>
       <h3 className="mt-2 font-display text-2xl">Bring in your broker&apos;s full record</h3>
       <p className="mt-1 max-w-lg text-sm text-[var(--muted)]">
-        Export an <b>OFX</b> or <b>QFX</b> file from your broker (often labeled &ldquo;download for
-        Quicken&rdquo;) — Schwab, Fidelity, IBKR, E*Trade and Tastytrade all offer it. Cost basis and
-        wash sales are computed from the complete history, not Plaid&apos;s last 24 months.
+        Export an <b>OFX/QFX</b> file (often labeled &ldquo;download for Quicken&rdquo;) or a{" "}
+        <b>CSV</b> — Schwab, Fidelity, IBKR, E*Trade and Tastytrade are recognized automatically, and
+        any other CSV can be mapped by hand. Cost basis and wash sales are computed from the complete
+        history, not Plaid&apos;s last 24 months.
       </p>
 
       <label className="mt-6 block text-sm font-medium">Destination account</label>
@@ -227,7 +258,7 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
         <input
           ref={fileInput}
           type="file"
-          accept=".ofx,.qfx,.qbo,text/plain"
+          accept=".ofx,.qfx,.qbo,.csv,text/plain,text/csv"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -236,7 +267,7 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
         />
         <button className={jade} onClick={() => fileInput.current?.click()} disabled={pending}>
           {pending ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
-          Choose an OFX / QFX file
+          Choose an OFX / QFX / CSV file
         </button>
       </div>
 
