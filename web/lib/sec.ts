@@ -7,7 +7,12 @@
  * SEC requires a descriptive User-Agent with contact info. Cached in Next's Data
  * Cache (24h) — filings change quarterly at most. Degrades to null on any failure.
  */
-import { parseIncomeStatement, type CompanyFacts, type IncomeStatement } from "@/lib/fundamentals/income-statement";
+import {
+  parseIncomeStatement,
+  type CompanyFacts,
+  type IncomeStatement,
+  type Period,
+} from "@/lib/fundamentals/income-statement";
 
 const UA = "budgetr personal-finance (kegeorge246@gmail.com)";
 const DAY = 86_400;
@@ -52,8 +57,11 @@ export async function fetchCompanyFacts(ticker: string): Promise<CompanyFacts | 
   }
 }
 
-/** The latest annual income statement for a ticker, or null. */
-export async function getIncomeStatement(ticker: string): Promise<IncomeStatement | null> {
+/** The latest income statement for a ticker (annual or quarterly), or null. */
+export async function getIncomeStatement(
+  ticker: string,
+  period: Period = "annual",
+): Promise<IncomeStatement | null> {
   const facts = await fetchCompanyFacts(ticker);
-  return facts ? parseIncomeStatement(facts) : null;
+  return facts ? parseIncomeStatement(facts, period) : null;
 }

@@ -86,22 +86,68 @@ describe("parseIncomeStatement", () => {
 
 describe("toSankey", () => {
   it("builds the profit spine + cost outflows, dropping zero flows", () => {
-    const { nodes, links } = toSankey(parseIncomeStatement(AAPL)!);
-    expect(nodes.map((n) => n.name)).toEqual([
-      "Revenue",
-      "Cost of revenue",
-      "Gross profit",
-      "Operating expenses",
-      "Operating income",
-      "Tax",
-      "Net income",
-    ]);
+    const is = parseIncomeStatement(AAPL)!;
+    const { nodes, links } = toSankey(is);
+    const netIdx = nodes.findIndex((n) => n.name === "Net income");
     // Revenue conserves: cost + gross = revenue
     const fromRevenue = links.filter((l) => l.source === 0);
     expect(fromRevenue.reduce((s, l) => s + l.value, 0)).toBe(383285_000000);
     // Net income link value = operating income − tax
-    const toNet = links.find((l) => l.target === 6)!;
+    const toNet = links.find((l) => l.target === netIdx)!;
     expect(toNet.value).toBe(114301_000000 - 16741_000000);
     expect(links.every((l) => l.value > 0)).toBe(true);
+    // No R&D/SG&A in this fixture → a single "Operating expenses" node.
+    expect(nodes.some((n) => n.name === "Operating expenses")).toBe(true);
+  });
+
+  it("splits operating expenses into R&D / SG&A / Other when reported", () => {
+    const withOpex: CompanyFacts = {
+      facts: {
+        "us-gaap": {
+          Revenues: usd(1000),
+          CostOfRevenue: usd(400),
+          OperatingIncomeLoss: usd(250), // opex = gross 600 − 250 = 350
+          ResearchAndDevelopmentExpense: usd(200),
+          SellingGeneralAndAdministrativeExpense: usd(120),
+          IncomeTaxExpenseBenefit: usd(50),
+          NetIncomeLoss: usd(200),
+        },
+      },
+    };
+    const is = parseIncomeStatement(withOpex)!;
+    expect(is.opex.map((o) => o.label)).toEqual(["R&D", "SG&A", "Other opex"]); // 200 + 120 + 30
+    const { nodes } = toSankey(is);
+    expect(nodes.filter((n) => ["R&D", "SG&A", "Other opex"].includes(n.name))).toHaveLength(3);
+  });
+});
+
+describe("quarterly period", () => {
+  it("selects the latest 10-Q (~90-day) figures", () => {
+    const q: CompanyFacts = {
+      facts: {
+        "us-gaap": {
+          Revenues: {
+            units: {
+              USD: [
+                { start: "2023-04-01", end: "2023-06-30", val: 95_000000000, fy: 2023, fp: "Q3", form: "10-Q" },
+                { start: "2022-10-01", end: "2023-09-30", val: 383285_000000, fy: 2023, fp: "FY", form: "10-K" },
+              ],
+            },
+          },
+          NetIncomeLoss: {
+            units: {
+              USD: [
+                { start: "2023-04-01", end: "2023-06-30", val: 20_000000000, fy: 2023, fp: "Q3", form: "10-Q" },
+                { start: "2022-10-01", end: "2023-09-30", val: 96995_000000, fy: 2023, fp: "FY", form: "10-K" },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const is = parseIncomeStatement(q, "quarterly")!;
+    expect(is.period).toBe("quarterly");
+    expect(is.revenue).toBe(95_000000000);
+    expect(is.netIncome).toBe(20_000000000);
   });
 });

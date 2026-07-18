@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Search } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { Card } from "@/components/ui/card";
@@ -18,11 +19,12 @@ function pct(part: number, whole: number): string {
 export default async function FundamentalsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ticker?: string }>;
+  searchParams: Promise<{ ticker?: string; period?: string }>;
 }) {
-  const { ticker } = await searchParams;
+  const { ticker, period: periodParam } = await searchParams;
   const sym = (ticker ?? "").trim().toUpperCase();
-  const is = sym ? await getIncomeStatement(sym) : null;
+  const period = periodParam === "quarterly" ? "quarterly" : "annual";
+  const is = sym ? await getIncomeStatement(sym, period) : null;
   const sankey = is ? toSankey(is) : null;
 
   return (
@@ -30,18 +32,36 @@ export default async function FundamentalsPage({
       <PageHead
         title="Fundamentals"
         action={
-          <form action="/fundamentals" method="get" className="flex items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-line bg-[var(--panel)] px-3.5 py-1.5">
-              <Search size={14} className="text-[var(--muted)]" />
-              <input
-                name="ticker"
-                defaultValue={sym}
-                placeholder="Ticker (e.g. AAPL)"
-                autoCapitalize="characters"
-                className="w-32 bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
-              />
-            </div>
-          </form>
+          <div className="flex flex-wrap items-center gap-2">
+            {sym && (
+              <div className="flex rounded-full border border-line bg-[var(--panel)] p-0.5 text-sm">
+                {(["annual", "quarterly"] as const).map((p) => (
+                  <Link
+                    key={p}
+                    href={{ pathname: "/fundamentals", query: { ticker: sym, period: p } }}
+                    className={`rounded-full px-3 py-1 capitalize transition ${
+                      period === p ? "bg-[var(--panel-2)] text-[var(--paper)]" : "text-[var(--muted)]"
+                    }`}
+                  >
+                    {p}
+                  </Link>
+                ))}
+              </div>
+            )}
+            <form action="/fundamentals" method="get" className="flex items-center gap-2">
+              <input type="hidden" name="period" value={period} />
+              <div className="flex items-center gap-2 rounded-full border border-line bg-[var(--panel)] px-3.5 py-1.5">
+                <Search size={14} className="text-[var(--muted)]" />
+                <input
+                  name="ticker"
+                  defaultValue={sym}
+                  placeholder="Ticker (e.g. AAPL)"
+                  autoCapitalize="characters"
+                  className="w-32 bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
+                />
+              </div>
+            </form>
+          </div>
         }
       />
 
@@ -71,10 +91,13 @@ export default async function FundamentalsPage({
             <div>
               <p className="eyebrow">{is.entityName ?? sym}</p>
               <p className="mt-1 font-display text-2xl">
-                {sym} · FY{is.fiscalYear ?? "—"}
+                {sym} ·{" "}
+                {is.period === "quarterly" ? `${is.fiscalPeriod ?? "Q"} FY${is.fiscalYear ?? "—"}` : `FY${is.fiscalYear ?? "—"}`}
               </p>
             </div>
-            <p className="text-xs text-[var(--muted)]">Fiscal year ended {is.periodEnd}</p>
+            <p className="text-xs text-[var(--muted)]">
+              {is.period === "quarterly" ? "Quarter" : "Fiscal year"} ended {is.periodEnd}
+            </p>
           </div>
 
           <Card className="p-0">
