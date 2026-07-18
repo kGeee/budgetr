@@ -58,6 +58,9 @@ const tooltipStyle = {
   fontFamily: "var(--font-mono)",
 };
 const labelStyle = { color: "var(--muted)", marginBottom: 2 };
+// Recharts colors each tooltip row by its series color, which renders dark on the
+// dark tooltip surface. Force a legible gray so item rows read on both themes.
+const itemStyle = { color: "var(--muted)" };
 
 export function NetWorthChart({ data }: { data: { date: string; netWorth: number }[] }) {
   if (data.length === 0)
@@ -92,6 +95,7 @@ export function NetWorthChart({ data }: { data: { date: string; netWorth: number
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value) => [formatCurrency(Number(value)), "Net worth"]}
           labelFormatter={(d) => format(parseISO(d as string), "PP")}
@@ -154,6 +158,7 @@ export function CashflowChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ fill: "rgba(255,255,255,0.04)" }}
           formatter={(value, name) => [
             formatCurrency(Number(value)),
@@ -226,6 +231,7 @@ export function MonthlySpendChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ fill: "rgba(255,255,255,0.04)" }}
           formatter={(value) => [formatCurrency(Number(value)), "Spent"]}
           labelFormatter={(m) => format(parseISO(m + "-01"), "MMMM yyyy")}
@@ -351,6 +357,7 @@ export function PortfolioChart({ data }: { data: { date: string; value: number }
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value) => [formatCurrency(Number(value)), "Value"]}
           labelFormatter={(d) => format(parseISO(d as string), "PP")}
@@ -425,6 +432,7 @@ export function ValueAreaChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ stroke: color, strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value) => [formatCurrency(Number(value)), valueLabel]}
           labelFormatter={(d) => format(parseISO(d as string), "PP")}
@@ -567,6 +575,7 @@ export function BudgetPaceChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value, name) => [
             value == null ? "—" : formatCurrency(Number(value)),
@@ -636,6 +645,7 @@ export function ForecastChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value, name) => [
             value == null ? "—" : formatCurrency(Number(value)),
@@ -714,6 +724,7 @@ export function FireProjectionChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value, name) => [
             value == null ? "—" : formatCurrency(Number(value)),
@@ -862,6 +873,7 @@ export function TickerPriceChart({
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
+          itemStyle={itemStyle}
           cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
           formatter={(value, name) => [
             formatCurrency(Number(value)),
