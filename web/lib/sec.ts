@@ -7,6 +7,7 @@
  * SEC requires a descriptive User-Agent with contact info. Cached in Next's Data
  * Cache (24h) — filings change quarterly at most. Degrades to null on any failure.
  */
+import { unstable_cache } from "next/cache";
 import {
   parseIncomeStatement,
   type CompanyFacts,
@@ -57,11 +58,18 @@ export async function fetchCompanyFacts(ticker: string): Promise<CompanyFacts | 
   }
 }
 
-/** The latest income statement for a ticker (annual or quarterly), or null. */
-export async function getIncomeStatement(
-  ticker: string,
-  period: Period = "annual",
-): Promise<IncomeStatement | null> {
-  const facts = await fetchCompanyFacts(ticker);
-  return facts ? parseIncomeStatement(facts, period) : null;
-}
+/**
+ * The latest income statement for a ticker (annual or quarterly), or null.
+ *
+ * companyfacts responses are large (~5MB — past Next's 2MB fetch-cache limit), so
+ * instead of caching the raw JSON we cache the tiny PARSED result per ticker+period
+ * for a day. That's one SEC fetch per company per day, not one per page view.
+ */
+export const getIncomeStatement = unstable_cache(
+  async (ticker: string, period: Period = "annual"): Promise<IncomeStatement | null> => {
+    const facts = await fetchCompanyFacts(ticker);
+    return facts ? parseIncomeStatement(facts, period) : null;
+  },
+  ["sec-income-statement"],
+  { revalidate: DAY },
+);
