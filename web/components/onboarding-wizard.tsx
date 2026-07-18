@@ -73,6 +73,16 @@ export function OnboardingWizard({ initial }: { initial: Initial }) {
                 <p className="mt-3 inline-flex items-center gap-2 text-[var(--jade)]">
                   <ShieldCheck size={15} /> Your keys are encrypted and never leave this device.
                 </p>
+                <p className="mt-4 border-t border-line pt-4 text-sm text-[var(--muted)]">
+                  No bank connection needed to start —{" "}
+                  <a
+                    href="/investments/import"
+                    className="text-[var(--brass)] underline decoration-[var(--brass-dim)] underline-offset-2 hover:decoration-[var(--brass)]"
+                  >
+                    import your broker&apos;s trade history
+                  </a>{" "}
+                  from an OFX/QFX file and see your portfolio right away.
+                </p>
               </>
             }
             next={() => setStep(1)}

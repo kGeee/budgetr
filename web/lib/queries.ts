@@ -1356,7 +1356,9 @@ export function getAccounts() {
 }
 
 export function getItems() {
-  return db.select().from(items).all();
+  // The 'manual' container item is not a real connection — hide it from the
+  // Connections UI (it holds imported/manual accounts, not a Plaid link).
+  return db.select().from(items).where(eq(items.source, "plaid")).all();
 }
 
 export function getHoldings() {
