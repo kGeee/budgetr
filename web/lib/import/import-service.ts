@@ -84,6 +84,21 @@ export function buildReconcile(
         message: `${ticker}: ${round(deficit)} sold share(s)/contract(s) have no opening buy in this file — their gain/loss can't be computed until the earlier trades are imported.`,
       });
     }
+
+    // Wash-sale completeness: a sale near the file's start means the IRS ±30-day
+    // window reaches before the imported data, so a replacement purchase could be
+    // missing and a wash sale under-reported. Flag it (unless we already warned
+    // about a hard deficit for this ticker).
+    if (deficit === 0 && sells > 0 && meta.dateStart) {
+      const earliestSell = chron.find((t) => (t.quantity ?? 0) < 0)?.date;
+      if (earliestSell && daysBetweenDates(meta.dateStart, earliestSell) <= WASH_WINDOW_DAYS) {
+        warnings.push({
+          level: "info",
+          ticker,
+          message: `${ticker}: a sale falls within ${WASH_WINDOW_DAYS} days of this file's start (${meta.dateStart}) — wash-sale detection may miss a replacement purchase made earlier. Import the prior period to be sure.`,
+        });
+      }
+    }
   }
 
   if (untickered > 0) {
@@ -411,4 +426,12 @@ export function importedTickers(): string[] {
 
 function round(n: number): number {
   return Math.round(n * 1e6) / 1e6;
+}
+
+/** IRS wash-sale window (matches lib/tax-lots.ts). */
+const WASH_WINDOW_DAYS = 30;
+
+/** Whole days between two YYYY-MM-DD dates (absolute). */
+function daysBetweenDates(a: string, b: string): number {
+  return Math.abs(Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000));
 }
