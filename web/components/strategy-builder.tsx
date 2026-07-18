@@ -35,6 +35,7 @@ import { useChartTheme } from "@/lib/chart-theme";
 import { atmIv, contractsForExpiry } from "@/lib/option-chain-analytics";
 import {
   generateStrategies,
+  marketImpliedDensity,
   midQuote,
   pnlDistribution,
   type Bias,
@@ -396,10 +397,17 @@ function SafetyPanel({
   currency: string;
 }) {
   const ct = useChartTheme();
-  // Driftless / market-implied: the terminal distribution is centered on spot
-  // (forward = spot), matching the probability-of-profit convention — not the
-  // user's target, which would bias the P&L distribution optimistically.
-  const dist = useMemo(() => pnlDistribution(legs, spot, sigma, T), [legs, spot, sigma, T]);
+  // Score against the market-implied (smile) density recovered from the chain, so
+  // multi-strike structures (butterflies/condors) aren't mispriced by a single
+  // flat-vol lognormal. Falls back to the lognormal when the chain is too sparse.
+  const density = useMemo(
+    () => marketImpliedDensity(expiryContracts, spot, sigma, T),
+    [expiryContracts, spot, sigma, T],
+  );
+  const dist = useMemo(
+    () => pnlDistribution(legs, spot, sigma, T, { density }),
+    [legs, spot, sigma, T, density],
+  );
   const greeks = useMemo(
     () => netGreeks(legs, expiryContracts, spot, sigma),
     [legs, expiryContracts, spot, sigma],
@@ -563,10 +571,11 @@ function ManualBuilder({
     }
     if (!payoffLegs.length) return null;
     const analysis = analyzePayoff(payoffLegs);
-    const pop = probabilityOfProfit(payoffLegs, analysis, spot, sigma, T);
+    const density = marketImpliedDensity(expiryContracts, spot, sigma, T);
+    const pop = probabilityOfProfit(payoffLegs, analysis, spot, sigma, T, density);
     const capital = analysis.maxLoss ?? Math.abs(analysis.netDebit);
     return { payoffLegs, analysis, pop, capital };
-  }, [legs, at, spot, sigma, T, ticker, expiry]);
+  }, [legs, at, spot, sigma, T, ticker, expiry, expiryContracts]);
 
   return (
     <Card className="p-0">
