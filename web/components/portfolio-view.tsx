@@ -912,6 +912,16 @@ function HoldingRowView({
                   <ArrowUpRight size={10} />
                 </Link>
               )}
+              {h.ticker && !parseOccSymbol(h.ticker) && (
+                <Link
+                  href={`/fundamentals?ticker=${encodeURIComponent(h.ticker)}`}
+                  title={`Fundamentals for ${h.ticker}`}
+                  className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+                >
+                  Fundamentals
+                  <ArrowUpRight size={10} />
+                </Link>
+              )}
               <span
                 className="max-w-[240px] truncate text-[var(--muted)]"
                 title={h.securityName ?? undefined}
