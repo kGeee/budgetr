@@ -1,5 +1,6 @@
 import { ChevronRight, GitMerge, Store } from "lucide-react";
 import Link from "next/link";
+import { format, parseISO } from "date-fns";
 import { PageHead } from "@/components/page-head";
 import { CategoryChart, MonthlySpendChart } from "@/components/charts";
 import { TransactionsTable } from "@/components/transactions-table";
@@ -54,8 +55,10 @@ export default async function VendorsPage({
                     <Link
                       href={{ pathname: "/vendors", query: { v: vendor.vendorKey } }}
                       scroll={false}
-                      className={`flex items-center gap-3 border-b border-line/60 px-4 py-3 transition-colors last:border-0 hover:bg-[var(--panel-2)] ${
-                        active ? "bg-[var(--panel-2)]" : ""
+                      className={`flex items-center gap-3 border-b border-l-2 border-line/60 px-4 py-3 transition-colors last:border-b-0 hover:bg-[var(--panel-2)] ${
+                        active
+                          ? "border-l-[var(--brass)] bg-[var(--panel-2)]"
+                          : "border-l-transparent"
                       }`}
                     >
                       <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] ${isGroup ? "text-[var(--brass)]" : "text-[var(--muted)]"}`}>
@@ -133,11 +136,23 @@ export default async function VendorsPage({
               </div>
 
               <Card className="p-0">
-                <div className="border-b border-line px-5 py-3.5">
-                  <span className="eyebrow">Monthly spend · 12 mo</span>
+                <div className="flex items-baseline justify-between border-b border-line px-5 py-3.5">
+                  <span className="eyebrow">Monthly spend</span>
+                  {monthly.length > 0 && (
+                    <span className="text-xs text-[var(--faint)]">
+                      {format(parseISO(monthly[0].month + "-01"), "MMM")} –{" "}
+                      {format(parseISO(monthly[monthly.length - 1].month + "-01"), "MMM yyyy")}
+                    </span>
+                  )}
                 </div>
                 <div className="px-2 py-4 sm:px-4">
-                  <MonthlySpendChart data={monthly} />
+                  {monthly.length > 0 ? (
+                    <MonthlySpendChart data={monthly} />
+                  ) : (
+                    <p className="py-10 text-center text-sm text-[var(--muted)]">
+                      No dated activity to chart yet.
+                    </p>
+                  )}
                 </div>
               </Card>
 

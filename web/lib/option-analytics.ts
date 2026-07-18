@@ -13,6 +13,7 @@
  */
 
 import { normCdf } from "./greeks";
+import { scoreUnderDensity, type Density } from "./risk-neutral";
 import { payoffAtExpiry, type PayoffAnalysis, type PayoffLeg } from "./payoff";
 
 /**
@@ -42,7 +43,14 @@ export function probabilityOfProfit(
   spot: number | null | undefined,
   sigma: number | null | undefined,
   T: number,
+  density?: Density | null,
 ): number | null {
+  // Prefer the market-implied (smile) density when available — a single flat-vol
+  // lognormal badly misprices multi-strike structures (butterflies especially).
+  if (density) {
+    const { pWin } = scoreUnderDensity(legs, density);
+    return Math.min(1, Math.max(0, pWin));
+  }
   if (
     spot == null ||
     !(spot > 0) ||

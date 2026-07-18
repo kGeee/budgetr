@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Upload } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
 import {
@@ -6,6 +8,7 @@ import {
   getDividendSummary,
   getGeographyOverrides,
   getHoldings,
+  getImportedHoldings,
   getInvestmentSectors,
   getInvestmentTransactions,
   getKnownSectors,
@@ -45,8 +48,12 @@ export default async function InvestmentsPage() {
     return { ...h, sectorKey, sector: sectors[sectorKey] ?? null };
   });
 
+  // Current positions derived from imported broker trades (source:'import') so
+  // they show alongside Plaid holdings and anchor the value curve.
+  const importedRaw = getImportedHoldings();
+
   // Fetch price history for every tickered symbol — Plaid holdings + the
-  // symbol-priced manual holdings (e.g. BTC-USD).
+  // symbol-priced manual holdings (e.g. BTC-USD) + imported positions.
   const manualSymbols = manual
     .map((m) => m.symbol)
     .filter((s): s is string => Boolean(s));
@@ -56,6 +63,7 @@ export default async function InvestmentsPage() {
       .map((h) => h.ticker)
       .filter((t): t is string => Boolean(t) && !parseOccSymbol(t)),
     ...manualSymbols,
+    ...importedRaw.map((h) => h.ticker).filter((t) => !parseOccSymbol(t)),
   ];
   const histories = await getTickerHistories(symbols);
 
@@ -88,12 +96,38 @@ export default async function InvestmentsPage() {
     };
   });
 
-  // Interleave manual holdings with Plaid ones, ordered by best-known value so
-  // they sort in by size rather than always landing at the bottom. Live prices
-  // refine the figure client-side but don't reorder (avoids jumpiness).
+  // Imported positions valued like tickered manual holdings: quantity × last
+  // close. Grouped under their import account's name.
+  const importedHoldings: HoldingRow[] = importedRaw.map((h) => {
+    const sym = h.ticker.toUpperCase();
+    const hist = histories[sym];
+    const lastClose = hist && hist.length > 0 ? hist[hist.length - 1].close : null;
+    const sectorKey = sectorKeyFor(h.ticker, h.id);
+    return {
+      id: h.id,
+      quantity: h.quantity,
+      costBasis: h.costBasis,
+      price: null,
+      value: null,
+      closePrice: lastClose,
+      currency: h.currency ?? "USD",
+      ticker: h.ticker,
+      securityName: h.securityName,
+      securityType: null,
+      accountName: h.accountName ?? "Imported",
+      manual: true,
+      fromWallet: false,
+      sectorKey,
+      sector: sectors[sectorKey] ?? null,
+    };
+  });
+
+  // Interleave manual + imported holdings with Plaid ones, ordered by best-known
+  // value so they sort in by size rather than always landing at the bottom. Live
+  // prices refine the figure client-side but don't reorder (avoids jumpiness).
   const estValue = (h: HoldingRow): number =>
     h.value ?? (h.price ?? h.closePrice ?? 0) * (h.quantity ?? 0);
-  const holdings = [...plaidHoldings, ...manualHoldings].sort(
+  const holdings = [...plaidHoldings, ...manualHoldings, ...importedHoldings].sort(
     (a, b) => estValue(b) - estValue(a),
   );
 
@@ -175,7 +209,17 @@ export default async function InvestmentsPage() {
 
   return (
     <div className="space-y-7">
-      <PageHead title="Investments" />
+      <PageHead
+        title="Investments"
+        action={
+          <Link
+            href="/investments/import"
+            className="inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)]"
+          >
+            <Upload size={15} /> Import trades
+          </Link>
+        }
+      />
       <PortfolioView
         holdings={holdings}
         histories={histories}

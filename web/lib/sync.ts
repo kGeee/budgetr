@@ -407,7 +407,9 @@ export async function syncItem(item: Item) {
 }
 
 export async function syncAllItems() {
-  const all = db.select().from(items).all();
+  // Only real Plaid links are synced — the 'manual' container item (which holds
+  // imported/manual accounts) has no access token.
+  const all = db.select().from(items).where(eq(items.source, "plaid")).all();
   const results: Record<string, unknown> = {};
   for (const item of all) {
     try {

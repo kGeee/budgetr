@@ -19,13 +19,15 @@ import {
   savedFilters,
   savingsContributions,
   securities,
+  stockSplits,
   taxLotOverrides,
   vendorGroupMembers,
   vendorGroups,
   type SavedFilter,
 } from "@/db/schema";
+import { applySplits, type StockSplit } from "@/lib/import/splits";
 import type { SavingsContribution, Dashboard, DashboardWidget } from "@/db/schema";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 import {
   computeRealizedLots,
@@ -1354,7 +1356,99 @@ export function getAccounts() {
 }
 
 export function getItems() {
-  return db.select().from(items).all();
+  // The 'manual' container item is not a real connection — hide it from the
+  // Connections UI (it holds imported/manual accounts, not a Plaid link).
+  return db.select().from(items).where(eq(items.source, "plaid")).all();
+}
+
+export type ImportedHoldingRow = {
+  id: string;
+  ticker: string;
+  quantity: number;
+  costBasis: number | null;
+  securityName: string | null;
+  accountName: string | null;
+  currency: string | null;
+};
+
+/**
+ * Current open positions derived from IMPORTED trades (source:'import'), so an
+ * imported broker's holdings appear alongside Plaid ones and the value curve and
+ * dividend views reflect them. Net quantity is split-adjusted; cost basis is the
+ * average buy cost of the remaining shares (the precise per-method basis lives on
+ * the realized-gains page). Long positions only — closed and net-short omitted.
+ */
+export function getImportedHoldings(): ImportedHoldingRow[] {
+  const rows = db
+    .select({
+      accountId: investmentTransactions.accountId,
+      accountName: accounts.name,
+      ticker: securities.tickerSymbol,
+      securityName: securities.name,
+      date: investmentTransactions.date,
+      quantity: investmentTransactions.quantity,
+      amount: investmentTransactions.amount,
+      price: investmentTransactions.price,
+      currency: investmentTransactions.isoCurrencyCode,
+    })
+    .from(investmentTransactions)
+    .innerJoin(securities, eq(investmentTransactions.securityId, securities.id))
+    .innerJoin(accounts, eq(investmentTransactions.accountId, accounts.id))
+    .where(and(eq(investmentTransactions.source, "import"), eq(accounts.excluded, false)))
+    .all();
+
+  const adjusted = applySplits(rows, getStockSplits());
+
+  type Agg = {
+    accountId: string;
+    accountName: string | null;
+    ticker: string;
+    securityName: string | null;
+    currency: string | null;
+    net: number;
+    buyQty: number;
+    buyAmt: number;
+  };
+  const groups = new Map<string, Agg>();
+  for (const r of adjusted) {
+    if (!r.ticker) continue;
+    const key = `${r.accountId}::${r.ticker}`;
+    const g =
+      groups.get(key) ??
+      {
+        accountId: r.accountId,
+        accountName: r.accountName,
+        ticker: r.ticker,
+        securityName: r.securityName,
+        currency: r.currency,
+        net: 0,
+        buyQty: 0,
+        buyAmt: 0,
+      };
+    const q = r.quantity ?? 0;
+    g.net += q;
+    if (q > 0) {
+      g.buyQty += q;
+      g.buyAmt += Math.abs(r.amount ?? q * (r.price ?? 0));
+    }
+    groups.set(key, g);
+  }
+
+  const out: ImportedHoldingRow[] = [];
+  for (const g of groups.values()) {
+    if (g.net <= 1e-6) continue; // open long positions only
+    const avg = g.buyQty > 0 ? g.buyAmt / g.buyQty : null;
+    out.push({
+      id: `imph:${g.accountId}:${g.ticker}`,
+      ticker: g.ticker,
+      quantity: Math.round(g.net * 1e6) / 1e6,
+      costBasis: avg != null ? Math.round(avg * g.net * 100) / 100 : null,
+      securityName: g.securityName,
+      accountName: g.accountName,
+      currency: g.currency,
+    });
+  }
+  return out;
 }
 
 export function getHoldings() {
@@ -1569,8 +1663,21 @@ export type InvestmentTxnRow = {
 };
 
 /** All investment transactions (buys/sells/dividends), newest first, with ticker. */
-export function getInvestmentTransactions(): InvestmentTxnRow[] {
+/** All stock splits, as the pure shape lib/import/splits.ts consumes. */
+export function getStockSplits(): StockSplit[] {
   return db
+    .select({
+      ticker: stockSplits.ticker,
+      date: stockSplits.date,
+      numerator: stockSplits.numerator,
+      denominator: stockSplits.denominator,
+    })
+    .from(stockSplits)
+    .all();
+}
+
+export function getInvestmentTransactions(): InvestmentTxnRow[] {
+  const rows = db
     .select({
       id: investmentTransactions.id,
       date: investmentTransactions.date,
@@ -1594,6 +1701,11 @@ export function getInvestmentTransactions(): InvestmentTxnRow[] {
     .where(eq(accounts.excluded, false))
     .orderBy(desc(investmentTransactions.date))
     .all();
+
+  // Restate pre-split quantities/prices into current terms before any consumer
+  // (tax lots, dividends, the investments table) sees them. No-op when there are
+  // no splits, so Plaid-only setups are unaffected. See lib/import/splits.ts.
+  return applySplits(rows, getStockSplits());
 }
 
 // ── Realized gains / tax lots ─────────────────────────────────────────────────

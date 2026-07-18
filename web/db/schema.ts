@@ -24,15 +24,22 @@ export const items = sqliteTable("items", {
   transactionsCursor: text("transactions_cursor"), // /transactions/sync cursor
   status: text("status").notNull().default("active"), // active | error
   error: text("error"),
+  // 'plaid' items are Plaid links synced against the API; the single 'manual'
+  // item is a Plaid-less container holding imported/manually-created accounts, so
+  // syncAllItems can skip it (it has no real access token).
+  source: text("source").notNull().default("plaid"), // plaid | manual
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
 export const accounts = sqliteTable("accounts", {
-  id: text("id").primaryKey(), // Plaid account_id
+  id: text("id").primaryKey(), // Plaid account_id, or a uuid for manual accounts
   itemId: text("item_id")
     .notNull()
     .references(() => items.id, { onDelete: "cascade" }),
+  // 'plaid' accounts are owned by sync; 'manual' accounts hold imported trades /
+  // user-entered balances and are never written by Plaid sync.
+  source: text("source").notNull().default("plaid"), // plaid | manual
   name: text("name").notNull(),
   officialName: text("official_name"),
   mask: text("mask"),
@@ -332,11 +339,80 @@ export const investmentTransactions = sqliteTable(
     price: real("price"),
     fees: real("fees"),
     isoCurrencyCode: text("iso_currency_code"),
+    // Provenance. 'plaid' rows are owned by sync (id = Plaid txn id); 'import'
+    // rows come from an OFX/QFX/CSV file (id = deterministic content fingerprint,
+    // see lib/import/fingerprint.ts) and are grouped by importBatchId for revert.
+    source: text("source").notNull().default("plaid"), // plaid | import
+    importBatchId: text("import_batch_id").references(() => importBatches.id, {
+      onDelete: "cascade",
+    }),
   },
   (t) => [
     index("invtx_account_idx").on(t.accountId),
     index("invtx_security_idx").on(t.securityId),
     index("invtx_date_idx").on(t.date),
+    index("invtx_batch_idx").on(t.importBatchId),
+  ],
+);
+
+/**
+ * One row per file import — the reconcile summary and the unit of undo. Every
+ * imported `investment_transactions` row points here via importBatchId, so
+ * reverting a batch cascade-deletes exactly the trades it introduced.
+ */
+export const importBatches = sqliteTable("import_batches", {
+  id: text("id").primaryKey(),
+  source: text("source").notNull(), // ofx | qfx | csv
+  broker: text("broker"), // detected/selected broker key, or null (custom CSV)
+  accountId: text("account_id").references(() => accounts.id, { onDelete: "cascade" }),
+  fileName: text("file_name"),
+  fileHash: text("file_hash"), // sha256 of the raw file — detects a re-upload
+  rowsParsed: integer("rows_parsed").notNull().default(0),
+  rowsImported: integer("rows_imported").notNull().default(0),
+  dateStart: text("date_start"), // YYYY-MM-DD range covered by the batch
+  dateEnd: text("date_end"),
+  symbolCount: integer("symbol_count").notNull().default(0),
+  status: text("status").notNull().default("preview"), // preview | committed | reverted
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * A saved CSV column→field mapping, keyed by a fingerprint of the header row so a
+ * re-upload of the same broker's export auto-applies without re-mapping. `mapping`
+ * is JSON {field: columnName}; the top brokers ship hardcoded, this covers the tail.
+ */
+export const importProfiles = sqliteTable("import_profiles", {
+  id: text("id").primaryKey(),
+  broker: text("broker"), // known broker key, or null for a user-defined profile
+  name: text("name").notNull(),
+  headerFingerprint: text("header_fingerprint").notNull(),
+  mapping: text("mapping").notNull(), // JSON: { date, symbol, quantity, amount, ... }
+  signConvention: text("sign_convention"), // how this broker signs a sell
+  dateFormat: text("date_format"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * Corporate actions (stock splits), applied at read time by lib/import/splits.ts
+ * before trades reach the tax-lot engine — the engine itself has no split
+ * awareness. Kept editable (never baked into stored trades) so a split can be
+ * corrected without re-importing. Ratio is shares-after : shares-before.
+ */
+export const stockSplits = sqliteTable(
+  "stock_splits",
+  {
+    id: text("id").primaryKey(),
+    ticker: text("ticker").notNull(),
+    date: text("date").notNull(), // YYYY-MM-DD effective date
+    numerator: real("numerator").notNull(), // 4:1 → 4
+    denominator: real("denominator").notNull(), // 4:1 → 1
+    note: text("note"),
+    source: text("source").notNull().default("manual"), // manual | auto
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    index("splits_ticker_idx").on(t.ticker),
+    uniqueIndex("splits_ticker_date_idx").on(t.ticker, t.date),
   ],
 );
 
