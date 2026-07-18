@@ -8,7 +8,7 @@
  */
 import { createHash } from "node:crypto";
 import { db } from "@/db";
-import { importBatches, importProfiles, investmentTransactions, stockSplits } from "@/db/schema";
+import { importBatches, importProfiles, investmentTransactions, securities, stockSplits } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { parseOfx } from "@/lib/import/ofx";
 import { canonicalizeOfx, type CanonicalTrade } from "@/lib/import/canonicalize";
@@ -396,6 +396,17 @@ export function listImportBatches() {
 /** All stock splits (with ids), for the corporate-actions editor. */
 export function listStockSplits() {
   return db.select().from(stockSplits).orderBy(stockSplits.ticker, stockSplits.date).all();
+}
+
+/** Distinct tickers referenced by imported trades — the set to split-check. */
+export function importedTickers(): string[] {
+  const rows = db
+    .select({ ticker: securities.tickerSymbol })
+    .from(investmentTransactions)
+    .innerJoin(securities, eq(investmentTransactions.securityId, securities.id))
+    .where(eq(investmentTransactions.source, "import"))
+    .all();
+  return [...new Set(rows.map((r) => r.ticker).filter((t): t is string => !!t))];
 }
 
 function round(n: number): number {
