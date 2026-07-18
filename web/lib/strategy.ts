@@ -20,6 +20,13 @@ import { normCdf, RISK_FREE_RATE } from "./greeks";
 import { daysToExpiry, type ParsedOption } from "./options";
 import { expectedMove, probabilityOfProfit } from "./option-analytics";
 import {
+  scoreUnderDensity,
+  binsUnderDensity,
+  riskNeutralDensity,
+  smileFromContracts,
+  type Density,
+} from "./risk-neutral";
+import {
   analyzePayoff,
   payoffAtExpiry,
   CONTRACT_SIZE,
@@ -82,6 +89,8 @@ export type GenerateInput = {
   target: number;
   bias: Bias;
   risk: RiskInputs;
+  /** Market-implied terminal density (see marketImpliedDensity); optional. */
+  density?: Density | null;
 };
 
 // ── Pricing ─────────────────────────────────────────────────────────────────
@@ -126,6 +135,22 @@ export function midQuote(
   return null;
 }
 
+/**
+ * The market-implied terminal-price density for an expiry, recovered from its vol
+ * smile (Breeden–Litzenberger). Pass it into probabilityOfProfit / pnlDistribution
+ * to score any structure against the same distribution the chain is priced under.
+ * Returns null when the chain is too sparse — callers then fall back to the
+ * single-lognormal model.
+ */
+export function marketImpliedDensity(
+  expiryContracts: OptionQuote[],
+  spot: number,
+  sigma: number,
+  T: number,
+): Density | null {
+  return riskNeutralDensity(smileFromContracts(expiryContracts, spot), spot, T, sigma);
+}
+
 // ── Distribution / expected value ────────────────────────────────────────────
 
 /**
@@ -139,11 +164,18 @@ export function pnlDistribution(
   center: number,
   sigma: number,
   T: number,
-  opts: { steps?: number; bins?: number } = {},
+  opts: { steps?: number; bins?: number; density?: Density | null } = {},
 ): { ev: number; pWin: number; bins: { pnl: number; prob: number }[] } | null {
+  const binCount = opts.bins ?? 41;
+  // Market-implied (smile) density when available — consistent with the leg
+  // prices, so a fairly-priced spread nets EV ≈ 0 (± carry) instead of the large
+  // spurious loss a single flat-vol lognormal reports for butterflies/condors.
+  if (opts.density) {
+    const { ev, pWin } = scoreUnderDensity(legs, opts.density);
+    return { ev, pWin, bins: binsUnderDensity(legs, opts.density, binCount) };
+  }
   if (!(center > 0) || !(sigma > 0) || !(T > 0)) return null;
   const steps = opts.steps ?? 240;
-  const binCount = opts.bins ?? 41;
   const s = sigma * Math.sqrt(T);
   // Mean of a lognormal is exp(m + s²/2); set it to `center`.
   const m = Math.log(center) - 0.5 * s * s;
@@ -227,6 +259,7 @@ type Ctx = {
   spot: number;
   sigma: number;
   T: number;
+  density?: Density | null;
 };
 
 /**
@@ -270,10 +303,10 @@ function build(
     ? spec.capital(analysis, legs)
     : analysis.maxLoss ?? Math.abs(netDebit);
   const T = ctx.T;
-  const pop = probabilityOfProfit(payoffLegs, analysis, ctx.spot, ctx.sigma, T);
-  // Driftless / market-implied EV (forward = spot), consistent with POP — the
-  // user's target drives strategy + strike selection, not the probability model.
-  const dist = pnlDistribution(payoffLegs, ctx.spot, ctx.sigma, T);
+  const pop = probabilityOfProfit(payoffLegs, analysis, ctx.spot, ctx.sigma, T, ctx.density);
+  // Market-implied EV/POP under the recovered smile density (falls back to a
+  // single lognormal only when the chain is too sparse to build a density).
+  const dist = pnlDistribution(payoffLegs, ctx.spot, ctx.sigma, T, { density: ctx.density });
   const ev = dist?.ev ?? null;
   const withinBudget =
     capital <= spec.risk.budget && (analysis.maxLoss ?? Infinity) <= spec.risk.maxLoss;
@@ -355,7 +388,8 @@ export function generateStrategies(input: GenerateInput): StrategyCandidate[] {
   const { strikes, at } = indexChain(expiryContracts);
   if (strikes.length < 2) return [];
   const em = expectedMove(spot, sigma, T) ?? spot * 0.05;
-  const ctx: Ctx = { underlying, expiry, at, spot, sigma, T };
+  const density = input.density ?? marketImpliedDensity(expiryContracts, spot, sigma, T);
+  const ctx: Ctx = { underlying, expiry, at, spot, sigma, T, density };
 
   const near = (t: number) => nearestStrike(strikes, t);
   const cashSecuredCapital = (legs: StrategyLeg[]) =>
