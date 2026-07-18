@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Upload } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
 import {
@@ -175,7 +177,17 @@ export default async function InvestmentsPage() {
 
   return (
     <div className="space-y-7">
-      <PageHead title="Investments" />
+      <PageHead
+        title="Investments"
+        action={
+          <Link
+            href="/investments/import"
+            className="inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)]"
+          >
+            <Upload size={15} /> Import trades
+          </Link>
+        }
+      />
       <PortfolioView
         holdings={holdings}
         histories={histories}

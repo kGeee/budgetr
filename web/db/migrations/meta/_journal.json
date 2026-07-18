@@ -127,6 +127,13 @@
       "when": 1784329968482,
       "tag": "0017_hard_callisto",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1784336518330,
+      "tag": "0018_big_gabe_jones",
+      "breakpoints": true
     }
   ]
 }

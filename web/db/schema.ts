@@ -24,15 +24,22 @@ export const items = sqliteTable("items", {
   transactionsCursor: text("transactions_cursor"), // /transactions/sync cursor
   status: text("status").notNull().default("active"), // active | error
   error: text("error"),
+  // 'plaid' items are Plaid links synced against the API; the single 'manual'
+  // item is a Plaid-less container holding imported/manually-created accounts, so
+  // syncAllItems can skip it (it has no real access token).
+  source: text("source").notNull().default("plaid"), // plaid | manual
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
 export const accounts = sqliteTable("accounts", {
-  id: text("id").primaryKey(), // Plaid account_id
+  id: text("id").primaryKey(), // Plaid account_id, or a uuid for manual accounts
   itemId: text("item_id")
     .notNull()
     .references(() => items.id, { onDelete: "cascade" }),
+  // 'plaid' accounts are owned by sync; 'manual' accounts hold imported trades /
+  // user-entered balances and are never written by Plaid sync.
+  source: text("source").notNull().default("plaid"), // plaid | manual
   name: text("name").notNull(),
   officialName: text("official_name"),
   mask: text("mask"),
