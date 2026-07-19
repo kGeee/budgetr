@@ -13,18 +13,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
-  ExternalLink,
-  Loader2,
-  ShieldCheck,
-} from "lucide-react";
+import { ArrowRight, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ApiKeysForm } from "@/components/api-keys-form";
 import { PlaidLink } from "@/components/plaid-link";
+import { Stepper, Step, Walk, A } from "@/components/onboarding-steps";
 
 type Initial = {
   hasPlaidKeys: boolean;
@@ -54,7 +48,7 @@ export function OnboardingWizard({ initial }: { initial: Initial }) {
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
-      <Stepper step={step} />
+      <Stepper steps={STEPS} step={step} />
 
       <Card className="rise">
         {step === 0 && (
@@ -184,101 +178,5 @@ export function OnboardingWizard({ initial }: { initial: Initial }) {
         )}
       </Card>
     </div>
-  );
-}
-
-function Stepper({ step }: { step: number }) {
-  return (
-    <div className="flex items-center gap-2">
-      {STEPS.map((label, i) => (
-        <div key={label} className="flex flex-1 items-center gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-medium transition-colors ${
-                i < step
-                  ? "bg-[var(--jade)] text-[var(--on-jade)]"
-                  : i === step
-                    ? "bg-[var(--brass)] text-[var(--on-brass)]"
-                    : "border border-line text-[var(--faint)]"
-              }`}
-            >
-              {i < step ? "✓" : i + 1}
-            </span>
-            <span
-              className={`hidden truncate text-xs sm:block ${i === step ? "text-[var(--paper)]" : "text-[var(--muted)]"}`}
-            >
-              {label}
-            </span>
-          </div>
-          {i < STEPS.length - 1 && (
-            <span className={`h-px flex-1 ${i < step ? "bg-[var(--jade)]" : "bg-line"}`} />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Step({
-  title,
-  body,
-  back,
-  next,
-}: {
-  title: string;
-  body: React.ReactNode;
-  back?: () => void;
-  next?: () => void;
-}) {
-  return (
-    <div>
-      <h2 className="font-display text-2xl tracking-tight">{title}</h2>
-      <div className="mt-4 text-sm leading-relaxed text-[var(--paper)]/90">{body}</div>
-      {(back || next) && (
-        <div className="mt-8 flex items-center justify-between">
-          {back ? (
-            <button
-              type="button"
-              onClick={back}
-              className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--paper)]"
-            >
-              <ArrowLeft size={15} /> Back
-            </button>
-          ) : (
-            <span />
-          )}
-          {next && (
-            <Button variant="primary" onClick={next}>
-              Continue <ArrowRight size={15} />
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Walk({ n, children }: { n: number; children: React.ReactNode }) {
-  return (
-    <li className="flex gap-3">
-      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-[var(--brass-dim)] text-xs text-[var(--brass)]">
-        {n}
-      </span>
-      <span className="text-[var(--paper)]/90">{children}</span>
-    </li>
-  );
-}
-
-function A({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-0.5 text-[var(--brass)] underline decoration-[var(--brass-dim)] underline-offset-2 hover:decoration-[var(--brass)]"
-    >
-      {children}
-      <ExternalLink size={12} />
-    </a>
   );
 }

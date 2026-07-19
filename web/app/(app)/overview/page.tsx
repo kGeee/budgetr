@@ -12,8 +12,7 @@ import { AlertsPanel } from "@/components/alerts-panel";
 import { UpcomingBills } from "@/components/upcoming-bills";
 import { detectAnomalies } from "@/lib/anomalies";
 import { PlaidLink } from "@/components/plaid-link";
-import { hasPlaidCredentials } from "@/lib/plaid";
-import { redirect } from "next/navigation";
+import { ensureFirstRunDemo } from "@/lib/demo-data";
 import Link from "next/link";
 import {
   getBudgetsWithSpend,
@@ -38,11 +37,14 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "default-cache";
 
 export default async function Dashboard() {
-  const items = getItems();
+  let items = getItems();
 
-  // Brand-new install with no Plaid keys yet → guided onboarding. Once keys are
-  // set (but nothing connected), fall through to the inline empty state below.
-  if (!hasPlaidCredentials() && items.length === 0) redirect("/onboarding");
+  // Brand-new install → load the bundled demo data so the first screen is a fully
+  // populated dashboard (the demo banner offers "set up real accounts"). This
+  // also runs in the app layout, but doing it here too makes the landing
+  // deterministic regardless of layout/page render ordering. Once the user exits
+  // demo mode with no accounts linked, fall through to the empty state below.
+  if (items.length === 0 && ensureFirstRunDemo()) items = getItems();
   if (items.length === 0) return <EmptyState />;
 
   const baseNw = getNetWorth();

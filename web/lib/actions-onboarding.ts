@@ -8,8 +8,9 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { setFinnhubKey, setPlaidConfig } from "@/lib/app-config";
+import { setDemoMode, setFinnhubKey, setPlaidConfig } from "@/lib/app-config";
 import { verifyPlaidCredentials } from "@/lib/plaid";
+import { wipeFinancialData } from "@/lib/demo-data";
 
 export type ApiKeysInput = {
   clientId?: string;
@@ -56,6 +57,20 @@ export async function saveApiKeys(input: ApiKeysInput): Promise<{ ok: boolean }>
 
   if (input.finnhubKey?.trim()) setFinnhubKey(input.finnhubKey.trim());
 
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/**
+ * Leave demo mode: clear the bundled demo dataset and flip the flag off, so the
+ * app is a clean slate ready for the user's real accounts. Categories, Plaid
+ * keys, and other settings are preserved. Safe because demo mode only exists on a
+ * fresh install that has no real financial data of its own yet. Called at the
+ * start of the "set up real accounts" flow, before any real bank is linked.
+ */
+export async function exitDemoMode(): Promise<{ ok: boolean }> {
+  wipeFinancialData();
+  setDemoMode(false);
   revalidatePath("/", "layout");
   return { ok: true };
 }

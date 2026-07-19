@@ -26,6 +26,8 @@ const K_PLAID_CLIENT_ID = "plaidClientId";
 const K_PLAID_SECRET = "plaidSecret";
 const K_PLAID_ENV = "plaidEnv";
 const K_FINNHUB = "finnhubApiKey";
+const K_DEMO_MODE = "demoMode";
+const K_FIRST_RUN_DONE = "firstRunDone";
 
 function readSetting(key: string): string | null {
   const row = db.select().from(appSettings).where(eq(appSettings.key, key)).get();
@@ -138,4 +140,35 @@ export function getFinnhubKey(): string | null {
 export function setFinnhubKey(key: string | null): void {
   const k = key?.trim();
   writeSetting(K_FINNHUB, k ? encrypt(k) : null);
+}
+
+// ── Demo mode ────────────────────────────────────────────────────────────────
+
+/**
+ * True while the app is showing the bundled demo dataset (seeded on a brand-new
+ * install so the first thing a user sees is a fully populated dashboard). Cleared
+ * when the user connects real accounts. See lib/demo-data.ts.
+ */
+export function isDemoMode(): boolean {
+  return readSetting(K_DEMO_MODE) === "1";
+}
+
+/** Set (or clear) the demo-mode flag. */
+export function setDemoMode(on: boolean): void {
+  writeSetting(K_DEMO_MODE, on ? "1" : null);
+}
+
+/**
+ * Whether first-run handling has already happened (demo seeded, or skipped
+ * because real credentials/accounts were already present). A persistent, one-way
+ * marker so the demo dataset is only ever auto-seeded ONCE — exiting demo mode
+ * and abandoning setup leaves a clean slate rather than re-seeding demo.
+ */
+export function isFirstRunDone(): boolean {
+  return readSetting(K_FIRST_RUN_DONE) === "1";
+}
+
+/** Mark first-run handling complete (see isFirstRunDone). */
+export function markFirstRunDone(): void {
+  writeSetting(K_FIRST_RUN_DONE, "1");
 }
