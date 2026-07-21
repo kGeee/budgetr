@@ -1,22 +1,20 @@
-// Activity — recent transactions; tap one to recategorize (optimistic, queued
-// in the outbox until the Mac confirms via appliedOpIds). The category picker
-// offers every key the phone has seen in this summary — the contract carries
-// no separate category list.
+// Activity — recent transactions; tap one to recategorize. Desktop amount
+// convention: income renders jade, outflow renders paper (transactions-table).
 
 import React, { useMemo, useState } from "react";
 import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { TxnSummary } from "@budgetr/core";
 import { categoryLabel, dayLabel, money } from "@/format";
-import { T } from "@/theme";
+import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { Panel, SyncBanner } from "@/ui/bits";
+import { Aurora, Card, PageHead, SyncBanner } from "@/ui/bits";
 
 export default function Activity() {
   const { summary, refresh, refreshing, recategorize, pendingOps } = useCompanion();
   const [picking, setPicking] = useState<TxnSummary | null>(null);
 
   const pendingTxnIds = useMemo(
-    () => new Set(pendingOps.filter((o) => o.kind === "recategorize").map((o) => (o.kind === "recategorize" ? o.txnId : ""))),
+    () => new Set(pendingOps.flatMap((o) => (o.kind === "recategorize" ? [o.txnId] : []))),
     [pendingOps],
   );
 
@@ -29,12 +27,14 @@ export default function Activity() {
 
   return (
     <View style={s.root}>
+      <Aurora />
       <ScrollView
         contentContainerStyle={s.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={T.muted} />}
       >
+        <PageHead title="Activity" />
         <SyncBanner />
-        <Panel>
+        <Card>
           {(summary?.recent ?? []).map((t, i) => (
             <Pressable key={t.id} onPress={() => setPicking(t)} style={[s.row, i > 0 && s.rowBorder]}>
               <View style={{ flex: 1 }}>
@@ -50,7 +50,7 @@ export default function Activity() {
               <Text style={[s.amount, t.cents > 0 && { color: T.jade }]}>{money(t.cents, { sign: true })}</Text>
             </Pressable>
           ))}
-        </Panel>
+        </Card>
       </ScrollView>
 
       <Modal visible={picking !== null} transparent animationType="slide" onRequestClose={() => setPicking(null)}>
@@ -59,7 +59,7 @@ export default function Activity() {
             <Text style={s.sheetTitle} numberOfLines={1}>
               {picking?.merchant}
             </Text>
-            <Text style={s.sheetSub}>Move to category</Text>
+            <Text style={s.sheetSub}>MOVE TO CATEGORY</Text>
             <ScrollView style={{ maxHeight: 380 }}>
               {categories.map((c) => (
                 <Pressable
@@ -70,7 +70,7 @@ export default function Activity() {
                     setPicking(null);
                   }}
                 >
-                  <Text style={[s.catText, picking?.category === c && { color: T.jade, fontWeight: "700" }]}>
+                  <Text style={[s.catText, picking?.category === c && { color: T.jade, fontFamily: F.sansBold }]}>
                     {categoryLabel(c)}
                   </Text>
                   {picking?.category === c ? <Text style={{ color: T.jade }}>✓</Text> : null}
@@ -85,30 +85,39 @@ export default function Activity() {
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
-  content: { padding: 16, paddingTop: 62, paddingBottom: 40 },
+  root: { flex: 1, backgroundColor: T.ink },
+  content: { padding: 18, paddingTop: 74, paddingBottom: 44 },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 11, gap: 12 },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.line },
-  merchant: { color: T.paper, fontSize: 14.5 },
-  pendingTag: { color: T.amber, fontSize: 11 },
-  meta: { color: T.muted, fontSize: 12, marginTop: 2 },
-  amount: { color: T.paper, fontSize: 14.5, fontVariant: ["tabular-nums"] },
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  merchant: { color: T.paper, fontSize: 14.5, fontFamily: F.sansMedium },
+  pendingTag: { color: T.brass, fontSize: 11, fontFamily: F.sans },
+  meta: { color: T.faint, fontSize: 12, marginTop: 2, fontFamily: F.sans },
+  amount: { color: T.paper, fontSize: 14, fontFamily: F.mono },
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet: {
     backgroundColor: T.panel,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    padding: 20,
-    paddingBottom: 36,
+    borderTopLeftRadius: T.radius,
+    borderTopRightRadius: T.radius,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.line,
+    padding: 22,
+    paddingBottom: 38,
   },
-  sheetTitle: { color: T.paper, fontSize: 16, fontWeight: "700" },
-  sheetSub: { color: T.muted, fontSize: 12, marginTop: 2, marginBottom: 12 },
+  sheetTitle: { color: T.paper, fontSize: 19, fontFamily: F.display },
+  sheetSub: {
+    color: T.brass,
+    fontSize: 10.5,
+    fontFamily: F.sansSemiBold,
+    letterSpacing: 1.8,
+    marginTop: 4,
+    marginBottom: 12,
+  },
   catRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 12,
+    paddingVertical: 13,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: T.line,
   },
-  catText: { color: T.paper, fontSize: 15 },
+  catText: { color: T.paper, fontSize: 15, fontFamily: F.sans },
 });

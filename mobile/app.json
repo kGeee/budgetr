@@ -42,7 +42,8 @@
         {
           "cameraPermission": "budgetr uses the camera only to scan your Mac's pairing code."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
