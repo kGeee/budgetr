@@ -880,6 +880,35 @@ export const exchangeRates = sqliteTable(
  * preference (`displayCurrency`) and later for report-schedule config. Values
  * are stored as text; callers own the (de)serialization.
  */
+/**
+ * Daily implied-vol snapshots per option contract — the raw material for
+ * fixed-strike vol analysis. One row per (ticker, day, expiry, strike, right),
+ * captured whenever an option chain is fetched (first fetch of the day wins;
+ * later fetches the same day update in place). `ivSolved` marks values we
+ * back-solved from the mid price via Black-Scholes because the source chain
+ * carried no IV. Strikes are captured within a band around spot so SPY-sized
+ * chains don't balloon the table.
+ */
+export const optionIvSnapshots = sqliteTable(
+  "option_iv_snapshots",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ticker: text("ticker").notNull(), // underlying, uppercased
+    date: text("date").notNull(), // YYYY-MM-DD (capture day)
+    expiry: text("expiry").notNull(), // YYYY-MM-DD
+    strike: real("strike").notNull(),
+    right: text("right").notNull(), // call | put
+    iv: real("iv").notNull(), // decimal (0.42 = 42 vol)
+    ivSolved: integer("iv_solved", { mode: "boolean" }).notNull().default(false),
+    underlying: real("underlying"), // spot at capture time
+    capturedAt: integer("captured_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("iv_snap_key_idx").on(t.ticker, t.date, t.expiry, t.strike, t.right),
+    index("iv_snap_series_idx").on(t.ticker, t.expiry, t.date),
+  ],
+);
+
 export const appSettings = sqliteTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value"),

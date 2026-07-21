@@ -231,6 +231,18 @@ CREATE TABLE "net_worth_milestones" (
 	"achieved_date" text,
 	"sort_order" integer DEFAULT 0 NOT NULL
 );
+CREATE TABLE "option_iv_snapshots" (
+	"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	"ticker" text NOT NULL,
+	"date" text NOT NULL,
+	"expiry" text NOT NULL,
+	"strike" real NOT NULL,
+	"right" text NOT NULL,
+	"iv" real NOT NULL,
+	"iv_solved" integer DEFAULT false NOT NULL,
+	"underlying" real,
+	"captured_at" integer NOT NULL
+);
 CREATE TABLE "people" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
@@ -419,6 +431,8 @@ CREATE INDEX "invtx_account_idx" ON "investment_transactions" ("account_id");
 CREATE INDEX "invtx_batch_idx" ON "investment_transactions" ("import_batch_id");
 CREATE INDEX "invtx_date_idx" ON "investment_transactions" ("date");
 CREATE INDEX "invtx_security_idx" ON "investment_transactions" ("security_id");
+CREATE UNIQUE INDEX "iv_snap_key_idx" ON "option_iv_snapshots" ("ticker","date","expiry","strike","right");
+CREATE INDEX "iv_snap_series_idx" ON "option_iv_snapshots" ("ticker","expiry","date");
 CREATE INDEX "recurring_account_idx" ON "recurring_streams" ("account_id");
 CREATE INDEX "recurring_next_idx" ON "recurring_streams" ("predicted_next_date");
 CREATE INDEX "saved_filters_created_idx" ON "saved_filters" ("created_at");

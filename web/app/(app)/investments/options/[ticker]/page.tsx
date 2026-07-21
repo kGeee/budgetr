@@ -9,6 +9,7 @@ import { parseOccSymbol } from "@/lib/options";
 import { getCboeOptionChain } from "@/lib/cboe";
 import { getOptionChain } from "@/lib/yahoo";
 import { getQuotes } from "@/lib/finnhub";
+import { captureIvSnapshots } from "@/lib/fixed-strike-vol";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (fresh), but the option-chain fetch should hit the
@@ -42,6 +43,10 @@ export default async function OptionsTickerPage({
   const snapshot = await getQuotes([ticker]);
   const snapshotPrice = snapshot[ticker]?.price ?? null;
 
+  // Every desk visit refreshes today's fixed-strike vol capture (idempotent
+  // per day) — the history tape behind /options/[ticker]/fixed-strike.
+  if (chain) captureIvSnapshots(ticker, chain, snapshotPrice);
+
   const currency = heldLegs[0]?.currency ?? "USD";
 
   return (
@@ -49,13 +54,21 @@ export default async function OptionsTickerPage({
       <PageHead
         title={`${ticker} options`}
         action={
-          <Link
-            href="/investments"
-            className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
-          >
-            <ArrowLeft size={15} />
-            Investments
-          </Link>
+          <span className="flex items-center gap-4">
+            <Link
+              href={`/investments/options/${encodeURIComponent(ticker)}/fixed-strike`}
+              className="inline-flex items-center gap-1.5 text-sm text-[var(--brass)] transition-colors hover:text-[var(--paper)]"
+            >
+              Fixed-strike vol
+            </Link>
+            <Link
+              href="/investments"
+              className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+            >
+              <ArrowLeft size={15} />
+              Investments
+            </Link>
+          </span>
         }
       />
       <LivePricesProvider symbols={[ticker]}>
