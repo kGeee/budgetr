@@ -2,15 +2,19 @@ import type { NextConfig } from "next";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-// Pin the workspace root to this directory. Otherwise Next infers it from the
+// Pin the workspace root explicitly. Otherwise Next infers it from the
 // nearest lockfile and picks ~/bun.lock (the home dir), which makes Turbopack
 // walk all of $HOME — dev compiles hang and prod build over-traces files.
+// The root is the REPO root (one level up), not web/: the @budgetr/* packages
+// are file:-linked from ../packages, and Turbopack refuses to resolve through
+// symlinks that escape its root.
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.dirname(projectRoot);
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3"],
-  turbopack: { root: projectRoot },
-  outputFileTracingRoot: projectRoot,
+  turbopack: { root: repoRoot },
+  outputFileTracingRoot: repoRoot,
   // The output dir is ALWAYS the standard `.next` — that's what deploy platforms
   // (Vercel) expect. Only an explicit local opt-in, MARKETING_PREVIEW=1, writes
   // to a separate `.next-marketing` dir: that's for previewing the marketing
