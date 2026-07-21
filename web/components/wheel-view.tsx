@@ -23,7 +23,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { formatOptionExpiry, formatStrike } from "@/lib/options";
-import type { WheelReport } from "@/lib/wheel";
+import type { WheelReport, WheelStory } from "@/lib/wheel";
 
 const money = (n: number) => formatCurrency(n, "USD", { maximumFractionDigits: 0 });
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${money(Math.abs(n))}`;
@@ -35,6 +35,84 @@ const OUTCOME_BADGE: Record<string, { label: string; cls: string }> = {
   closed: { label: "bought back", cls: "bg-[var(--panel-2)] text-[var(--muted)]" },
   open: { label: "open", cls: "bg-[var(--blue)]/12 text-[var(--blue)]" },
 };
+
+const STORY_STATUS: Record<WheelStory["status"], { label: string; cls: string }> = {
+  "selling-puts": { label: "selling puts", cls: "bg-[var(--blue)]/12 text-[var(--blue)]" },
+  "holding-shares": { label: "holding shares", cls: "bg-[var(--brass)]/15 text-[var(--brass)]" },
+  "selling-calls": { label: "selling calls", cls: "bg-[var(--blue)]/12 text-[var(--blue)]" },
+  completed: { label: "completed", cls: "bg-[var(--jade)]/12 text-[var(--jade)]" },
+};
+
+function PhaseChip({ children, tone }: { children: React.ReactNode; tone?: "jade" | "brass" | "muted" }) {
+  const cls =
+    tone === "jade"
+      ? "border-[var(--jade)]/40 text-[var(--jade)]"
+      : tone === "brass"
+        ? "border-[var(--brass-dim)] text-[var(--brass)]"
+        : "border-line text-[var(--muted)]";
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] ${cls}`}>{children}</span>;
+}
+
+function StoryRow({ story }: { story: WheelStory }) {
+  const status = STORY_STATUS[story.status];
+  return (
+    <li className="px-6 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex items-center gap-3">
+          <span className="mono font-semibold text-[var(--brass)]">{story.underlying}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${status.cls}`}>{status.label}</span>
+          <span className="mono text-xs text-[var(--faint)]">
+            {story.started}
+            {story.ended ? ` → ${story.ended}` : ""}
+          </span>
+        </div>
+        <div className="mono flex items-center gap-4 text-xs">
+          <span className="text-[var(--muted)]">
+            premium <span className={signColor(story.premium)}>{signed(story.premium)}</span>
+          </span>
+          {story.stockPnl != null && (
+            <span className="text-[var(--muted)]">
+              stock <span className={signColor(story.stockPnl)}>{signed(story.stockPnl)}</span>
+            </span>
+          )}
+          <span className="text-[var(--paper)]">
+            total <span className={signColor(story.total)}>{signed(story.total)}</span>
+          </span>
+          {story.adjustedBasis != null && (
+            <span className="text-[var(--muted)]">adj. basis {money(story.adjustedBasis)}/sh</span>
+          )}
+        </div>
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-[11px] text-[var(--faint)]">
+        {story.phases.map((p, i) => (
+          <span key={i} className="flex items-center gap-1.5">
+            {i > 0 && <span>→</span>}
+            {p.kind === "csp" && (
+              <PhaseChip tone={p.cycle.net >= 0 ? "jade" : "muted"}>
+                CSP {formatStrike(p.cycle.strike)} {signed(p.cycle.net)}
+              </PhaseChip>
+            )}
+            {p.kind === "assigned" && (
+              <PhaseChip tone="brass">
+                assigned {p.shares} sh @ {formatStrike(p.costPerShare)}
+              </PhaseChip>
+            )}
+            {p.kind === "cc" && (
+              <PhaseChip tone={p.cycle.net >= 0 ? "jade" : "muted"}>
+                CC {formatStrike(p.cycle.strike)} {signed(p.cycle.net)}
+              </PhaseChip>
+            )}
+            {p.kind === "calledAway" && (
+              <PhaseChip tone="brass">
+                called away @ {formatStrike(p.pricePerShare)}
+              </PhaseChip>
+            )}
+          </span>
+        ))}
+      </div>
+    </li>
+  );
+}
 
 function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
   return (
@@ -48,7 +126,7 @@ function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: 
 
 export function WheelView({ report }: { report: WheelReport }) {
   const [showAllCycles, setShowAllCycles] = useState(false);
-  const { kpis, months, cumulative, open, cycles, rollup } = report;
+  const { kpis, months, cumulative, open, cycles, rollup, stories, spreadLegsExcluded } = report;
   const chartData = months.map((m, i) => ({ ...m, cumulative: cumulative[i]!.cumulative }));
   const visibleCycles = showAllCycles ? cycles : cycles.slice(0, 25);
 
@@ -71,7 +149,12 @@ export function WheelView({ report }: { report: WheelReport }) {
         <div className="grid grid-cols-2 gap-x-6 gap-y-5 lg:grid-cols-4">
           <Kpi label="Net premium · this month" value={signed(kpis.netThisMonth)} tone={signColor(kpis.netThisMonth)} />
           <Kpi label="Net premium · YTD" value={signed(kpis.netYtd)} tone={signColor(kpis.netYtd)} />
-          <Kpi label="Net premium · all time" value={signed(kpis.netAllTime)} tone={signColor(kpis.netAllTime)} />
+          <Kpi
+            label="Net premium · all time"
+            value={signed(kpis.netAllTime)}
+            tone={signColor(kpis.netAllTime)}
+            sub={`${signed(kpis.netAllOptions)} incl. spreads · ${spreadLegsExcluded} spread ${spreadLegsExcluded === 1 ? "leg" : "legs"} excluded`}
+          />
           <Kpi
             label="Collateral at risk"
             value={money(kpis.collateralAtRisk)}
@@ -178,6 +261,20 @@ export function WheelView({ report }: { report: WheelReport }) {
         </Card>
       )}
 
+      {/* Wheel stories — the chained narrative */}
+      {stories.length > 0 && (
+        <Card className="overflow-hidden p-0">
+          <div className="border-b border-line px-6 py-4">
+            <span className="eyebrow">Wheel stories</span>
+          </div>
+          <ul className="divide-y divide-line/60">
+            {stories.map((story) => (
+              <StoryRow key={story.underlying + story.started} story={story} />
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {/* Cycle ledger */}
       {cycles.length > 0 && (
         <Card className="overflow-hidden p-0">
@@ -267,7 +364,7 @@ export function WheelView({ report }: { report: WheelReport }) {
       )}
 
       <p className="text-[11px] text-[var(--muted)]">
-        Premium income is net option cash flow — spread long legs subtract. Cycles cover contracts
+        Premium income covers naked short premium only — spread strategies (verticals, combos) are excluded from every figure here and live on the options desk instead. Cycles cover contracts
         opened with a sell; assignment is inferred from a matching ±100-share stock trade within
         five days of expiry. Annualized figures are net premium over cash-secured collateral (puts).
       </p>

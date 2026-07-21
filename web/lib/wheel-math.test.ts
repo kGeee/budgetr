@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildShortCycles,
+  buildWheelLedger,
+  buildWheelStories,
   cumulativeNet,
   mapTrades,
   monthlyPremium,
+  openShortPositions,
   rollupByUnderlying,
   type TradeRow,
 } from "./wheel-math";
@@ -133,5 +136,95 @@ describe("income reporting", () => {
     expect(r!.open).toBe(1);
     expect(r!.winRatePct).toBe(50);
     expect(r!.net).toBe(120 - 80 + 300);
+  });
+});
+
+describe("buildWheelLedger — spreads shouldn't count", () => {
+  it("excludes short legs opened against a long leg (same underlying/expiry/right)", () => {
+    const { events, stocks } = mapTrades([
+      // LRCX-style same-day call vertical: short 430 leg is spread risk
+      t("2026-06-30", "sell", "LRCX260821C00430000", 1, -4530),
+      t("2026-06-30", "buy", "LRCX260821C00410000", 1, 5431),
+      // a genuine lone CSP stays
+      t("2026-07-01", "sell", "ABC260821P00090000", 1, -300),
+    ]);
+    const ledger = buildWheelLedger(events, stocks, TODAY);
+    expect(ledger.spreadLegsExcluded).toBe(1);
+    expect(ledger.cycles).toHaveLength(1);
+    expect(ledger.cycles[0]!.underlying).toBe("ABC");
+    // income covers only the eligible contract
+    const months = monthlyPremium(ledger.incomeEvents);
+    expect(months).toEqual([{ month: "2026-07", credits: 300, debits: 0, net: 300, trades: 1 }]);
+  });
+
+  it("different expiry or right does NOT mark a short as a spread leg", () => {
+    const { events, stocks } = mapTrades([
+      t("2026-06-30", "sell", "ABC260821P00090000", 1, -300),
+      t("2026-06-30", "buy", "ABC260821C00110000", 1, 150), // call vs put — unrelated
+    ]);
+    const ledger = buildWheelLedger(events, stocks, TODAY);
+    expect(ledger.spreadLegsExcluded).toBe(0);
+    expect(ledger.cycles).toHaveLength(1);
+  });
+});
+
+describe("openShortPositions — holdings semantics", () => {
+  it("divides shares-based option quantities by 100 (the 100x risk bug)", () => {
+    const [p] = openShortPositions([
+      { ticker: "ABC260821P00090000", quantity: -100, value: -250, costBasis: -300 },
+    ]);
+    expect(p!.contracts).toBe(1);
+    expect(p!.collateral).toBe(9_000); // 90 · 100 · 1 — not 900,000
+    expect(p!.credit).toBe(300);
+  });
+
+  it("excludes legs that classify into spreads; keeps lone shorts", () => {
+    const positions = openShortPositions([
+      // MU-style put vertical — both legs excluded
+      { ticker: "MU270115P00750000", quantity: -100, value: -14062, costBasis: -13008 },
+      { ticker: "MU270115P00700000", quantity: 100, value: 11625, costBasis: 10759 },
+      // lone short call, covered by shares
+      { ticker: "XYZ260918C00050000", quantity: -100, value: -120, costBasis: -180 },
+      { ticker: "XYZ", quantity: 100, value: 4800, costBasis: 4000 },
+    ]);
+    expect(positions).toHaveLength(1);
+    expect(positions[0]!.underlying).toBe("XYZ");
+    expect(positions[0]!.covered).toBe(true);
+  });
+
+  it("flags uncovered calls", () => {
+    const [p] = openShortPositions([{ ticker: "XYZ260918C00050000", quantity: -200, value: -240, costBasis: -360 }]);
+    expect(p!.contracts).toBe(2);
+    expect(p!.covered).toBe(false);
+  });
+});
+
+describe("buildWheelStories — the chained narrative", () => {
+  it("chains CSP → assigned → CC → called away into one completed story", () => {
+    const { events, stocks } = mapTrades([
+      // CSP sold, assigned at 95
+      t("2026-05-01", "sell", "ABC260515P00095000", 1, -250),
+      t("2026-05-15", "transfer", "ABC260515P00095000", -1, 0),
+      t("2026-05-15", "buy", "ABC", 100, 9500),
+      // CC sold against the shares, called away at 105
+      t("2026-05-20", "sell", "ABC260619C00105000", 1, -180),
+      t("2026-06-19", "transfer", "ABC260619C00105000", -1, 0),
+      t("2026-06-19", "sell", "ABC", 100, -10500),
+    ]);
+    const cycles = buildWheelLedger(events, stocks, TODAY).cycles;
+    const [story] = buildWheelStories(cycles);
+    expect(story!.status).toBe("completed");
+    expect(story!.phases.map((p) => p.kind)).toEqual(["csp", "assigned", "cc", "calledAway"]);
+    expect(story!.premium).toBe(430); // 250 + 180, both kept
+    expect(story!.stockPnl).toBe(1_000); // (105 − 95) · 100
+    expect(story!.total).toBe(1_430);
+    expect(story!.adjustedBasis).toBeCloseTo(95 - 430 / 100, 6); // 90.70/sh
+    expect(story!.ended).toBe("2026-06-19");
+  });
+
+  it("a lone CSP cycle does not become a story (the ledger already has it)", () => {
+    const { events, stocks } = mapTrades([t("2026-07-01", "sell", "ABC260821P00090000", 1, -300)]);
+    const cycles = buildWheelLedger(events, stocks, TODAY).cycles;
+    expect(buildWheelStories(cycles)).toHaveLength(0);
   });
 });

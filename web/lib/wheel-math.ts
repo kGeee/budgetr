@@ -17,7 +17,7 @@
  *     the credits).
  */
 
-import { parseOccSymbol, type ParsedOption } from "@/lib/options";
+import { classifyOptionLegs, parseOccSymbol, type ParsedOption } from "@/lib/options";
 
 export type TradeRow = {
   date: string; // YYYY-MM-DD
@@ -243,4 +243,244 @@ export function rollupByUnderlying(cycles: ShortCycle[]): UnderlyingRollup[] {
       };
     })
     .sort((a, b) => b.net - a.net);
+}
+
+
+// ── spread exclusion + wheel ledger ──────────────────────────────────
+
+export type WheelLedger = {
+  cycles: ShortCycle[]; // wheel-eligible only (naked CSP / CC premium)
+  spreadLegsExcluded: number;
+  /** Cash events of eligible contracts — feed monthlyPremium for wheel income. */
+  incomeEvents: OptionEvent[];
+};
+
+/**
+ * Cycles minus spread legs. A short contract is a spread leg — not wheel
+ * premium — when a LONG-opened contract exists on the same underlying,
+ * expiry, and right within ±3 days of its open (verticals, calendars-ish,
+ * and same-day multi-leg tickets all match this).
+ */
+export function buildWheelLedger(events: OptionEvent[], stocks: StockTrade[], today: string): WheelLedger {
+  const all = buildShortCycles(events, stocks, today);
+
+  // Long-opened contracts (first event is a buy) indexed by structure key.
+  const firstEvent = new Map<string, OptionEvent>();
+  for (const e of events) if (!firstEvent.has(e.occ)) firstEvent.set(e.occ, e);
+  const longOpens = new Map<string, string[]>();
+  for (const e of firstEvent.values()) {
+    if (e.kind !== "buy") continue;
+    const k = `${e.parsed.underlying}|${e.parsed.expiry}|${e.parsed.right}`;
+    const arr = longOpens.get(k) ?? [];
+    arr.push(e.date);
+    longOpens.set(k, arr);
+  }
+
+  const isSpreadLeg = (c: ShortCycle) =>
+    (longOpens.get(`${c.underlying}|${c.expiry}|${c.right}`) ?? []).some(
+      (d) => Math.abs(Date.parse(`${d}T00:00:00Z`) - Date.parse(`${c.opened}T00:00:00Z`)) <= 3 * 86_400_000,
+    );
+
+  const cycles = all.filter((c) => !isSpreadLeg(c));
+  const eligible = new Set(cycles.map((c) => c.occ));
+  return {
+    cycles,
+    spreadLegsExcluded: all.length - cycles.length,
+    incomeEvents: events.filter((e) => e.kind !== "remove" && eligible.has(e.occ)),
+  };
+}
+
+// ── open positions from holdings ─────────────────────────────────────
+
+export type HoldingLike = {
+  ticker: string | null;
+  /** SHARES-based for options in this schema: ±100 per contract. */
+  quantity: number | null;
+  value: number | null;
+  costBasis: number | null;
+};
+
+export type OpenShortPosition = {
+  occ: string;
+  underlying: string;
+  right: "call" | "put";
+  strike: number;
+  expiry: string;
+  contracts: number;
+  credit: number | null; // received at open (negative basis on a short)
+  markToClose: number | null;
+  collateral: number | null; // puts: strike · 100 · contracts
+  covered: boolean | null; // calls: shares ≥ 100/contract
+};
+
+/**
+ * Open wheel positions from live holdings. Two rules learned the hard way:
+ *  - holdings store option quantity as SHARES (±100 per contract) — divide,
+ *    or every risk figure is exactly 100× reality;
+ *  - legs that classify into multi-leg structures (verticals, combos) are
+ *    spread risk, not wheel premium — only lone short legs qualify.
+ */
+export function openShortPositions(holdings: HoldingLike[]): OpenShortPosition[] {
+  const sharesByTicker = new Map<string, number>();
+  const legs: Array<{ parsed: ParsedOption; h: HoldingLike }> = [];
+  for (const h of holdings) {
+    if (!h.ticker || h.quantity == null) continue;
+    const parsed = parseOccSymbol(h.ticker);
+    if (parsed) legs.push({ parsed, h });
+    else sharesByTicker.set(h.ticker.toUpperCase(), (sharesByTicker.get(h.ticker.toUpperCase()) ?? 0) + h.quantity);
+  }
+
+  // Classify per underlying with quantities AS STORED (the classifier's own
+  // convention); keep only single-leg short structures.
+  const byUnderlying = new Map<string, Array<{ parsed: ParsedOption; h: HoldingLike }>>();
+  for (const leg of legs) {
+    const arr = byUnderlying.get(leg.parsed.underlying) ?? [];
+    arr.push(leg);
+    byUnderlying.set(leg.parsed.underlying, arr);
+  }
+
+  const out: OpenShortPosition[] = [];
+  for (const [underlying, group] of byUnderlying) {
+    const structures = classifyOptionLegs(group.map(({ parsed, h }) => ({ parsed, quantity: h.quantity, costBasis: h.costBasis })));
+    for (const st of structures) {
+      if (st.kind !== "single") continue; // spreads/combos are not wheel premium
+      const { parsed, h } = group[st.legIndexes[0]!]!;
+      if ((h.quantity ?? 0) >= 0) continue; // long singles are not premium either
+      const contracts = Math.abs(h.quantity!) / 100; // shares-based → contracts
+      out.push({
+        occ: parsed.occ,
+        underlying,
+        right: parsed.right,
+        strike: parsed.strike,
+        expiry: parsed.expiry,
+        contracts,
+        credit: h.costBasis != null && h.costBasis < 0 ? -h.costBasis : null,
+        markToClose: h.value != null ? Math.abs(h.value) : null,
+        collateral: parsed.right === "put" ? parsed.strike * 100 * contracts : null,
+        covered: parsed.right === "call" ? (sharesByTicker.get(underlying) ?? 0) >= contracts * 100 : null,
+      });
+    }
+  }
+  return out;
+}
+
+// ── wheel stories: chained CSP → assignment → CC → called away ───────
+
+export type WheelPhase =
+  | { kind: "csp"; cycle: ShortCycle }
+  | { kind: "assigned"; date: string; shares: number; costPerShare: number }
+  | { kind: "cc"; cycle: ShortCycle }
+  | { kind: "calledAway"; date: string; shares: number; pricePerShare: number };
+
+export type WheelStory = {
+  underlying: string;
+  phases: WheelPhase[];
+  status: "selling-puts" | "holding-shares" | "selling-calls" | "completed";
+  started: string;
+  ended: string | null;
+  shares: number; // shares held during the story (0 while only selling puts)
+  premium: number; // Σ net premium across all phases
+  stockPnl: number | null; // (call strike − put strike) · shares, when completed
+  total: number; // premium + stockPnl
+  /** Assignment strike minus premium per share — what the shares really cost. */
+  adjustedBasis: number | null;
+};
+
+/**
+ * Chain cycles per underlying into full wheel narratives. A story opens with
+ * put-selling, turns into share-holding on assignment, collects covered-call
+ * premium, and completes when calls are assigned (called away). Lone cycles
+ * with no chaining stay in the flat ledger — a story needs at least an
+ * assignment or a put→call handoff to say something the ledger doesn't.
+ */
+export function buildWheelStories(cycles: ShortCycle[]): WheelStory[] {
+  const byUnderlying = new Map<string, ShortCycle[]>();
+  for (const c of cycles) {
+    const arr = byUnderlying.get(c.underlying) ?? [];
+    arr.push(c);
+    byUnderlying.set(c.underlying, arr);
+  }
+
+  const stories: WheelStory[] = [];
+  for (const [underlying, list] of byUnderlying) {
+    const ordered = [...list].sort((a, b) => (a.opened < b.opened ? -1 : 1));
+    let story: WheelStory | null = null;
+    let assignStrike: number | null = null;
+
+    const finalize = () => {
+      if (!story) return;
+      const chained =
+        story.phases.some((p) => p.kind === "assigned" || p.kind === "calledAway") ||
+        (story.phases.some((p) => p.kind === "csp") && story.phases.some((p) => p.kind === "cc"));
+      if (chained) stories.push(story);
+      story = null;
+      assignStrike = null;
+    };
+
+    for (const c of ordered) {
+      if (c.right === "put") {
+        if (story && story.status !== "selling-puts") finalize(); // new wheel begins
+        if (!story) {
+          story = {
+            underlying,
+            phases: [],
+            status: "selling-puts",
+            started: c.opened,
+            ended: null,
+            shares: 0,
+            premium: 0,
+            stockPnl: null,
+            total: 0,
+            adjustedBasis: null,
+          };
+        }
+        story.phases.push({ kind: "csp", cycle: c });
+        story.premium += c.net;
+        if (c.outcome === "assigned") {
+          const shares = c.qty * 100;
+          story.phases.push({ kind: "assigned", date: c.closed ?? c.expiry, shares, costPerShare: c.strike });
+          story.shares = shares;
+          assignStrike = c.strike;
+          story.status = "holding-shares";
+        }
+      } else {
+        // covered call
+        if (!story || story.status === "selling-puts") {
+          // CC without a tracked assignment: shares were bought outright —
+          // still a wheel-ish story once calls chain on.
+          finalize();
+          story = {
+            underlying,
+            phases: [],
+            status: "selling-calls",
+            started: c.opened,
+            ended: null,
+            shares: c.qty * 100,
+            premium: 0,
+            stockPnl: null,
+            total: 0,
+            adjustedBasis: null,
+          };
+        }
+        story.phases.push({ kind: "cc", cycle: c });
+        story.premium += c.net;
+        story.status = c.outcome === "open" ? "selling-calls" : story.status === "selling-puts" ? story.status : "holding-shares";
+        if (c.outcome === "assigned") {
+          const shares = c.qty * 100;
+          story.phases.push({ kind: "calledAway", date: c.closed ?? c.expiry, shares, pricePerShare: c.strike });
+          story.stockPnl = assignStrike != null ? (c.strike - assignStrike) * shares : null;
+          story.status = "completed";
+          story.ended = c.closed ?? c.expiry;
+        }
+      }
+      if (story) {
+        story.total = story.premium + (story.stockPnl ?? 0);
+        story.adjustedBasis =
+          assignStrike != null && story.shares > 0 ? assignStrike - story.premium / story.shares : null;
+      }
+      if (story && story.status === "completed") finalize();
+    }
+    finalize();
+  }
+  return stories.sort((a, b) => (a.started > b.started ? -1 : 1));
 }
