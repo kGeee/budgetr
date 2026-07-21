@@ -2,16 +2,17 @@
 // Tapping a transaction opens a detail sheet (amount hero, meta, category);
 // recategorizing happens inside it, optimistically, via the outbox.
 
-import React, { useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated from "react-native-reanimated";
+import React, { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import Animated, { useReducedMotion, LinearTransition } from "react-native-reanimated";
+import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import type { SparkPoint, TxnSummary } from "@budgetr/core";
 import { categoryLabel, dayLabel, money } from "@/format";
 import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { Aurora, Bars, Card, Eyebrow, PageHead, SyncBanner } from "@/ui/bits";
+import { Bars, Card, Eyebrow, SyncBanner } from "@/ui/bits";
+import { Screen } from "@/ui/screen";
 import { useEntering } from "@/ui/motion";
 import { Sheet } from "@/ui/sheet";
 
@@ -65,17 +66,22 @@ function TxnSheet({
   txn,
   categories,
   pending,
+  initialPicking,
   onClose,
   onRecategorize,
 }: {
   txn: TxnSummary | null;
   categories: string[];
   pending: boolean;
+  initialPicking: boolean;
   onClose: () => void;
   onRecategorize: (txnId: string, toCategory: string) => void;
 }) {
   const [picking, setPicking] = useState(false);
   const income = (txn?.cents ?? 0) > 0;
+  useEffect(() => {
+    setPicking(initialPicking);
+  }, [txn?.id, initialPicking]);
 
   return (
     <Sheet
@@ -148,9 +154,10 @@ function TxnSheet({
 
 export default function Activity() {
   const { summary, refresh, refreshing, recategorize, pendingOps } = useCompanion();
-  const insets = useSafeAreaInsets();
   const entering = useEntering();
+  const reduced = useReducedMotion();
   const [selected, setSelected] = useState<TxnSummary | null>(null);
+  const [startPicking, setStartPicking] = useState(false);
 
   const pendingTxnIds = useMemo(
     () => new Set(pendingOps.flatMap((o) => (o.kind === "recategorize" ? [o.txnId] : []))),
@@ -165,22 +172,8 @@ export default function Activity() {
   }, [summary]);
 
   return (
-    <View style={s.root}>
-      <Aurora />
-      <ScrollView
-        contentContainerStyle={[s.content, { paddingTop: insets.top + 18 }]}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              haptics.thud();
-              void refresh();
-            }}
-            tintColor={T.muted}
-          />
-        }
-      >
-        <PageHead title="Activity" />
+    <>
+      <Screen title="Activity" refreshing={refreshing} onRefresh={() => void refresh()}>
         <SyncBanner />
         <Animated.View entering={entering(0)}>
           <SpendChart points={summary?.spendByDay ?? []} />
@@ -188,39 +181,61 @@ export default function Activity() {
         <Animated.View entering={entering(1)}>
           <Card>
             {(summary?.recent ?? []).map((t, i) => (
-              <Pressable
+              <Animated.View
                 key={t.id}
-                onPress={() => {
-                  haptics.thud();
-                  setSelected(t);
-                }}
-                style={[s.row, i > 0 && s.rowBorder]}
+                layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(32)}
               >
-                <View style={{ flex: 1 }}>
-                  <Text style={s.merchant} numberOfLines={1}>
-                    {t.merchant}
-                    {t.pending ? <Text style={s.pendingTag}>  pending</Text> : null}
-                  </Text>
-                  <Text style={s.meta}>
-                    {dayLabel(t.ts)} · {categoryLabel(t.category)}
-                    {pendingTxnIds.has(t.id) ? <Text style={{ color: T.brass }}> · syncing…</Text> : null}
-                  </Text>
-                </View>
-                <Text style={[s.amount, t.cents > 0 && { color: T.jade }]}>{money(t.cents, { sign: true })}</Text>
-              </Pressable>
+                <ReanimatedSwipeable
+                  friction={1.6}
+                  rightThreshold={52}
+                  overshootRight={false}
+                  renderRightActions={() => (
+                    <View style={s.swipeZone}>
+                      <Text style={s.swipeZoneText}>Category</Text>
+                    </View>
+                  )}
+                  onSwipeableWillOpen={() => {
+                    haptics.tap();
+                    setStartPicking(true);
+                    setSelected(t);
+                  }}
+                >
+                  <Pressable
+                    onPress={() => {
+                      haptics.thud();
+                      setStartPicking(false);
+                      setSelected(t);
+                    }}
+                    style={[s.row, i > 0 && s.rowBorder]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.merchant} numberOfLines={1}>
+                        {t.merchant}
+                        {t.pending ? <Text style={s.pendingTag}>  pending</Text> : null}
+                      </Text>
+                      <Text style={s.meta}>
+                        {dayLabel(t.ts)} · {categoryLabel(t.category)}
+                        {pendingTxnIds.has(t.id) ? <Text style={{ color: T.brass }}> · syncing…</Text> : null}
+                      </Text>
+                    </View>
+                    <Text style={[s.amount, t.cents > 0 && { color: T.jade }]}>{money(t.cents, { sign: true })}</Text>
+                  </Pressable>
+                </ReanimatedSwipeable>
+              </Animated.View>
             ))}
           </Card>
         </Animated.View>
-      </ScrollView>
+      </Screen>
 
       <TxnSheet
         txn={selected}
         categories={categories}
         pending={selected ? pendingTxnIds.has(selected.id) : false}
+        initialPicking={startPicking}
         onClose={() => setSelected(null)}
         onRecategorize={recategorize}
       />
-    </View>
+    </>
   );
 }
 
@@ -267,8 +282,17 @@ const tx = StyleSheet.create({
 });
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.ink },
-  content: { padding: 18, paddingBottom: 108 },
+  swipeZone: {
+    width: 92,
+    marginLeft: 6,
+    borderRadius: 12,
+    backgroundColor: "rgba(111,227,166,0.12)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.jade,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  swipeZoneText: { color: T.jade, fontFamily: F.sansSemiBold, fontSize: 12.5 },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 11, gap: 12 },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.line },
   merchant: { color: T.paper, fontSize: 14.5, fontFamily: F.sansMedium },

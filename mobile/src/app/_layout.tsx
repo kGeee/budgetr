@@ -20,6 +20,7 @@ import {
 } from "@expo-google-fonts/hanken-grotesk";
 import { SplineSansMono_500Medium, SplineSansMono_600SemiBold } from "@expo-google-fonts/spline-sans-mono";
 import { ArrowLeftRight, LayoutDashboard, LineChart, Wallet } from "lucide-react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BlurView } from "expo-blur";
 import { CompanionProvider, useCompanion } from "@/state/companion";
 import { PairingScreen } from "@/ui/pairing";
@@ -66,6 +67,7 @@ export default function RootLayout() {
   if (!fontsLoaded) return <View style={s.blank} />;
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <CompanionProvider>
       <StatusBar style="light" />
       <Gate>
@@ -113,6 +115,7 @@ export default function RootLayout() {
         </Tabs>
       </Gate>
     </CompanionProvider>
+    </GestureHandlerRootView>
   );
 }
 

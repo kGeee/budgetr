@@ -3,16 +3,16 @@
 // Tap a budget to see its transactions from `recent`.
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Defs, Line, LinearGradient as SvgGradient, Path, Circle, Stop } from "react-native-svg";
 import type { BudgetSummary, SparkPoint } from "@budgetr/core";
 import { categoryLabel, money } from "@/format";
 import * as haptics from "@/haptics";
 import { F, stateColor, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated from "react-native-reanimated";
-import { Aurora, Card, Eyebrow, PageHead, SyncBanner } from "@/ui/bits";
+import Animated, { FadeIn, LinearTransition, useReducedMotion } from "react-native-reanimated";
+import { Card, Eyebrow, SyncBanner } from "@/ui/bits";
+import { Screen } from "@/ui/screen";
 import { useEntering } from "@/ui/motion";
 
 /**
@@ -202,28 +202,13 @@ const pc = StyleSheet.create({
 export default function Budgets() {
   const { summary, refresh, refreshing } = useCompanion();
   const [openCat, setOpenCat] = useState<string | null>(null);
-  const insets = useSafeAreaInsets();
   const entering = useEntering();
+  const reduced = useReducedMotion();
 
   const budgets = summary?.budgets ?? [];
 
   return (
-    <View style={s.root}>
-      <Aurora />
-      <ScrollView
-        contentContainerStyle={[s.content, { paddingTop: insets.top + 18 }]}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              haptics.thud();
-              void refresh();
-            }}
-            tintColor={T.muted}
-          />
-        }
-      >
-        <PageHead title="Budgets" />
+    <Screen title="Budgets" refreshing={refreshing} onRefresh={() => void refresh()}>
         <SyncBanner />
         <Animated.View entering={entering(0)}>
           <PaceChart spendByDay={summary?.spendByDay ?? []} budgets={budgets} />
@@ -236,8 +221,12 @@ export default function Budgets() {
           const open = openCat === b.category;
           const txns = open ? (summary?.recent ?? []).filter((t) => t.category === b.category) : [];
           return (
-            <Pressable
+            <Animated.View
               key={b.category}
+              entering={entering(1)}
+              layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(32)}
+            >
+            <Pressable
               onPress={() => {
                 haptics.tick();
                 setOpenCat(open ? null : b.category);
@@ -260,7 +249,7 @@ export default function Budgets() {
                   </Text>
                 )}
                 {open && (
-                  <View style={s.txns}>
+                  <Animated.View entering={FadeIn.duration(180)} style={s.txns}>
                     {txns.length === 0 ? (
                       <Text style={s.txnEmpty}>No recent transactions in this category.</Text>
                     ) : (
@@ -273,20 +262,18 @@ export default function Budgets() {
                         </View>
                       ))
                     )}
-                  </View>
+                  </Animated.View>
                 )}
               </Card>
             </Pressable>
+            </Animated.View>
           );
         })}
-      </ScrollView>
-    </View>
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.ink },
-  content: { padding: 18, paddingBottom: 108 },
   emptyText: { color: T.muted, textAlign: "center", marginTop: 60, fontSize: 14, fontFamily: F.sans },
   head: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 12 },
   name: { color: T.paper, fontSize: 15.5, fontFamily: F.sansSemiBold, flexShrink: 1 },

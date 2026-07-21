@@ -4,16 +4,16 @@
 // Still read-only, still no basis/greeks/lots — the Mac has the detail.
 
 import React, { useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, ClipPath, Defs, Line, Path, Rect } from "react-native-svg";
 import type { PositionSummary, StrategySummary } from "@budgetr/core";
 import { money, moneyCompact } from "@/format";
 import * as haptics from "@/haptics";
 import { F, PIE_COLORS, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated from "react-native-reanimated";
-import { Aurora, Card, Donut, Eyebrow, PageHead, Spark, SyncBanner } from "@/ui/bits";
+import Animated, { FadeIn, LinearTransition, useReducedMotion } from "react-native-reanimated";
+import { Card, Donut, Eyebrow, Spark, SyncBanner } from "@/ui/bits";
+import { Screen } from "@/ui/screen";
 import { Sheet } from "@/ui/sheet";
 import { AnimatedMoney, useEntering } from "@/ui/motion";
 
@@ -110,29 +110,15 @@ export default function Holdings() {
   const { summary, refresh, refreshing } = useCompanion();
   const [openStrategy, setOpenStrategy] = useState<string | null>(null);
   const [focus, setFocus] = useState<PositionSummary | null>(null);
-  const insets = useSafeAreaInsets();
   const entering = useEntering();
+  const reduced = useReducedMotion();
   const positions = summary?.positions ?? [];
   const inv = summary?.investments;
   const total = inv?.valueCents ?? positions.reduce((acc, p) => acc + p.cents, 0);
 
   return (
-    <View style={s.root}>
-      <Aurora />
-      <ScrollView
-        contentContainerStyle={[s.content, { paddingTop: insets.top + 18 }]}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              haptics.thud();
-              void refresh();
-            }}
-            tintColor={T.muted}
-          />
-        }
-      >
-        <PageHead title="Holdings" />
+    <>
+    <Screen title="Holdings" refreshing={refreshing} onRefresh={() => void refresh()}>
         <SyncBanner />
 
         {positions.length === 0 ? (
@@ -182,8 +168,11 @@ export default function Holdings() {
                     const hasCurve = (st.curve?.length ?? 0) >= 2;
                     const open = openStrategy === st.id && hasCurve;
                     return (
-                      <Pressable
+                      <Animated.View
                         key={st.id}
+                        layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(32)}
+                      >
+                      <Pressable
                         disabled={!hasCurve}
                         onPress={() => {
                           haptics.tap();
@@ -208,8 +197,13 @@ export default function Holdings() {
                             <Text style={[s.stratValue, st.cents < 0 && { color: T.coral }]}>{moneyCompact(st.cents)}</Text>
                           </View>
                         </View>
-                        {open && <PayoffMini st={st} />}
+                        {open && (
+                          <Animated.View entering={FadeIn.duration(180)}>
+                            <PayoffMini st={st} />
+                          </Animated.View>
+                        )}
                       </Pressable>
+                      </Animated.View>
                     );
                   })}
                 </View>
@@ -271,14 +265,14 @@ export default function Holdings() {
             <Text style={s.footnote}>Cost basis, lots, and gains live on your Mac.</Text>
           </>
         )}
-      </ScrollView>
+    </Screen>
       <PositionSheet
         position={focus}
         totalCents={positions.reduce((a, x) => a + Math.max(0, x.cents), 0)}
         strategies={(inv?.strategies ?? []).filter((st) => st.underlying === focus?.symbol)}
         onClose={() => setFocus(null)}
       />
-    </View>
+    </>
   );
 }
 
@@ -376,8 +370,6 @@ const ps = StyleSheet.create({
 });
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.ink },
-  content: { padding: 18, paddingBottom: 108 },
   emptyText: { color: T.muted, textAlign: "center", marginTop: 60, fontSize: 14, fontFamily: F.sans },
   hero: { paddingVertical: 22 },
   heroValue: { color: T.paper, fontSize: 36, fontFamily: F.display, letterSpacing: -0.6, marginTop: 8 },

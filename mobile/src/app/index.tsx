@@ -1,19 +1,20 @@
-// Overview — net worth in Fraunces over the scrubbable sparkline, alerts,
-// accounts. Cards enter on staggered springs; the hero counts to new values.
-// Settings (pairing status, sync, unpair) live behind the gear in a sheet.
+// Overview — large-title screen: net worth hero (counts to new values over
+// the scrubbable spark), swipe-to-dismiss alerts, accounts. Settings live
+// behind the gear in an interruptible sheet.
 
 import React, { useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated from "react-native-reanimated";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { FadeOut, LinearTransition, useReducedMotion } from "react-native-reanimated";
+import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Constants from "expo-constants";
 import { Settings2 } from "lucide-react-native";
 import { agoLabel, moneyCompact } from "@/format";
 import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { Aurora, Card, Eyebrow, PageHead, Spark, SyncBanner } from "@/ui/bits";
+import { Card, Eyebrow, Spark, SyncBanner } from "@/ui/bits";
 import { AnimatedMoney, PressableScale, useEntering } from "@/ui/motion";
+import { Screen } from "@/ui/screen";
 import { Sheet } from "@/ui/sheet";
 
 function SettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -75,9 +76,46 @@ function SettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => 
   );
 }
 
+/** Alert card you can swipe away — the swipe IS the dismissal (with an op). */
+function AlertRow({ id, kind, text, index }: { id: string; kind: string; text: string; index: number }) {
+  const { dismissAlert } = useCompanion();
+  const reduced = useReducedMotion();
+  const entering = useEntering();
+
+  return (
+    <Animated.View
+      entering={entering(index + 1)}
+      exiting={FadeOut.duration(180)}
+      layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(32)}
+    >
+      <ReanimatedSwipeable
+        friction={1.6}
+        rightThreshold={56}
+        overshootRight={false}
+        renderRightActions={() => (
+          <View style={s.swipeZone}>
+            <Text style={s.swipeZoneText}>Dismiss</Text>
+          </View>
+        )}
+        onSwipeableWillOpen={() => {
+          haptics.success();
+          dismissAlert(id);
+        }}
+      >
+        <Card style={s.alert}>
+          <View style={{ flex: 1 }}>
+            <Eyebrow color={T.coral}>{kind === "large_move" ? "Spending spike" : "Alert"}</Eyebrow>
+            <Text style={s.alertText}>{text}</Text>
+          </View>
+          <Text style={s.alertHint}>‹ swipe</Text>
+        </Card>
+      </ReanimatedSwipeable>
+    </Animated.View>
+  );
+}
+
 export default function Overview() {
-  const { summary, refresh, refreshing, dismissAlert } = useCompanion();
-  const insets = useSafeAreaInsets();
+  const { summary, refresh, refreshing } = useCompanion();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const entering = useEntering();
 
@@ -94,104 +132,58 @@ export default function Overview() {
     </PressableScale>
   );
 
-  if (!summary) {
-    return (
-      <View style={s.root}>
-        <Aurora />
-        <ScrollView
-          contentContainerStyle={[s.empty, { paddingTop: insets.top }]}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                haptics.thud();
-                void refresh();
-              }}
-              tintColor={T.muted}
-            />
-          }
-        >
-          <Text style={s.emptyText}>Waiting for your Mac&apos;s first sync…</Text>
-          <Text style={s.emptySub}>Pull to retry. budgetr must be running on your Mac.</Text>
-        </ScrollView>
-        <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      </View>
-    );
-  }
-
   return (
-    <View style={s.root}>
-      <Aurora />
-      <ScrollView
-        contentContainerStyle={[s.content, { paddingTop: insets.top + 18 }]}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              haptics.thud();
-              void refresh();
-            }}
-            tintColor={T.muted}
-          />
-        }
-      >
-        <PageHead title="Overview" action={gear} />
+    <>
+      <Screen title="Overview" action={gear} refreshing={refreshing} onRefresh={() => void refresh()}>
         <SyncBanner />
+        {!summary ? (
+          <View style={s.empty}>
+            <Text style={s.emptyText}>Waiting for your Mac&apos;s first sync…</Text>
+            <Text style={s.emptySub}>Pull to retry. budgetr must be running on your Mac.</Text>
+          </View>
+        ) : (
+          <>
+            <Animated.View entering={entering(0)}>
+              <Card style={s.hero}>
+                <Eyebrow>Net worth</Eyebrow>
+                <AnimatedMoney cents={summary.netWorth.cents} style={s.heroValue} />
+                <Spark points={summary.netWorth.spark} height={116} />
+              </Card>
+            </Animated.View>
 
-        <Animated.View entering={entering(0)}>
-          <Card style={s.hero}>
-            <Eyebrow>Net worth</Eyebrow>
-            <AnimatedMoney cents={summary.netWorth.cents} style={s.heroValue} />
-            <Spark points={summary.netWorth.spark} height={116} />
-          </Card>
-        </Animated.View>
+            {summary.alerts.map((a, i) => (
+              <AlertRow key={a.id} id={a.id} kind={a.kind} text={a.text} index={i} />
+            ))}
 
-        {summary.alerts.map((a, i) => (
-          <Animated.View key={a.id} entering={entering(i + 1)}>
-            <Card style={s.alert}>
-              <View style={{ flex: 1 }}>
-                <Eyebrow color={T.coral}>{a.kind === "large_move" ? "Spending spike" : "Alert"}</Eyebrow>
-                <Text style={s.alertText}>{a.text}</Text>
-              </View>
-              <Pressable
-                onPress={() => {
-                  haptics.tap();
-                  dismissAlert(a.id);
-                }}
-                hitSlop={10}
-              >
-                <Text style={s.alertDismiss}>Dismiss</Text>
-              </Pressable>
-            </Card>
-          </Animated.View>
-        ))}
-
-        <Animated.View entering={entering(summary.alerts.length + 1)}>
-          <Card>
-            <Eyebrow>Accounts</Eyebrow>
-            <View style={{ marginTop: 8 }}>
-              {summary.accounts.map((a, i) => (
-                <View key={a.id} style={[s.row, i > 0 && s.rowBorder]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.rowName}>{a.name}</Text>
-                    <Text style={s.rowKind}>{a.kind}</Text>
-                  </View>
-                  <Text style={[s.rowValue, a.cents < 0 && { color: T.coral }]}>{moneyCompact(a.cents)}</Text>
+            <Animated.View
+              entering={entering(summary.alerts.length + 1)}
+              layout={LinearTransition.springify().stiffness(320).damping(32)}
+            >
+              <Card>
+                <Eyebrow>Accounts</Eyebrow>
+                <View style={{ marginTop: 8 }}>
+                  {summary.accounts.map((a, i) => (
+                    <View key={a.id} style={[s.row, i > 0 && s.rowBorder]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.rowName}>{a.name}</Text>
+                        <Text style={s.rowKind}>{a.kind}</Text>
+                      </View>
+                      <Text style={[s.rowValue, a.cents < 0 && { color: T.coral }]}>{moneyCompact(a.cents)}</Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
-          </Card>
-        </Animated.View>
-      </ScrollView>
+              </Card>
+            </Animated.View>
+          </>
+        )}
+      </Screen>
       <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </View>
+    </>
   );
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.ink },
-  content: { padding: 18, paddingBottom: 108 },
-  empty: { flexGrow: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+  empty: { alignItems: "center", paddingVertical: 120 },
   emptyText: { color: T.paper, fontSize: 16, fontFamily: F.sansSemiBold },
   emptySub: { color: T.muted, fontSize: 13, marginTop: 6, textAlign: "center", fontFamily: F.sans },
   gear: {
@@ -209,7 +201,19 @@ const s = StyleSheet.create({
   heroValue: { color: T.paper, fontSize: 42, fontFamily: F.display, letterSpacing: -0.8, marginTop: 8 },
   alert: { flexDirection: "row", alignItems: "center", gap: 12, borderColor: T.lineStrong },
   alertText: { color: T.paper, fontSize: 13.5, lineHeight: 19, fontFamily: F.sans, marginTop: 6 },
-  alertDismiss: { color: T.brass, fontSize: 13, fontFamily: F.sansSemiBold },
+  alertHint: { color: T.faint, fontSize: 11, fontFamily: F.sans },
+  swipeZone: {
+    width: 96,
+    borderRadius: T.radius,
+    marginBottom: 14,
+    marginLeft: 8,
+    backgroundColor: "rgba(240,137,123,0.14)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.coral,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  swipeZoneText: { color: T.coral, fontFamily: F.sansSemiBold, fontSize: 13 },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 11 },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.line },
   rowName: { color: T.paper, fontSize: 15, fontFamily: F.sansMedium },
