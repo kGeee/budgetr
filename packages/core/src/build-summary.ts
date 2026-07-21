@@ -7,6 +7,7 @@
 
 import {
   MAX_APPLIED_OP_IDS,
+  MAX_CURVE_POINTS,
   MAX_RECENT_TXNS,
   MAX_SECTOR_SLICES,
   MAX_SPARK_POINTS,
@@ -57,6 +58,12 @@ export interface DesktopReadModel {
       detail: string;
       expiry: number;
       cents: number;
+      // Pre-rendered payoff outputs (see contracts.ts). Optional; may be float
+      // cents on input — buildSummary rounds and bounds them.
+      curve?: Array<{ p: number; pnl: number }>;
+      breakevens?: number[];
+      maxProfitCents?: number | null;
+      maxLossCents?: number | null;
       [extra: string]: unknown;
     }>;
   };
@@ -115,14 +122,28 @@ function buildInvestments(inv: NonNullable<DesktopReadModel['investments']>): In
   const strategies = [...inv.strategies]
     .sort((a, b) => a.expiry - b.expiry || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .slice(0, MAX_STRATEGIES)
-    .map((st) => ({
-      id: st.id,
-      underlying: st.underlying,
-      label: st.label,
-      detail: st.detail,
-      expiry: seconds(st.expiry, `strategy ${st.id} expiry`),
-      cents: cents(st.cents, `strategy ${st.id}`),
-    }));
+    .map((st) => {
+      const curve = st.curve
+        ?.slice(0, MAX_CURVE_POINTS)
+        .map((v, j) => ({ p: cents(v.p, `strategy ${st.id} curve[${j}].p`), pnl: cents(v.pnl, `strategy ${st.id} curve[${j}].pnl`) }))
+        .sort((a, b) => a.p - b.p);
+      return {
+        id: st.id,
+        underlying: st.underlying,
+        label: st.label,
+        detail: st.detail,
+        expiry: seconds(st.expiry, `strategy ${st.id} expiry`),
+        cents: cents(st.cents, `strategy ${st.id}`),
+        ...(curve && curve.length >= 2 ? { curve } : {}),
+        ...(st.breakevens ? { breakevens: st.breakevens.map((b, j) => cents(b, `strategy ${st.id} breakevens[${j}]`)).sort((a, b) => a - b) } : {}),
+        ...(st.maxProfitCents !== undefined
+          ? { maxProfitCents: st.maxProfitCents === null ? null : cents(st.maxProfitCents, `strategy ${st.id} maxProfit`) }
+          : {}),
+        ...(st.maxLossCents !== undefined
+          ? { maxLossCents: st.maxLossCents === null ? null : cents(st.maxLossCents, `strategy ${st.id} maxLoss`) }
+          : {}),
+      };
+    });
 
   return {
     valueCents: cents(inv.valueCents, 'investments value'),

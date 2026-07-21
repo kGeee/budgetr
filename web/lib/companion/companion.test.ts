@@ -173,8 +173,8 @@ describe("investments read-model", () => {
     db.insert(schema.holdings)
       .values([
         { id: "acc-brokerage:sec-voo", accountId: "acc-brokerage", securityId: "sec-voo", quantity: 30, institutionValue: 15000, updatedAt: ts },
-        { id: "acc-brokerage:sec-c190", accountId: "acc-brokerage", securityId: "sec-c190", quantity: 1, institutionValue: 1200, updatedAt: ts },
-        { id: "acc-brokerage:sec-c200", accountId: "acc-brokerage", securityId: "sec-c200", quantity: -1, institutionValue: -400, updatedAt: ts },
+        { id: "acc-brokerage:sec-c190", accountId: "acc-brokerage", securityId: "sec-c190", quantity: 100, institutionValue: 1200, costBasis: 900, updatedAt: ts },
+        { id: "acc-brokerage:sec-c200", accountId: "acc-brokerage", securityId: "sec-c200", quantity: -100, institutionValue: -400, costBasis: -300, updatedAt: ts },
       ])
       .run();
     db.insert(schema.investmentSectors)
@@ -206,7 +206,17 @@ describe("investments read-model", () => {
     expect(st.underlying).toBe("AAPL");
     expect(st.label).toBe("Bull call spread");
     expect(st.cents).toBe(80_000);
-    expect(Object.keys(st).sort()).toEqual(["cents", "detail", "expiry", "id", "label", "underlying"]);
+    expect(Object.keys(st).sort()).toEqual([
+      "breakevens", "cents", "curve", "detail", "expiry", "id", "label", "maxLossCents", "maxProfitCents", "underlying",
+    ]);
+    // pre-rendered payoff: ascending integer-cent vertices, real breakevens
+    expect(st.curve!.length).toBeGreaterThanOrEqual(2);
+    for (let i = 1; i < st.curve!.length; i++) expect(st.curve![i]!.p).toBeGreaterThan(st.curve![i - 1]!.p);
+    for (const v of st.curve!) {
+      expect(Number.isSafeInteger(v.p)).toBe(true);
+      expect(Number.isSafeInteger(v.pnl)).toBe(true);
+    }
+    expect(st.breakevens!.length).toBeGreaterThan(0);
 
     // option legs fold into their underlying in positions
     expect(summary.positions.find((p) => p.symbol === "AAPL")?.cents).toBe(80_000);

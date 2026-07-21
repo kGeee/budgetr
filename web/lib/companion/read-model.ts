@@ -28,6 +28,7 @@ import {
 } from "@/lib/queries";
 import { detectAnomalies, type Alert } from "@/lib/anomalies";
 import { classifyOptionLegs, parseOccSymbol, type OptionLegInput, type ParsedOption } from "@/lib/options";
+import { payoffCurve } from "@/lib/payoff";
 import { getAppliedOpIds } from "./store";
 
 const cents = (dollars: number | null | undefined): number => Math.round((dollars ?? 0) * 100);
@@ -71,11 +72,11 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
   const holdings = getHoldings();
   const manual = getManualHoldings();
   const bySymbol = new Map<string, number>();
-  const optionLegs: Array<{ parsed: ParsedOption; quantity: number | null; valueCents: number }> = [];
+  const optionLegs: Array<{ parsed: ParsedOption; quantity: number | null; valueCents: number; costBasis: number | null }> = [];
   for (const h of holdings) {
     if (h.value == null || h.value === 0) continue;
     const parsed = parseOccSymbol(h.ticker);
-    if (parsed) optionLegs.push({ parsed, quantity: h.quantity, valueCents: cents(h.value) });
+    if (parsed) optionLegs.push({ parsed, quantity: h.quantity, valueCents: cents(h.value), costBasis: h.costBasis ?? null });
     const symbol = parsed?.underlying ?? h.ticker ?? h.securityName ?? "OTHER";
     bySymbol.set(symbol, (bySymbol.get(symbol) ?? 0) + cents(h.value));
   }
@@ -121,7 +122,7 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
 function buildInvestmentsModel(
   holdings: ReturnType<typeof getHoldings>,
   manual: ReturnType<typeof getManualHoldings>,
-  optionLegs: Array<{ parsed: ParsedOption; quantity: number | null; valueCents: number }>,
+  optionLegs: Array<{ parsed: ParsedOption; quantity: number | null; valueCents: number; costBasis: number | null }>,
   now: number,
 ): DesktopReadModel["investments"] {
   const sectorNames = getInvestmentSectors();
@@ -145,7 +146,10 @@ function buildInvestmentsModel(
 
   // Strategies: group legs per underlying, let the desktop's classifier name
   // them, value each structure at the sum of its legs' market values.
-  const legsByUnderlying = new Map<string, Array<{ parsed: ParsedOption; quantity: number | null; valueCents: number }>>();
+  const legsByUnderlying = new Map<
+    string,
+    Array<{ parsed: ParsedOption; quantity: number | null; valueCents: number; costBasis: number | null }>
+  >();
   for (const leg of optionLegs) {
     const arr = legsByUnderlying.get(leg.parsed.underlying);
     if (arr) arr.push(leg);
@@ -153,13 +157,22 @@ function buildInvestmentsModel(
   }
   const strategies: NonNullable<DesktopReadModel["investments"]>["strategies"] = [];
   for (const [underlying, legs] of legsByUnderlying) {
-    const inputs: OptionLegInput[] = legs.map((l) => ({ parsed: l.parsed, quantity: l.quantity }));
+    const inputs: OptionLegInput[] = legs.map((l) => ({ parsed: l.parsed, quantity: l.quantity, costBasis: l.costBasis }));
     for (const structure of classifyOptionLegs(inputs)) {
       const legCents = structure.legIndexes.reduce((acc, i) => acc + (legs[i]?.valueCents ?? 0), 0);
       const expiryIso = legs[structure.legIndexes[0]!]?.parsed.expiry;
       if (!expiryIso) continue;
       const expiry = dayToUnix(expiryIso);
       if (expiry < now - 86_400) continue; // expired structures aren't topical
+
+      // Pre-render the payoff outputs for the phone — only when every leg has
+      // a recorded premium, so the curve is real P&L, never zero-premium noise.
+      const allCosted = structure.legIndexes.every((i) => legs[i]?.costBasis != null);
+      const curvePoints =
+        allCosted && structure.payoffLegs?.length
+          ? payoffCurve(structure.payoffLegs).points.map((pt) => ({ p: pt.price * 100, pnl: pt.pnl * 100 }))
+          : undefined;
+
       strategies.push({
         id: `${underlying}:${expiryIso}:${structure.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
         underlying,
@@ -167,6 +180,14 @@ function buildInvestmentsModel(
         detail: structure.detail,
         expiry,
         cents: legCents,
+        ...(curvePoints ? { curve: curvePoints } : {}),
+        ...(allCosted && structure.breakevens?.length ? { breakevens: structure.breakevens.map((b) => b * 100) } : {}),
+        ...(allCosted
+          ? {
+              maxProfitCents: structure.maxProfitUnbounded ? null : structure.maxProfit != null ? structure.maxProfit * 100 : undefined,
+              maxLossCents: structure.maxLossUnbounded ? null : structure.maxLoss != null ? structure.maxLoss * 100 : undefined,
+            }
+          : {}),
       });
     }
   }

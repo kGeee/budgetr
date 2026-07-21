@@ -47,7 +47,23 @@ const ALERT_KINDS = new Set(['overspend', 'large_move', 'low_balance', 'other'])
 // greeks, payoff legs, lots) and rejects the whole summary.
 const POSITION_KEYS = new Set(['symbol', 'cents']);
 const SECTOR_KEYS = new Set(['sector', 'cents']);
-const STRATEGY_KEYS = new Set(['id', 'underlying', 'label', 'detail', 'expiry', 'cents']);
+// curve/breakevens/maxProfitCents/maxLossCents are pre-rendered DISPLAY
+// outputs computed on the desktop — allowed. The raw engine fields
+// (maxProfit, maxLoss, payoffLegs, breakeven) remain banned: their presence
+// means someone wired desktop internals straight onto the wire.
+const STRATEGY_KEYS = new Set([
+  'id',
+  'underlying',
+  'label',
+  'detail',
+  'expiry',
+  'cents',
+  'curve',
+  'breakevens',
+  'maxProfitCents',
+  'maxLossCents',
+]);
+const CURVE_KEYS = new Set(['p', 'pnl']);
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -181,8 +197,29 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
       req(typeof st.detail === 'string', `${path}.detail`, 'must be a string');
       reqInt(st.expiry, `${path}.expiry`);
       reqInt(st.cents, `${path}.cents`);
-      // STRICT: maxProfit/maxLoss/breakevens/payoffLegs are basis-derived and
-      // must never cross the wire.
+      if (st.curve !== undefined) {
+        reqArr(st.curve, `${path}.curve`);
+        let prevP = -Infinity;
+        st.curve.forEach((v, j) => {
+          const vp = `${path}.curve[${j}]`;
+          req(isRecord(v), vp, 'must be an object');
+          reqInt(v.p, `${vp}.p`);
+          reqInt(v.pnl, `${vp}.pnl`);
+          req((v.p as number) > prevP, `${vp}.p`, 'curve must be ascending by price');
+          prevP = v.p as number;
+          for (const k of Object.keys(v)) {
+            req(CURVE_KEYS.has(k), `${vp}.${k}`, 'curve vertices carry only p + pnl');
+          }
+        });
+      }
+      if (st.breakevens !== undefined) {
+        reqArr(st.breakevens, `${path}.breakevens`);
+        st.breakevens.forEach((b, j) => reqInt(b, `${path}.breakevens[${j}]`));
+      }
+      if (st.maxProfitCents !== undefined && st.maxProfitCents !== null) reqInt(st.maxProfitCents, `${path}.maxProfitCents`);
+      if (st.maxLossCents !== undefined && st.maxLossCents !== null) reqInt(st.maxLossCents, `${path}.maxLossCents`);
+      // STRICT: raw engine fields (maxProfit, payoffLegs, …) must never cross
+      // the wire — only the pre-rendered *Cents/curve outputs above may.
       for (const k of Object.keys(st)) {
         req(STRATEGY_KEYS.has(k), `${path}.${k}`, 'strategies carry only pre-rendered labels and value');
       }

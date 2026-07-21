@@ -93,6 +93,12 @@ export interface SectorSlice {
   cents: number; // current market value in this bucket
 }
 
+/** One vertex of the expiry payoff polyline (piecewise linear between them). */
+export interface PayoffVertex {
+  p: number; // underlying price, cents
+  pnl: number; // P&L at expiry at that price, cents (signed)
+}
+
 export interface StrategySummary {
   id: string; // stable slug, e.g. "AAPL:2026-08-21:bull-call-spread"
   underlying: string; // ticker
@@ -100,6 +106,14 @@ export interface StrategySummary {
   detail: string; // pre-rendered, e.g. "$430 / $450 · Aug 21 '26"
   expiry: number; // unix seconds — drives "topical" ordering + DTE display
   cents: number; // current market value of the structure (signed)
+  // Pre-rendered payoff visualization, computed ON THE DESKTOP. These are
+  // finished display outputs (like label/detail) — the raw inputs that made
+  // them (per-leg premiums, payoffLegs) still never cross the wire.
+  // Field semantics: absent = unknown (no basis recorded), null = unbounded.
+  curve?: PayoffVertex[]; // ≤ MAX_CURVE_POINTS vertices, ascending by price
+  breakevens?: number[]; // underlying prices, cents, ascending
+  maxProfitCents?: number | null;
+  maxLossCents?: number | null; // positive magnitude
 }
 
 export interface InvestmentsSummary {
@@ -152,3 +166,4 @@ export const MAX_RECENT_TXNS = 40;
 export const MAX_SPARK_POINTS = 92;
 export const MAX_SECTOR_SLICES = 10;
 export const MAX_STRATEGIES = 8;
+export const MAX_CURVE_POINTS = 16;

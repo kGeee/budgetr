@@ -3,13 +3,95 @@
 // strategies (soonest expiry first, DTE-colored), and the positions list.
 // Still read-only, still no basis/greeks/lots — the Mac has the detail.
 
-import React from "react";
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useState } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import Svg, { Circle, ClipPath, Defs, Line, Path, Rect } from "react-native-svg";
+import type { StrategySummary } from "@budgetr/core";
 import { money, moneyCompact } from "@/format";
 import * as haptics from "@/haptics";
 import { F, PIE_COLORS, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
 import { Aurora, Card, Donut, Eyebrow, PageHead, Spark, SyncBanner } from "@/ui/bits";
+
+/**
+ * Expiry payoff curve, phone-sized — the desktop PayoffDiagram's shape:
+ * profit shaded jade, loss coral, breakeven markers on the zero line. Drawn
+ * from the desktop's pre-rendered vertices; the phone computes nothing.
+ */
+function PayoffMini({ st }: { st: StrategySummary }) {
+  const [width, setWidth] = useState(0);
+  const curve = st.curve!;
+  const H = 120;
+
+  const minP = curve[0]!.p;
+  const maxP = curve[curve.length - 1]!.p;
+  const pnls = curve.map((v) => v.pnl);
+  let lo = Math.min(0, ...pnls);
+  let hi = Math.max(0, ...pnls);
+  if (hi === lo) hi = lo + 1;
+  const pad = (hi - lo) * 0.14;
+  lo -= pad;
+  hi += pad;
+
+  const x = (p: number) => ((p - minP) / Math.max(1, maxP - minP)) * width;
+  const y = (v: number) => ((hi - v) / (hi - lo)) * H;
+  const zeroY = y(0);
+  const line = curve.map((v, i) => `${i === 0 ? "M" : "L"}${x(v.p).toFixed(1)},${y(v.pnl).toFixed(1)}`).join(" ");
+  const area = `${line} L${width},${zeroY} L0,${zeroY} Z`;
+
+  return (
+    <View style={{ marginTop: 10 }}>
+      <View style={pm.metaRow}>
+        <Text style={pm.metaItem}>
+          Max profit{" "}
+          <Text style={[pm.metaValue, { color: T.jade }]}>
+            {st.maxProfitCents === null ? "Unlimited" : st.maxProfitCents !== undefined ? money(st.maxProfitCents) : "—"}
+          </Text>
+        </Text>
+        <Text style={pm.metaItem}>
+          Max loss{" "}
+          <Text style={[pm.metaValue, { color: T.coral }]}>
+            {st.maxLossCents === null ? "Unlimited" : st.maxLossCents !== undefined ? money(st.maxLossCents) : "—"}
+          </Text>
+        </Text>
+        {st.breakevens && st.breakevens.length > 0 && (
+          <Text style={pm.metaItem}>
+            B/E <Text style={pm.metaValue}>{st.breakevens.map((b) => `$${Math.round(b / 100)}`).join(" · ")}</Text>
+          </Text>
+        )}
+      </View>
+      <View style={{ height: H }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+        {width > 0 && (
+          <Svg width={width} height={H}>
+            <Defs>
+              <ClipPath id="profit">
+                <Rect x={0} y={0} width={width} height={zeroY} />
+              </ClipPath>
+              <ClipPath id="loss">
+                <Rect x={0} y={zeroY} width={width} height={H - zeroY} />
+              </ClipPath>
+            </Defs>
+            <Path d={area} fill={T.jade} opacity={0.18} clipPath="url(#profit)" />
+            <Path d={area} fill={T.coral} opacity={0.16} clipPath="url(#loss)" />
+            <Line x1={0} y1={zeroY} x2={width} y2={zeroY} stroke={T.lineStrong} strokeWidth={1} strokeDasharray="3 3" />
+            <Path d={line} stroke={T.paper} strokeWidth={1.8} fill="none" strokeLinejoin="round" />
+            {(st.breakevens ?? [])
+              .filter((b) => b >= minP && b <= maxP)
+              .map((b) => (
+                <Circle key={b} cx={x(b)} cy={zeroY} r={3.5} fill={T.brass} stroke={T.ink} strokeWidth={1.5} />
+              ))}
+          </Svg>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const pm = StyleSheet.create({
+  metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginBottom: 4 },
+  metaItem: { color: T.muted, fontSize: 11.5, fontFamily: F.sans },
+  metaValue: { color: T.paper, fontFamily: F.monoSemiBold, fontSize: 11.5 },
+});
 
 function dteLabel(expiry: number): { text: string; color: string } {
   const days = Math.floor((expiry - Date.now() / 1000) / 86_400);
@@ -22,6 +104,7 @@ function dteLabel(expiry: number): { text: string; color: string } {
 
 export default function Holdings() {
   const { summary, refresh, refreshing } = useCompanion();
+  const [openStrategy, setOpenStrategy] = useState<string | null>(null);
   const positions = summary?.positions ?? [];
   const inv = summary?.investments;
   const total = inv?.valueCents ?? positions.reduce((acc, p) => acc + p.cents, 0);
@@ -87,24 +170,37 @@ export default function Holdings() {
                 <View style={{ marginTop: 6 }}>
                   {inv.strategies.map((st, i) => {
                     const dte = dteLabel(st.expiry);
+                    const hasCurve = (st.curve?.length ?? 0) >= 2;
+                    const open = openStrategy === st.id && hasCurve;
                     return (
-                      <View key={st.id} style={[s.stratRow, i > 0 && s.rowBorder]}>
-                        <View style={{ flex: 1 }}>
-                          <View style={s.stratHead}>
-                            <Text style={s.stratUnderlying}>{st.underlying}</Text>
-                            <Text style={s.stratLabel} numberOfLines={1}>
-                              {st.label}
+                      <Pressable
+                        key={st.id}
+                        disabled={!hasCurve}
+                        onPress={() => {
+                          haptics.tap();
+                          setOpenStrategy(open ? null : st.id);
+                        }}
+                      >
+                        <View style={[s.stratRow, i > 0 && s.rowBorder]}>
+                          <View style={{ flex: 1 }}>
+                            <View style={s.stratHead}>
+                              <Text style={s.stratUnderlying}>{st.underlying}</Text>
+                              <Text style={s.stratLabel} numberOfLines={1}>
+                                {st.label}
+                              </Text>
+                              {hasCurve && <Text style={s.stratChevron}>{open ? "▾" : "▸"}</Text>}
+                            </View>
+                            <Text style={s.stratDetail} numberOfLines={1}>
+                              {st.detail}
                             </Text>
                           </View>
-                          <Text style={s.stratDetail} numberOfLines={1}>
-                            {st.detail}
-                          </Text>
+                          <View style={s.stratRight}>
+                            <Text style={[s.dte, { color: dte.color, borderColor: dte.color }]}>{dte.text}</Text>
+                            <Text style={[s.stratValue, st.cents < 0 && { color: T.coral }]}>{moneyCompact(st.cents)}</Text>
+                          </View>
                         </View>
-                        <View style={s.stratRight}>
-                          <Text style={[s.dte, { color: dte.color, borderColor: dte.color }]}>{dte.text}</Text>
-                          <Text style={[s.stratValue, st.cents < 0 && { color: T.coral }]}>{moneyCompact(st.cents)}</Text>
-                        </View>
-                      </View>
+                        {open && <PayoffMini st={st} />}
+                      </Pressable>
                     );
                   })}
                 </View>
@@ -160,6 +256,7 @@ const s = StyleSheet.create({
   stratUnderlying: { color: T.paper, fontSize: 14, fontFamily: F.monoSemiBold },
   stratLabel: { color: T.paper, fontSize: 13.5, fontFamily: F.sansMedium, flexShrink: 1 },
   stratDetail: { color: T.faint, fontSize: 12, fontFamily: F.mono, marginTop: 3 },
+  stratChevron: { color: T.faint, fontSize: 11 },
   stratRight: { alignItems: "flex-end", gap: 4 },
   dte: {
     fontSize: 10.5,
