@@ -6,7 +6,8 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Defs, Line, LinearGradient as SvgGradient, Path, Circle, Stop } from "react-native-svg";
 import type { BudgetSummary, SparkPoint } from "@budgetr/core";
-import { categoryLabel, money } from "@/format";
+import { money } from "@/format";
+import { CategoryIcon, catName, categoryIndex } from "@/categories";
 import * as haptics from "@/haptics";
 import { F, stateColor, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
@@ -206,6 +207,7 @@ export default function Budgets() {
   const reduced = useReducedMotion();
 
   const budgets = summary?.budgets ?? [];
+  const catIndex = categoryIndex(summary);
 
   return (
     <Screen title="Budgets" refreshing={refreshing} onRefresh={() => void refresh()}>
@@ -234,7 +236,10 @@ export default function Budgets() {
             >
               <Card>
                 <View style={s.head}>
-                  <Text style={s.name}>{categoryLabel(b.category)}</Text>
+                  <View style={s.nameRow}>
+                    <CategoryIcon icon={catIndex.get(b.category)?.icon} size={15} color={T.brass} />
+                    <Text style={s.name}>{catName(catIndex, b.category)}</Text>
+                  </View>
                   <Text style={s.amounts}>
                     <Text style={[s.spent, { color }]}>{money(b.spentCents)}</Text>
                     <Text style={s.limit}> / {money(b.limitCents)}</Text>
@@ -276,6 +281,7 @@ export default function Budgets() {
 const s = StyleSheet.create({
   emptyText: { color: T.muted, textAlign: "center", marginTop: 60, fontSize: 14, fontFamily: F.sans },
   head: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 12 },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
   name: { color: T.paper, fontSize: 15.5, fontFamily: F.sansSemiBold, flexShrink: 1 },
   amounts: { fontSize: 13 },
   spent: { fontFamily: F.monoSemiBold },

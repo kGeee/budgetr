@@ -17,6 +17,7 @@ import { db } from "@/db";
 import {
   getAccounts,
   getBudgetsWithSpend,
+  getCategories,
   getDailySpend,
   getHoldings,
   getInvestmentSectors,
@@ -158,6 +159,17 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
     alerts,
     investments,
     spendByDay: getDailySpend(92).map((r) => ({ d: dayToUnix(r.date), cents: cents(r.spent) })),
+    // The category vocabulary, in the desktop's display order — the phone
+    // shows these exact names/icons instead of prettifying keys.
+    categories: getCategories().map((c) => ({
+      id: c.id,
+      name: c.name,
+      icon: c.icon,
+      group: (c.group === "income" || c.group === "transfer" ? c.group : "spending") as
+        | "income"
+        | "spending"
+        | "transfer",
+    })),
   };
 }
 

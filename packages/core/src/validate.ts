@@ -64,6 +64,8 @@ const STRATEGY_KEYS = new Set([
   'maxLossCents',
 ]);
 const CURVE_KEYS = new Set(['p', 'pnl']);
+const CATEGORY_KEYS = new Set(['id', 'name', 'icon', 'group']);
+const CATEGORY_GROUPS = new Set(['income', 'spending', 'transfer']);
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -174,6 +176,21 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
   });
 
   if (s.spendByDay !== undefined) validateSpark(s.spendByDay, '$.spendByDay');
+
+  if (s.categories !== undefined) {
+    reqArr(s.categories, '$.categories');
+    s.categories.forEach((c, i) => {
+      const path = `$.categories[${i}]`;
+      req(isRecord(c), path, 'must be an object');
+      reqStr(c.id, `${path}.id`);
+      reqStr(c.name, `${path}.name`);
+      if (c.icon !== undefined) reqStr(c.icon, `${path}.icon`);
+      req(typeof c.group === 'string' && CATEGORY_GROUPS.has(c.group), `${path}.group`, 'unknown category group');
+      for (const k of Object.keys(c)) {
+        req(CATEGORY_KEYS.has(k), `${path}.${k}`, 'categories carry only id/name/icon/group');
+      }
+    });
+  }
 
   if (s.investments !== undefined) {
     const inv = s.investments;

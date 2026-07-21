@@ -6,8 +6,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, { useReducedMotion, LinearTransition } from "react-native-reanimated";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
-import type { SparkPoint, TxnSummary } from "@budgetr/core";
-import { categoryLabel, dayLabel, money } from "@/format";
+import type { CategoryInfo, SparkPoint, TxnSummary } from "@budgetr/core";
+import { dayLabel, money } from "@/format";
+import { CategoryIcon, catName, categoryIndex, pickerCategories } from "@/categories";
 import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
@@ -65,13 +66,15 @@ function SpendChart({ points }: { points: SparkPoint[] }) {
 function TxnSheet({
   txn,
   categories,
+  catIndex,
   pending,
   initialPicking,
   onClose,
   onRecategorize,
 }: {
   txn: TxnSummary | null;
-  categories: string[];
+  categories: CategoryInfo[];
+  catIndex: Map<string, CategoryInfo>;
   pending: boolean;
   initialPicking: boolean;
   onClose: () => void;
@@ -117,7 +120,7 @@ function TxnSheet({
               }}
             >
               <Text style={tx.rowLabel}>Category</Text>
-              <Text style={[tx.rowValue, { color: T.brass }]}>{categoryLabel(txn.category)} ›</Text>
+              <Text style={[tx.rowValue, { color: T.brass }]}>{catName(catIndex, txn.category)} ›</Text>
             </Pressable>
           </View>
         </>
@@ -125,26 +128,38 @@ function TxnSheet({
       {txn && picking && (
         <>
           <Text style={tx.pickTitle}>Move to category</Text>
-          <ScrollView style={{ maxHeight: 380 }}>
-            {categories.map((c) => (
-              <Pressable
-                key={c}
-                style={tx.catRow}
-                onPress={() => {
-                  if (c !== txn.category) {
-                    haptics.success();
-                    onRecategorize(txn.id, c);
-                  }
-                  setPicking(false);
-                  onClose();
-                }}
-              >
-                <Text style={[tx.catText, txn.category === c && { color: T.jade, fontFamily: F.sansBold }]}>
-                  {categoryLabel(c)}
-                </Text>
-                {txn.category === c ? <Text style={{ color: T.jade }}>✓</Text> : null}
-              </Pressable>
-            ))}
+          <ScrollView style={{ maxHeight: 420 }}>
+            {(["spending", "income", "transfer"] as const).map((group) => {
+              const inGroup = categories.filter((c) => c.group === group);
+              if (inGroup.length === 0) return null;
+              return (
+                <View key={group}>
+                  <Text style={tx.groupHead}>{group.toUpperCase()}</Text>
+                  {inGroup.map((c) => (
+                    <Pressable
+                      key={c.id}
+                      style={tx.catRow}
+                      onPress={() => {
+                        if (c.id !== txn.category) {
+                          haptics.success();
+                          onRecategorize(txn.id, c.id);
+                        }
+                        setPicking(false);
+                        onClose();
+                      }}
+                    >
+                      <View style={tx.catLeft}>
+                        <CategoryIcon icon={c.icon} size={15} color={txn.category === c.id ? T.jade : T.muted} />
+                        <Text style={[tx.catText, txn.category === c.id && { color: T.jade, fontFamily: F.sansBold }]}>
+                          {c.name}
+                        </Text>
+                      </View>
+                      {txn.category === c.id ? <Text style={{ color: T.jade }}>✓</Text> : null}
+                    </Pressable>
+                  ))}
+                </View>
+              );
+            })}
           </ScrollView>
         </>
       )}
@@ -164,12 +179,8 @@ export default function Activity() {
     [pendingOps],
   );
 
-  const categories = useMemo(() => {
-    const keys = new Set<string>();
-    for (const b of summary?.budgets ?? []) keys.add(b.category);
-    for (const t of summary?.recent ?? []) keys.add(t.category);
-    return [...keys].sort();
-  }, [summary]);
+  const categories = useMemo(() => pickerCategories(summary), [summary]);
+  const catIndex = useMemo(() => categoryIndex(summary), [summary]);
 
   return (
     <>
@@ -214,7 +225,7 @@ export default function Activity() {
                         {t.pending ? <Text style={s.pendingTag}>  pending</Text> : null}
                       </Text>
                       <Text style={s.meta}>
-                        {dayLabel(t.ts)} · {categoryLabel(t.category)}
+                        {dayLabel(t.ts)} · {catName(catIndex, t.category)}
                         {pendingTxnIds.has(t.id) ? <Text style={{ color: T.brass }}> · syncing…</Text> : null}
                       </Text>
                     </View>
@@ -230,6 +241,7 @@ export default function Activity() {
       <TxnSheet
         txn={selected}
         categories={categories}
+        catIndex={catIndex}
         pending={selected ? pendingTxnIds.has(selected.id) : false}
         initialPicking={startPicking}
         onClose={() => setSelected(null)}
@@ -279,6 +291,15 @@ const tx = StyleSheet.create({
     borderTopColor: T.line,
   },
   catText: { color: T.paper, fontSize: 15, fontFamily: F.sans },
+  catLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  groupHead: {
+    color: T.brass,
+    fontSize: 10,
+    fontFamily: F.sansSemiBold,
+    letterSpacing: 1.6,
+    marginTop: 14,
+    marginBottom: 2,
+  },
 });
 
 const s = StyleSheet.create({

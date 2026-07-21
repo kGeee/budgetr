@@ -94,6 +94,11 @@ describe("read-model → buildSummary", () => {
 
     // net worth: 3000.50 − 500.25 (hidden account excluded)
     expect(summary.netWorth.cents).toBe(250_025);
+
+    // the category vocabulary ships with real display names
+    const dining2 = summary.categories!.find((c) => c.id === "cat_dining")!;
+    expect(dining2.name).toBe("Dining");
+    expect(dining2.group).toBe("spending");
   });
 });
 

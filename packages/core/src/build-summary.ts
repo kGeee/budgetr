@@ -7,6 +7,7 @@
 
 import {
   MAX_APPLIED_OP_IDS,
+  MAX_CATEGORIES,
   MAX_CURVE_POINTS,
   MAX_RECENT_TXNS,
   MAX_SECTOR_SLICES,
@@ -54,6 +55,8 @@ export interface DesktopReadModel {
   alerts: Array<{ id: string; kind: AlertKind; text: string; ts: number }>;
   // Daily spending totals, positive cents. Optional.
   spendByDay?: Array<{ d: number; cents: number }>;
+  // Active categories in display order. Optional.
+  categories?: Array<{ id: string; name: string; icon?: string | null; group: 'income' | 'spending' | 'transfer' }>;
   // Optional investments detail. Strategy inputs may carry extra fields
   // (maxProfit, payoffLegs, …) — buildSummary strips to the contract shape.
   investments?: {
@@ -219,6 +222,16 @@ export function buildSummary(model: DesktopReadModel): Summary {
     alerts,
     ...(model.investments ? { investments: buildInvestments(model.investments) } : {}),
     ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
+    ...(model.categories
+      ? {
+          categories: model.categories.slice(0, MAX_CATEGORIES).map((c) => ({
+            id: c.id,
+            name: c.name,
+            ...(c.icon ? { icon: c.icon } : {}),
+            group: c.group,
+          })),
+        }
+      : {}),
   };
 
   assertValidSummary(summary); // generation is also the trust edge

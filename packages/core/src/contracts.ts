@@ -42,6 +42,8 @@ export interface Summary {
   // Daily spending totals (positive cents per day, days with no spend absent),
   // ascending, ≤ MAX_SPARK_POINTS. Backs the Budgets/Activity charts.
   spendByDay?: SparkPoint[];
+  // Active categories in the desktop's display order; ≤ MAX_CATEGORIES.
+  categories?: CategoryInfo[];
 }
 
 export interface SparkPoint {
@@ -131,6 +133,16 @@ export interface InvestmentsSummary {
   strategies: StrategySummary[]; // soonest expiry first; ≤ MAX_STRATEGIES
 }
 
+// The user's category vocabulary — real display names and icons, so every
+// client shows identical labels. Phones fall back to prettifying the key
+// only when a summary predates this field.
+export interface CategoryInfo {
+  id: string; // stable key, matches TxnSummary.category / BudgetSummary.category
+  name: string; // display name, e.g. "Food & Drink"
+  icon?: string; // lucide icon name or emoji, as configured on the desktop
+  group: 'income' | 'spending' | 'transfer';
+}
+
 export type AlertKind = 'overspend' | 'large_move' | 'low_balance' | 'other';
 
 export interface AlertSummary {
@@ -175,3 +187,4 @@ export const MAX_SPARK_POINTS = 92;
 export const MAX_SECTOR_SLICES = 10;
 export const MAX_STRATEGIES = 8;
 export const MAX_CURVE_POINTS = 16;
+export const MAX_CATEGORIES = 96;
