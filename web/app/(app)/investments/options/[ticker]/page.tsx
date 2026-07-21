@@ -56,6 +56,12 @@ export default async function OptionsTickerPage({
         action={
           <span className="flex items-center gap-4">
             <Link
+              href="/investments/options/wheel"
+              className="inline-flex items-center gap-1.5 text-sm text-[var(--brass)] transition-colors hover:text-[var(--paper)]"
+            >
+              Wheel &amp; premium
+            </Link>
+            <Link
               href={`/investments/options/${encodeURIComponent(ticker)}/fixed-strike`}
               className="inline-flex items-center gap-1.5 text-sm text-[var(--brass)] transition-colors hover:text-[var(--paper)]"
             >
