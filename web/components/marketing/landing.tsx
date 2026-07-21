@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  ArrowRight,
   Boxes,
   LineChart,
   Lock,
@@ -11,10 +12,12 @@ import {
 import { Card } from "@/components/ui/card";
 import { BuyLink } from "@/components/marketing/marketing-shell";
 import { HeroShot, ScreenshotShowcase } from "@/components/marketing/screenshots";
-import { SITE, hasCheckout } from "@/lib/site";
+import { SITE, hasCheckout, demoEnabled, DEMO_HREF } from "@/lib/site";
 
 /** The public landing page body (rendered inside <MarketingShell/>). */
 export function MarketingLanding() {
+  // Live-demo CTA only appears when the deploy serves the demo (DEMO_DB set).
+  const demo = demoEnabled();
   return (
     <main>
       {/* Hero */}
@@ -29,6 +32,15 @@ export function MarketingLanding() {
         <p className="mx-auto mt-6 max-w-xl text-lg text-[var(--muted)]">{SITE.description}</p>
         <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
           <BuyLink />
+          {demo && (
+            <Link
+              href={DEMO_HREF}
+              className="group inline-flex items-center gap-1.5 rounded-full border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-4 py-2 text-sm font-medium text-[var(--brass)] transition hover:border-[var(--brass)]"
+            >
+              Try the live demo
+              <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
+            </Link>
+          )}
           <Link
             href="#screens"
             className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)]"

@@ -6,6 +6,7 @@ import { ConnectWalletButton, WalletsCard } from "@/components/connect-wallet-di
 import { getAccounts, getWallets } from "@/lib/queries";
 import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
+import { demoEnabled } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,13 @@ export default function AccountsPage() {
       <PageHead
         title="Accounts"
         action={
-          <div className="flex items-center gap-2">
-            <ConnectWalletButton />
-            <PlaidLink />
-          </div>
+          // Read-only web demo: nothing to connect.
+          demoEnabled() ? undefined : (
+            <div className="flex items-center gap-2">
+              <ConnectWalletButton />
+              <PlaidLink />
+            </div>
+          )
         }
       />
 

@@ -716,6 +716,107 @@ export const transactionMatches = sqliteTable(
 );
 
 /**
+ * ── Shared expenses (bill splitting) ─────────────────────────────────────────
+ *
+ * You pay for the table, friends pay you back later over Venmo/Zelle/Apple Cash.
+ * Three tables model it, and reporting needs *no* new query paths:
+ *
+ *  - `people` — who you split with.
+ *  - `shared_expenses` — 1:1 with the outflow you paid, recording your own share.
+ *  - `expense_shares` — what each person owes on that expense.
+ *  - `settlements` — a repayment landing back in your account, tied to a person.
+ *
+ * The reporting trick: when an expense is shared, we also write two
+ * transaction_splits on the paid transaction — your share at its real category,
+ * and the reimbursable remainder at the seeded `cat_reimbursable` category, which
+ * lives in the `transfer` group. Every spend/income query already skips the
+ * transfer group (see lib/queries.ts), so your category totals show only your
+ * share, and the repayment inflows (also categorized reimbursable) don't count as
+ * income. The two sides cancel; the residual is what you're still owed.
+ */
+export const people = sqliteTable("people", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  /** Free text — @venmo handle, phone, email. Display only; never matched on. */
+  handle: text("handle"),
+  color: text("color"),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * The shared-expense header for one paid transaction. `myShare` is in the same
+ * sign convention as transactions.amount (positive = you spent it), and always
+ * equals the parent amount minus the sum of its expense_shares.
+ *
+ * `itemsJson` is an opaque blob holding receipt line items and their per-person
+ * assignment — kept unstructured (like saved_filters.query) so the itemized
+ * splitter can evolve without a migration. Nothing reads it but the split editor;
+ * the authoritative per-person numbers are always the expense_shares rows.
+ */
+export const sharedExpenses = sqliteTable(
+  "shared_expenses",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    myShare: real("my_share").notNull(),
+    note: text("note"),
+    itemsJson: text("items_json"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [uniqueIndex("shared_expenses_txn_idx").on(t.transactionId)],
+);
+
+/** What one person owes on one shared expense. Positive = they owe you. */
+export const expenseShares = sqliteTable(
+  "expense_shares",
+  {
+    id: text("id").primaryKey(),
+    sharedExpenseId: text("shared_expense_id")
+      .notNull()
+      .references(() => sharedExpenses.id, { onDelete: "cascade" }),
+    personId: text("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    amount: real("amount").notNull(),
+  },
+  (t) => [
+    uniqueIndex("expense_shares_pair_idx").on(t.sharedExpenseId, t.personId),
+    index("expense_shares_person_idx").on(t.personId),
+  ],
+);
+
+/**
+ * A repayment from a person, drawing down their balance. `transactionId` points
+ * at the real Venmo/Zelle/Apple Cash inflow when there is one, and is null for a
+ * cash "settled up" you record by hand. Amounts are positive = they paid you.
+ * One settlement per transaction (SQLite allows many NULLs under a unique index,
+ * so hand-recorded rows don't collide).
+ */
+export const settlements = sqliteTable(
+  "settlements",
+  {
+    id: text("id").primaryKey(),
+    personId: text("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    transactionId: text("transaction_id").references(() => transactions.id, {
+      onDelete: "cascade",
+    }),
+    amount: real("amount").notNull(),
+    date: text("date").notNull(), // YYYY-MM-DD
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("settlements_txn_idx").on(t.transactionId),
+    index("settlements_person_idx").on(t.personId),
+  ],
+);
+
+/**
  * Receipt/invoice files attached to a transaction. The bytes live on disk under
  * ATTACHMENTS_DIR (see lib/attachments.ts) — outside public/ — with one metadata
  * row per file here. `file_path` is the absolute on-disk path the streaming API

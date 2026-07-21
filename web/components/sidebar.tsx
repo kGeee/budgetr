@@ -20,6 +20,7 @@ import {
   Sparkles,
   Store,
   TrendingUp,
+  Users,
   Wand2,
   Flame,
   Settings,
@@ -27,26 +28,69 @@ import {
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 
-const nav: { href: string; label: string; icon: LucideIcon }[] = [
-  { href: "/overview", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboards", label: "Dashboards", icon: LayoutGrid },
-  { href: "/accounts", label: "Accounts", icon: Landmark },
-  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
-  { href: "/vendors", label: "Vendors", icon: Store },
-  { href: "/review", label: "Review", icon: Sparkles },
-  { href: "/investments", label: "Investments", icon: LineChart },
-  { href: "/fundamentals", label: "Fundamentals", icon: Building2 },
-  { href: "/realized-gains", label: "Realized gains", icon: Receipt },
-  { href: "/categories", label: "Categories", icon: Shapes },
-  { href: "/budgets", label: "Budgets", icon: Wallet },
-  { href: "/goals", label: "Goals", icon: PiggyBank },
-  { href: "/cashflow", label: "Cashflow", icon: TrendingUp },
-  { href: "/fire", label: "FIRE", icon: Flame },
-  { href: "/insights", label: "Insights", icon: Sparkles },
-  { href: "/recurring", label: "Recurring", icon: Repeat },
-  { href: "/rules", label: "Auto-tag rules", icon: Wand2 },
-  { href: "/settings", label: "Settings", icon: Settings },
+type NavItem = { href: string; label: string; icon: LucideIcon };
+
+// Grouped by what you're doing, not by data model. The first and last groups
+// are unlabelled: the landing screens sit above the fold, Settings below.
+const navGroups: { label?: string; items: NavItem[] }[] = [
+  {
+    items: [
+      { href: "/overview", label: "Overview", icon: LayoutDashboard },
+      { href: "/dashboards", label: "Dashboards", icon: LayoutGrid },
+    ],
+  },
+  {
+    label: "Ledger",
+    items: [
+      { href: "/accounts", label: "Accounts", icon: Landmark },
+      { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
+      { href: "/recurring", label: "Recurring", icon: Repeat },
+      { href: "/shared", label: "Shared", icon: Users },
+      { href: "/vendors", label: "Vendors", icon: Store },
+      { href: "/categories", label: "Categories", icon: Shapes },
+    ],
+  },
+  {
+    label: "Investments",
+    items: [
+      { href: "/investments", label: "Investments", icon: LineChart },
+      { href: "/fundamentals", label: "Fundamentals", icon: Building2 },
+      { href: "/realized-gains", label: "Realized gains", icon: Receipt },
+    ],
+  },
+  {
+    label: "Planning",
+    items: [
+      { href: "/budgets", label: "Budgets", icon: Wallet },
+      { href: "/cashflow", label: "Cashflow", icon: TrendingUp },
+      { href: "/goals", label: "Goals", icon: PiggyBank },
+      { href: "/fire", label: "FIRE", icon: Flame },
+    ],
+  },
+  {
+    label: "Assistant",
+    items: [
+      { href: "/review", label: "Review", icon: Sparkles },
+      { href: "/insights", label: "Insights", icon: Sparkles },
+      { href: "/rules", label: "Auto-tag rules", icon: Wand2 },
+    ],
+  },
+  {
+    items: [{ href: "/settings", label: "Settings", icon: Settings }],
+  },
 ];
+
+const nav: NavItem[] = navGroups.flatMap((g) => g.items);
+
+// On the read-only web demo, drop nav items that only make sense on a real
+// install (Settings → API keys). Everything else is browsable.
+const DEMO_HIDDEN = new Set(["/settings"]);
+function visibleGroups(webDemo: boolean) {
+  if (!webDemo) return navGroups;
+  return navGroups
+    .map((g) => ({ ...g, items: g.items.filter((i) => !DEMO_HIDDEN.has(i.href)) }))
+    .filter((g) => g.items.length > 0);
+}
 
 function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -76,8 +120,9 @@ function fmtBalance(amount: number | null, currency: string | null) {
   return formatCurrency(amount ?? 0, currency ?? "USD", { maximumFractionDigits: 0 });
 }
 
-export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
+export function Sidebar({ accounts, webDemo = false }: { accounts: SidebarAccount[]; webDemo?: boolean }) {
   const pathname = usePathname();
+  const groupsNav = visibleGroups(webDemo);
 
   // Excluded accounts are hidden from the sidebar entirely — managed on /accounts.
   const visible = accounts.filter((a) => !a.excluded);
@@ -103,31 +148,37 @@ export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
           <span className="font-display text-2xl tracking-tight">budgetr</span>
         </Link>
 
-        <p className="eyebrow mb-3 px-3">Ledger</p>
-        <nav className="flex flex-col gap-1">
-          {nav.map(({ href, label, icon: Icon }) => {
-            const active = isActive(pathname, href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-200 ${
-                  active
-                    ? "bg-[var(--panel-2)] text-[var(--paper)] shadow-[var(--elev-1)]"
-                    : "text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--paper)]"
-                }`}
-              >
-                <span
-                  className={`absolute left-0 top-1/2 h-5 -translate-y-1/2 rounded-full bg-[var(--brass)] transition-all ${
-                    active ? "w-[3px] opacity-100" : "w-0 opacity-0"
-                  }`}
-                />
-                <Icon size={18} strokeWidth={active ? 2.2 : 1.8} />
-                {label}
-              </Link>
-            );
-          })}
+        <nav className="flex flex-col gap-5">
+          {groupsNav.map((group, i) => (
+            <div key={group.label ?? `group-${i}`}>
+              {group.label && <p className="eyebrow mb-2 px-3">{group.label}</p>}
+              <div className="flex flex-col gap-1">
+                {group.items.map(({ href, label, icon: Icon }) => {
+                  const active = isActive(pathname, href);
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      aria-current={active ? "page" : undefined}
+                      className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-200 ${
+                        active
+                          ? "bg-[var(--panel-2)] text-[var(--paper)] shadow-[var(--elev-1)]"
+                          : "text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--paper)]"
+                      }`}
+                    >
+                      <span
+                        className={`absolute left-0 top-1/2 h-5 -translate-y-1/2 rounded-full bg-[var(--brass)] transition-all ${
+                          active ? "w-[3px] opacity-100" : "w-0 opacity-0"
+                        }`}
+                      />
+                      <Icon size={18} strokeWidth={active ? 2.2 : 1.8} />
+                      {label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* Accounts grouped by type, with inline balances. */}
@@ -169,10 +220,11 @@ export function Sidebar({ accounts }: { accounts: SidebarAccount[] }) {
   );
 }
 
-export function MobileNav() {
+export function MobileNav({ webDemo = false }: { webDemo?: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const current = nav.find(({ href }) => isActive(pathname, href));
+  const groupsNav = visibleGroups(webDemo);
 
   return (
     <div className="min-w-0 flex-1 md:hidden">
@@ -230,26 +282,31 @@ export function MobileNav() {
             <X size={22} />
           </button>
         </div>
-        <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {nav.map(({ href, label, icon: Icon }) => {
-            const active = isActive(pathname, href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setOpen(false)}
-                aria-current={active ? "page" : undefined}
-                className={`flex items-center gap-3.5 rounded-xl px-4 py-3 text-base transition-colors ${
-                  active
-                    ? "bg-[var(--panel-2)] text-[var(--paper)]"
-                    : "text-[var(--muted)] active:bg-[var(--panel)]"
-                }`}
-              >
-                <Icon size={20} strokeWidth={active ? 2.2 : 1.8} />
-                {label}
-              </Link>
-            );
-          })}
+        <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {groupsNav.map((group, i) => (
+            <div key={group.label ?? `group-${i}`}>
+              {group.label && <p className="eyebrow mb-1.5 px-4">{group.label}</p>}
+              {group.items.map(({ href, label, icon: Icon }) => {
+                const active = isActive(pathname, href);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    onClick={() => setOpen(false)}
+                    aria-current={active ? "page" : undefined}
+                    className={`flex items-center gap-3.5 rounded-xl px-4 py-3 text-base transition-colors ${
+                      active
+                        ? "bg-[var(--panel-2)] text-[var(--paper)]"
+                        : "text-[var(--muted)] active:bg-[var(--panel)]"
+                    }`}
+                  >
+                    <Icon size={20} strokeWidth={active ? 2.2 : 1.8} />
+                    {label}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
       </aside>
     </div>
