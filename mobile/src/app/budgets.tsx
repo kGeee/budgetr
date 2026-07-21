@@ -226,7 +226,7 @@ export default function Budgets() {
             <Animated.View
               key={b.category}
               entering={entering(1)}
-              layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(32)}
+              layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(42)}
             >
             <Pressable
               onPress={() => {
@@ -280,7 +280,7 @@ export default function Budgets() {
 
 const s = StyleSheet.create({
   emptyText: { color: T.muted, textAlign: "center", marginTop: 60, fontSize: 14, fontFamily: F.sans },
-  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 12 },
+  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
   name: { color: T.paper, fontSize: 15.5, fontFamily: F.sansSemiBold, flexShrink: 1 },
   amounts: { fontSize: 13 },

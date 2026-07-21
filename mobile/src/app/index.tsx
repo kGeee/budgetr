@@ -86,7 +86,7 @@ function AlertRow({ id, kind, text, index }: { id: string; kind: string; text: s
     <Animated.View
       entering={entering(index + 1)}
       exiting={FadeOut.duration(180)}
-      layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(32)}
+      layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(42)}
     >
       <ReanimatedSwipeable
         friction={1.6}
@@ -157,7 +157,7 @@ export default function Overview() {
 
             <Animated.View
               entering={entering(summary.alerts.length + 1)}
-              layout={LinearTransition.springify().stiffness(320).damping(32)}
+              layout={LinearTransition.springify().stiffness(320).damping(42)}
             >
               <Card>
                 <Eyebrow>Accounts</Eyebrow>

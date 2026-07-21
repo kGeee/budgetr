@@ -194,7 +194,7 @@ export default function Activity() {
             {(summary?.recent ?? []).map((t, i) => (
               <Animated.View
                 key={t.id}
-                layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(32)}
+                layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(42)}
               >
                 <ReanimatedSwipeable
                   friction={1.6}

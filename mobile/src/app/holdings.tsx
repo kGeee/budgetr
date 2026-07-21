@@ -170,7 +170,7 @@ export default function Holdings() {
                     return (
                       <Animated.View
                         key={st.id}
-                        layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(32)}
+                        layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(42)}
                       >
                       <Pressable
                         disabled={!hasCurve}
@@ -383,7 +383,7 @@ const s = StyleSheet.create({
   legendPct: { color: T.paper, fontSize: 12.5, fontFamily: F.mono },
 
   stratRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11 },
-  stratHead: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  stratHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   stratUnderlying: { color: T.paper, fontSize: 14, fontFamily: F.monoSemiBold },
   stratLabel: { color: T.paper, fontSize: 13.5, fontFamily: F.sansMedium, flexShrink: 1 },
   stratDetail: { color: T.faint, fontSize: 12, fontFamily: F.mono, marginTop: 3 },

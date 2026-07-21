@@ -19,7 +19,7 @@ import { money } from "@/format";
 
 // Apple's "response 0.3–0.4, damping 1.0" translated to Reanimated's params.
 export const SPRING_SNAPPY = { stiffness: 420, damping: 41, mass: 1 } as const; // critically damped, ~0.3s
-export const SPRING_SHEET = { stiffness: 440, damping: 34, mass: 1 } as const; // damping ~0.8 — momentum contexts
+export const SPRING_SHEET = { stiffness: 440, damping: 42, mass: 1 } as const; // ratio ~1.0 — settles without bouncing
 
 /** Staggered entrance for cards: gentle rise + fade, or pure fade under reduced motion. */
 export function useEntering() {
@@ -27,7 +27,7 @@ export function useEntering() {
   return (index = 0) =>
     reduced
       ? FadeIn.duration(180).delay(index * 30)
-      : FadeInDown.springify().stiffness(320).damping(32).delay(index * 55);
+      : FadeInDown.springify().stiffness(320).damping(42).delay(index * 55);
 }
 
 /**
