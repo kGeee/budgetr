@@ -5,9 +5,71 @@ import React, { useMemo, useState } from "react";
 import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { TxnSummary } from "@budgetr/core";
 import { categoryLabel, dayLabel, money } from "@/format";
+import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { Aurora, Card, PageHead, SyncBanner } from "@/ui/bits";
+import { Aurora, Bars, Card, Eyebrow, PageHead, SyncBanner } from "@/ui/bits";
+
+const TIMEFRAMES = [
+  { label: "7D", days: 7 },
+  { label: "30D", days: 30 },
+  { label: "90D", days: 90 },
+] as const;
+
+/** Daily spending over a selectable window — scrub the bars to read any day. */
+function SpendChart({ points }: { points: import("@budgetr/core").SparkPoint[] }) {
+  const [tf, setTf] = useState<(typeof TIMEFRAMES)[number]>(TIMEFRAMES[1]);
+  if (points.length === 0) return null;
+  const cutoff = Math.floor(Date.now() / 1000) - tf.days * 86_400;
+  const windowed = points.filter((p) => p.d >= cutoff);
+  const total = windowed.reduce((a, p) => a + p.cents, 0);
+  return (
+    <Card>
+      <View style={cs.head}>
+        <View>
+          <Eyebrow>{`Spending · ${tf.label.toLowerCase()}`}</Eyebrow>
+          <Text style={cs.total}>{money(total)}</Text>
+        </View>
+        <View style={cs.chips}>
+          {TIMEFRAMES.map((t) => (
+            <Pressable
+              key={t.label}
+              onPress={() => {
+                haptics.tick();
+                setTf(t);
+              }}
+              style={[cs.chip, tf.label === t.label && cs.chipActive]}
+            >
+              <Text style={[cs.chipText, tf.label === t.label && cs.chipTextActive]}>{t.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      {windowed.length > 0 ? (
+        <Bars points={windowed} height={64} />
+      ) : (
+        <Text style={cs.empty}>No spending in this window.</Text>
+      )}
+    </Card>
+  );
+}
+
+const cs = StyleSheet.create({
+  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  total: { color: T.paper, fontSize: 24, fontFamily: F.display, marginTop: 6 },
+  chips: { flexDirection: "row", gap: 6 },
+  chip: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.line,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  chipActive: { backgroundColor: T.jade, borderColor: T.jade },
+  chipText: { color: T.muted, fontSize: 11, fontFamily: F.sansSemiBold },
+  chipTextActive: { color: T.onJade },
+  empty: { color: T.faint, fontSize: 12, fontFamily: F.sans, marginTop: 12 },
+});
 
 export default function Activity() {
   const { summary, refresh, refreshing, recategorize, pendingOps } = useCompanion();
@@ -30,13 +92,30 @@ export default function Activity() {
       <Aurora />
       <ScrollView
         contentContainerStyle={s.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={T.muted} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              haptics.thud();
+              void refresh();
+            }}
+            tintColor={T.muted}
+          />
+        }
       >
         <PageHead title="Activity" />
         <SyncBanner />
+        <SpendChart points={summary?.spendByDay ?? []} />
         <Card>
           {(summary?.recent ?? []).map((t, i) => (
-            <Pressable key={t.id} onPress={() => setPicking(t)} style={[s.row, i > 0 && s.rowBorder]}>
+            <Pressable
+              key={t.id}
+              onPress={() => {
+                haptics.thud();
+                setPicking(t);
+              }}
+              style={[s.row, i > 0 && s.rowBorder]}
+            >
               <View style={{ flex: 1 }}>
                 <Text style={s.merchant} numberOfLines={1}>
                   {t.merchant}
@@ -66,7 +145,12 @@ export default function Activity() {
                   key={c}
                   style={s.catRow}
                   onPress={() => {
-                    if (picking && c !== picking.category) recategorize(picking.id, c);
+                    if (picking && c !== picking.category) {
+                      haptics.success();
+                      recategorize(picking.id, c);
+                    } else {
+                      haptics.tick();
+                    }
                     setPicking(null);
                   }}
                 >

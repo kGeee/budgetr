@@ -5,9 +5,30 @@
 import React, { useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { categoryLabel, money } from "@/format";
+import * as haptics from "@/haptics";
 import { F, stateColor, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { Aurora, Card, PageHead, SyncBanner } from "@/ui/bits";
+import { Aurora, Bars, Card, Eyebrow, PageHead, SyncBanner } from "@/ui/bits";
+
+/** Month-to-date spending, day by day — the desktop Budgets page's burn chart. */
+function MonthBurn({ points }: { points: import("@budgetr/core").SparkPoint[] }) {
+  const now = new Date();
+  const monthStart = Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), 1) / 1000);
+  const month = points.filter((p) => p.d >= monthStart);
+  if (month.length === 0) return null;
+  const total = month.reduce((a, p) => a + p.cents, 0);
+  return (
+    <Card>
+      <Eyebrow>This month · spending by day</Eyebrow>
+      <Text style={mb.total}>{money(total)}</Text>
+      <Bars points={month} height={56} />
+    </Card>
+  );
+}
+
+const mb = StyleSheet.create({
+  total: { color: T.paper, fontSize: 24, fontFamily: F.display, marginTop: 6 },
+});
 
 export default function Budgets() {
   const { summary, refresh, refreshing } = useCompanion();
@@ -20,10 +41,20 @@ export default function Budgets() {
       <Aurora />
       <ScrollView
         contentContainerStyle={s.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={T.muted} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              haptics.thud();
+              void refresh();
+            }}
+            tintColor={T.muted}
+          />
+        }
       >
         <PageHead title="Budgets" />
         <SyncBanner />
+        <MonthBurn points={summary?.spendByDay ?? []} />
         {budgets.length === 0 && <Text style={s.emptyText}>No budgets set — add limits on your Mac.</Text>}
 
         {budgets.map((b) => {
@@ -32,7 +63,13 @@ export default function Budgets() {
           const open = openCat === b.category;
           const txns = open ? (summary?.recent ?? []).filter((t) => t.category === b.category) : [];
           return (
-            <Pressable key={b.category} onPress={() => setOpenCat(open ? null : b.category)}>
+            <Pressable
+              key={b.category}
+              onPress={() => {
+                haptics.tick();
+                setOpenCat(open ? null : b.category);
+              }}
+            >
               <Card>
                 <View style={s.head}>
                   <Text style={s.name}>{categoryLabel(b.category)}</Text>

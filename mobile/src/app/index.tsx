@@ -4,6 +4,7 @@
 import React from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { money, moneyCompact } from "@/format";
+import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
 import { Aurora, Card, Eyebrow, PageHead, Spark, SyncBanner } from "@/ui/bits";
@@ -17,7 +18,16 @@ export default function Overview() {
         <Aurora />
         <ScrollView
           contentContainerStyle={s.empty}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={T.muted} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                haptics.thud();
+                void refresh();
+              }}
+              tintColor={T.muted}
+            />
+          }
         >
           <Text style={s.emptyText}>Waiting for your Mac&apos;s first sync…</Text>
           <Text style={s.emptySub}>Pull to retry. budgetr must be running on your Mac.</Text>
@@ -39,7 +49,7 @@ export default function Overview() {
         <Card style={s.hero}>
           <Eyebrow>Net worth</Eyebrow>
           <Text style={s.heroValue}>{money(summary.netWorth.cents)}</Text>
-          <Spark points={summary.netWorth.spark} />
+          <Spark points={summary.netWorth.spark} height={116} />
         </Card>
 
         {summary.alerts.length > 0 && (
@@ -50,7 +60,13 @@ export default function Overview() {
                   <Eyebrow color={T.coral}>{a.kind === "large_move" ? "Spending spike" : "Alert"}</Eyebrow>
                   <Text style={s.alertText}>{a.text}</Text>
                 </View>
-                <Pressable onPress={() => dismissAlert(a.id)} hitSlop={10}>
+                <Pressable
+                  onPress={() => {
+                    haptics.tap();
+                    dismissAlert(a.id);
+                  }}
+                  hitSlop={10}
+                >
                   <Text style={s.alertDismiss}>Dismiss</Text>
                 </Pressable>
               </Card>
@@ -73,7 +89,13 @@ export default function Overview() {
           </View>
         </Card>
 
-        <Pressable onPress={() => void unpair()} style={s.unpair}>
+        <Pressable
+          onPress={() => {
+            haptics.warning();
+            void unpair();
+          }}
+          style={s.unpair}
+        >
           <Text style={s.unpairText}>Unpair this phone</Text>
         </Pressable>
       </ScrollView>

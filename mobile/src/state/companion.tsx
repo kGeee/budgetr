@@ -7,6 +7,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState } from "react-native";
 import type { Op, Summary } from "@budgetr/core";
 import { decodePairing, type PairingMaterial } from "@budgetr/sync-crypto";
+import * as haptics from "@/haptics";
 import { clearCache, loadCachedSummary, loadPendingOps, savePendingOps } from "@/sync/cache";
 import { clearMaterial, loadMaterial, saveMaterial } from "@/sync/material";
 import { syncOnce, type SyncStatus } from "@/sync/client";
@@ -136,9 +137,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         material.current = m;
         etag.current = null;
         setPhase("ready");
+        haptics.success();
         void refresh();
         return null;
       } catch {
+        haptics.error();
         return "That doesn't look like a budgetr pairing code.";
       }
     },

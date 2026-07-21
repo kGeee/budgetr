@@ -34,3 +34,17 @@ export const F = {
 } as const;
 
 export const stateColor = { ok: T.jade, warn: T.brass, over: T.coral } as const;
+
+// Desktop PIE_COLORS (components/charts.tsx) with CSS vars resolved to hex.
+export const PIE_COLORS = [
+  T.jade,
+  T.brass,
+  T.blue,
+  T.coral,
+  "#b59ce0",
+  "#5fc9c0",
+  "#e0c36f",
+  "#9ad17f",
+  "#e08fb8",
+  T.muted,
+] as const;

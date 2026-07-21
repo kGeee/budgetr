@@ -22,6 +22,7 @@ import { SplineSansMono_500Medium, SplineSansMono_600SemiBold } from "@expo-goog
 import { ArrowLeftRight, LayoutDashboard, LineChart, Wallet } from "lucide-react-native";
 import { CompanionProvider, useCompanion } from "@/state/companion";
 import { PairingScreen } from "@/ui/pairing";
+import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -67,6 +68,7 @@ export default function RootLayout() {
       <StatusBar style="light" />
       <Gate>
         <Tabs
+          screenListeners={{ tabPress: () => haptics.tick() }}
           screenOptions={{
             headerShown: false,
             sceneStyle: { backgroundColor: T.ink },

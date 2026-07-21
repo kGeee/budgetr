@@ -6,6 +6,7 @@
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
 import { Aurora, Eyebrow } from "@/ui/bits";
@@ -46,7 +47,13 @@ export function PairingScreen() {
           />
         </View>
       ) : (
-        <Pressable style={s.button} onPress={() => void requestPermission()}>
+        <Pressable
+          style={s.button}
+          onPress={() => {
+            haptics.tap();
+            void requestPermission();
+          }}
+        >
           <Text style={s.buttonText}>Allow camera to scan</Text>
         </Pressable>
       )}
