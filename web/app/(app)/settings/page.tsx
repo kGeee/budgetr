@@ -1,11 +1,13 @@
 import { cookies } from "next/headers";
-import { Coins, KeyRound, Mail, SunMoon } from "lucide-react";
+import { Coins, KeyRound, Mail, Smartphone, SunMoon } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { CurrencySwitcher } from "@/components/currency-switcher";
 import { ThemeSegmented } from "@/components/theme-toggle";
 import { ReportScheduleForm } from "@/components/report-schedule-form";
 import { ApiKeysForm } from "@/components/api-keys-form";
+import { CompanionCard } from "@/components/companion-card";
+import { getSyncStatus } from "@/lib/companion/store";
 import { getDisplayCurrencySetting } from "@/lib/queries";
 import { getReportSchedule } from "@/lib/actions-reports";
 import { getFinnhubKey, getPlaidConfig } from "@/lib/app-config";
@@ -79,6 +81,15 @@ export default async function SettingsPage() {
           </p>
           <ThemeSegmented initialTheme={theme} />
         </div>
+      </Card>
+
+      {/* Phone companion */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Phone companion</CardTitle>
+          <Smartphone size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <CompanionCard initial={getSyncStatus()} />
       </Card>
 
       {/* Scheduled report */}

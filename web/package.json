@@ -29,6 +29,8 @@
     "node": ">=20.9"
   },
   "dependencies": {
+    "@budgetr/core": "file:../packages/core",
+    "@budgetr/sync-crypto": "file:../packages/sync-crypto",
     "better-sqlite3": "^12.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -39,6 +41,7 @@
     "next": "16.2.6",
     "papaparse": "^5.5.4",
     "plaid": "^42.2.0",
+    "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-plaid-link": "^4.1.1",
@@ -51,6 +54,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/papaparse": "^5.5.2",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.10",
