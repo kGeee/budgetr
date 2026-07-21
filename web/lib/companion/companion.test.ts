@@ -219,7 +219,15 @@ describe("investments read-model", () => {
     expect(st.breakevens!.length).toBeGreaterThan(0);
 
     // option legs fold into their underlying in positions
-    expect(summary.positions.find((p) => p.symbol === "AAPL")?.cents).toBe(80_000);
+    const aapl = summary.positions.find((p) => p.symbol === "AAPL")!;
+    expect(aapl.cents).toBe(80_000);
+    expect(aapl.pnlCents).toBe(20_000); // (1200-900) + (-400-(-300)) dollars
+    expect(aapl.qtyLabel).toBeUndefined(); // options in the mix — no share count
+    const voo = summary.positions.find((p) => p.symbol === "VOO")!;
+    expect(voo.name).toBe("Vanguard S&P 500");
+    expect(voo.qtyLabel).toBe("30");
+    expect(voo.sector).toBe("Broad Market");
+    expect(voo.pnlCents).toBeUndefined(); // no basis recorded — never fake P&L
     expect(summary.positions.some((p) => p.symbol.includes("C00190000"))).toBe(false);
   });
 });

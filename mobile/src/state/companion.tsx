@@ -11,6 +11,7 @@ import * as haptics from "@/haptics";
 import { clearCache, loadCachedSummary, loadPendingOps, savePendingOps } from "@/sync/cache";
 import { clearMaterial, loadMaterial, saveMaterial } from "@/sync/material";
 import { syncOnce, type SyncStatus } from "@/sync/client";
+import { publishWidgetData } from "@/widget";
 import { uuid4 } from "@/sync/uuid";
 
 export type Phase = "loading" | "unpaired" | "ready" | "update-required";
@@ -65,6 +66,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       setSummary(fresh);
       setLastSyncAt(Math.floor(Date.now() / 1000));
       setSyncError(null);
+      publishWidgetData(fresh); // keep the Home/Lock Screen in lockstep
     } else if (status === "not-modified") {
       setLastSyncAt(Math.floor(Date.now() / 1000));
       setSyncError(null);
@@ -108,6 +110,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         setSummary(cached.summary);
         etag.current = cached.etag;
         setLastSyncAt(cached.lastSyncAt);
+        publishWidgetData(cached.summary);
       }
       setPendingOps(await loadPendingOps());
       setPhase("ready");

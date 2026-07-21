@@ -68,24 +68,73 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
 
   // Positions: Plaid holdings aggregated by ticker (option legs fold into
   // their underlying — exposure per name), plus manual holdings that carry a
-  // user-entered value. Symbol-less rows fold into their name.
+  // user-entered value. Each position also gets pre-rendered display fields:
+  // name, value-weighted day move, aggregate P&L (only when EVERY row of the
+  // symbol has a recorded basis — partial P&L would lie), quantity, sector.
   const holdings = getHoldings();
   const manual = getManualHoldings();
-  const bySymbol = new Map<string, number>();
+  const sectorNamesForPositions = getInvestmentSectors();
+  type PosAcc = {
+    cents: number;
+    name: string | null;
+    qty: number | null; // null once options mix in — a share count would mislead
+    pnl: number; // dollars; valid only while costed stays true
+    costed: boolean;
+    dayNow: number; // Σ qty·price   (rows with both prices)
+    dayClose: number; // Σ qty·close
+    sector: string | null;
+  };
+  const bySymbol = new Map<string, PosAcc>();
+  const acc = (symbol: string): PosAcc => {
+    let a = bySymbol.get(symbol);
+    if (!a) {
+      a = { cents: 0, name: null, qty: null, pnl: 0, costed: true, dayNow: 0, dayClose: 0, sector: null };
+      bySymbol.set(symbol, a);
+    }
+    return a;
+  };
   const optionLegs: Array<{ parsed: ParsedOption; quantity: number | null; valueCents: number; costBasis: number | null }> = [];
   for (const h of holdings) {
     if (h.value == null || h.value === 0) continue;
     const parsed = parseOccSymbol(h.ticker);
     if (parsed) optionLegs.push({ parsed, quantity: h.quantity, valueCents: cents(h.value), costBasis: h.costBasis ?? null });
     const symbol = parsed?.underlying ?? h.ticker ?? h.securityName ?? "OTHER";
-    bySymbol.set(symbol, (bySymbol.get(symbol) ?? 0) + cents(h.value));
+    const a = acc(symbol);
+    a.cents += cents(h.value);
+    if (parsed) {
+      a.qty = null; // options in the mix — suppress the share count
+    } else {
+      a.name ??= h.securityName ?? null;
+      if (h.quantity != null) a.qty = (a.qty ?? 0) + h.quantity;
+      if (h.price != null && h.closePrice != null && h.quantity != null) {
+        a.dayNow += h.quantity * h.price;
+        a.dayClose += h.quantity * h.closePrice;
+      }
+    }
+    if (h.costBasis == null) a.costed = false;
+    else a.pnl += h.value - h.costBasis;
+    a.sector ??= sectorNamesForPositions[sectorKeyFor(parsed?.underlying ?? h.ticker, h.id)] ?? null;
   }
   for (const m of manual) {
     if (m.manualValue == null || m.manualValue === 0) continue;
     const symbol = m.symbol ?? m.name ?? "OTHER";
-    bySymbol.set(symbol, (bySymbol.get(symbol) ?? 0) + cents(m.manualValue));
+    const a = acc(symbol);
+    a.cents += cents(m.manualValue);
+    a.name ??= m.name ?? null;
+    if (m.quantity != null) a.qty = (a.qty ?? 0) + m.quantity;
+    if (m.costBasis == null) a.costed = false;
+    else a.pnl += m.manualValue - m.costBasis;
+    a.sector ??= sectorNamesForPositions[sectorKeyFor(m.symbol, `man:${m.id}`)] ?? null;
   }
-  const positions = [...bySymbol.entries()].map(([symbol, value]) => ({ symbol, cents: value }));
+  const positions = [...bySymbol.entries()].map(([symbol, a]) => ({
+    symbol,
+    cents: a.cents,
+    ...(a.name ? { name: a.name } : {}),
+    ...(a.dayClose > 0 ? { dayBp: Math.round(((a.dayNow - a.dayClose) / a.dayClose) * 10_000) } : {}),
+    ...(a.costed ? { pnlCents: cents(a.pnl) } : {}),
+    ...(a.qty != null ? { qtyLabel: a.qty.toLocaleString("en-US", { maximumFractionDigits: 4 }) } : {}),
+    ...(a.sector ? { sector: a.sector } : {}),
+  }));
 
   const investments = buildInvestmentsModel(holdings, manual, optionLegs, now);
 

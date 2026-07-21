@@ -45,7 +45,7 @@ const BUDGET_STATES = new Set(['ok', 'warn', 'over']);
 const ALERT_KINDS = new Set(['overspend', 'large_move', 'low_balance', 'other']);
 // STRICT-keyed shapes: anything beyond these keys is a privacy leak (basis,
 // greeks, payoff legs, lots) and rejects the whole summary.
-const POSITION_KEYS = new Set(['symbol', 'cents']);
+const POSITION_KEYS = new Set(['symbol', 'cents', 'name', 'dayBp', 'pnlCents', 'qtyLabel', 'sector']);
 const SECTOR_KEYS = new Set(['sector', 'cents']);
 // curve/breakevens/maxProfitCents/maxLossCents are pre-rendered DISPLAY
 // outputs computed on the desktop — allowed. The raw engine fields
@@ -151,10 +151,15 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
     req(isRecord(p), path, 'must be an object');
     reqStr(p.symbol, `${path}.symbol`);
     reqInt(p.cents, `${path}.cents`);
-    // STRICT: any extra field on a position (basis, greeks, lots, …) is a
-    // privacy leak — reject the whole summary.
+    if (p.name !== undefined) reqStr(p.name, `${path}.name`);
+    if (p.dayBp !== undefined) reqInt(p.dayBp, `${path}.dayBp`);
+    if (p.pnlCents !== undefined) reqInt(p.pnlCents, `${path}.pnlCents`);
+    if (p.qtyLabel !== undefined) reqStr(p.qtyLabel, `${path}.qtyLabel`);
+    if (p.sector !== undefined) reqStr(p.sector, `${path}.sector`);
+    // STRICT: anything beyond the pre-rendered display keys (raw basis,
+    // greeks, lots, …) is a privacy leak — reject the whole summary.
     for (const k of Object.keys(p)) {
-      req(POSITION_KEYS.has(k), `${path}.${k}`, 'positions may only carry symbol + cents');
+      req(POSITION_KEYS.has(k), `${path}.${k}`, 'positions carry only pre-rendered display fields');
     }
   });
 

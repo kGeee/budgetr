@@ -41,7 +41,16 @@ export interface DesktopReadModel {
     category: string;
     pending: boolean;
   }>;
-  positions: Array<{ symbol: string; cents: number; [extra: string]: unknown }>;
+  positions: Array<{
+    symbol: string;
+    cents: number;
+    name?: string;
+    dayBp?: number;
+    pnlCents?: number;
+    qtyLabel?: string;
+    sector?: string;
+    [extra: string]: unknown;
+  }>;
   alerts: Array<{ id: string; kind: AlertKind; text: string; ts: number }>;
   // Daily spending totals, positive cents. Optional.
   spendByDay?: Array<{ d: number; cents: number }>;
@@ -180,11 +189,19 @@ export function buildSummary(model: DesktopReadModel): Summary {
       pending: t.pending,
     }));
 
-  // Strip to exactly {symbol, cents}: cost basis, greeks, and lots must be
-  // unreconstructable from the wire (spec invariant 2).
+  // Strip to the pre-rendered display keys only: raw basis, greeks, and lots
+  // must be unreconstructable from the wire (spec invariant 2).
   const positions = [...model.positions]
     .sort((a, b) => b.cents - a.cents || (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0))
-    .map((p) => ({ symbol: p.symbol, cents: cents(p.cents, `position ${p.symbol}`) }));
+    .map((p) => ({
+      symbol: p.symbol,
+      cents: cents(p.cents, `position ${p.symbol}`),
+      ...(p.name !== undefined ? { name: p.name } : {}),
+      ...(p.dayBp !== undefined ? { dayBp: cents(p.dayBp, `position ${p.symbol} dayBp`) } : {}),
+      ...(p.pnlCents !== undefined ? { pnlCents: cents(p.pnlCents, `position ${p.symbol} pnl`) } : {}),
+      ...(p.qtyLabel !== undefined ? { qtyLabel: p.qtyLabel } : {}),
+      ...(p.sector !== undefined ? { sector: p.sector } : {}),
+    }));
 
   const alerts = [...model.alerts]
     .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))

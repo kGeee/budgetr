@@ -54,10 +54,10 @@ describe('assertValidSummary', () => {
     expect(() => assertValidSummary(s)).toThrow(ContractVersionError);
   });
 
-  it('rejects positions carrying anything beyond symbol + cents', () => {
+  it('rejects positions carrying raw basis fields beyond the display keys', () => {
     const s = validSummary();
     s.positions[0].costBasisCents = 1;
-    expect(() => assertValidSummary(s)).toThrow(/symbol \+ cents/);
+    expect(() => assertValidSummary(s)).toThrow(/pre-rendered display fields/);
   });
 
   it('tolerates unknown extra fields outside positions (forward compat)', () => {

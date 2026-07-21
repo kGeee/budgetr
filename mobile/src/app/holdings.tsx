@@ -6,7 +6,7 @@
 import React, { useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, ClipPath, Defs, Line, Path, Rect } from "react-native-svg";
-import type { StrategySummary } from "@budgetr/core";
+import type { PositionSummary, StrategySummary } from "@budgetr/core";
 import { money, moneyCompact } from "@/format";
 import * as haptics from "@/haptics";
 import { F, PIE_COLORS, T } from "@/theme";
@@ -14,6 +14,7 @@ import { useCompanion } from "@/state/companion";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated from "react-native-reanimated";
 import { Aurora, Card, Donut, Eyebrow, PageHead, Spark, SyncBanner } from "@/ui/bits";
+import { Sheet } from "@/ui/sheet";
 import { AnimatedMoney, useEntering } from "@/ui/motion";
 
 /**
@@ -108,6 +109,7 @@ function dteLabel(expiry: number): { text: string; color: string } {
 export default function Holdings() {
   const { summary, refresh, refreshing } = useCompanion();
   const [openStrategy, setOpenStrategy] = useState<string | null>(null);
+  const [focus, setFocus] = useState<PositionSummary | null>(null);
   const insets = useSafeAreaInsets();
   const entering = useEntering();
   const positions = summary?.positions ?? [];
@@ -221,16 +223,47 @@ export default function Holdings() {
                   const posTotal = positions.reduce((a, x) => a + Math.max(0, x.cents), 0);
                   const pct = posTotal > 0 ? (Math.max(0, p.cents) / posTotal) * 100 : 0;
                   return (
-                    <View key={p.symbol} style={[s.posRow, i > 0 && s.rowBorder]}>
+                    <Pressable
+                      key={p.symbol}
+                      onPress={() => {
+                        haptics.thud();
+                        setFocus(p);
+                      }}
+                      style={[s.posRow, i > 0 && s.rowBorder]}
+                    >
                       <View style={s.posHead}>
                         <Text style={s.symbol}>{p.symbol}</Text>
-                        <Text style={s.posPct}>{pct >= 1 ? `${pct.toFixed(1)}%` : "<1%"}</Text>
-                        <Text style={s.value}>{moneyCompact(p.cents)}</Text>
+                        {p.name ? (
+                          <Text style={s.posName} numberOfLines={1}>
+                            {p.name}
+                          </Text>
+                        ) : (
+                          <View style={{ flex: 1 }} />
+                        )}
+                        <View style={s.posRight}>
+                          <Text style={s.value}>{moneyCompact(p.cents)}</Text>
+                          {p.dayBp !== undefined && (
+                            <Text style={[s.dayChg, { color: p.dayBp >= 0 ? T.jade : T.coral }]}>
+                              {p.dayBp >= 0 ? "+" : ""}
+                              {(p.dayBp / 100).toFixed(2)}%
+                            </Text>
+                          )}
+                        </View>
                       </View>
                       <View style={s.barWrap}>
                         <View style={[s.bar, { width: `${Math.max(1.5, pct)}%` }]} />
                       </View>
-                    </View>
+                      <View style={s.posMeta}>
+                        {p.qtyLabel ? <Text style={s.posMetaText}>Qty {p.qtyLabel}</Text> : null}
+                        {p.pnlCents !== undefined && (
+                          <Text style={[s.posMetaText, { color: p.pnlCents >= 0 ? T.jade : T.coral }]}>
+                            {p.pnlCents >= 0 ? "+" : "-"}
+                            {moneyCompact(Math.abs(p.pnlCents))}
+                          </Text>
+                        )}
+                        <Text style={s.posMetaText}>{pct >= 1 ? `${pct.toFixed(1)}%` : "<1%"} of portfolio</Text>
+                      </View>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -239,9 +272,108 @@ export default function Holdings() {
           </>
         )}
       </ScrollView>
+      <PositionSheet
+        position={focus}
+        totalCents={positions.reduce((a, x) => a + Math.max(0, x.cents), 0)}
+        strategies={(inv?.strategies ?? []).filter((st) => st.underlying === focus?.symbol)}
+        onClose={() => setFocus(null)}
+      />
     </View>
   );
 }
+
+/** Deep dive for one position: breakdown rows plus its live option structures. */
+function PositionSheet({
+  position,
+  totalCents,
+  strategies,
+  onClose,
+}: {
+  position: PositionSummary | null;
+  totalCents: number;
+  strategies: StrategySummary[];
+  onClose: () => void;
+}) {
+  const p = position;
+  const pct = p && totalCents > 0 ? (Math.max(0, p.cents) / totalCents) * 100 : 0;
+  return (
+    <Sheet visible={p !== null} onClose={onClose}>
+      {p && (
+        <ScrollView style={{ maxHeight: 520 }} showsVerticalScrollIndicator={false}>
+          <Text style={ps.symbol}>{p.symbol}</Text>
+          {p.name ? <Text style={ps.name}>{p.name}</Text> : null}
+          <Text style={ps.value}>{money(p.cents)}</Text>
+          {p.dayBp !== undefined && (
+            <Text style={[ps.day, { color: p.dayBp >= 0 ? T.jade : T.coral }]}>
+              {p.dayBp >= 0 ? "+" : ""}
+              {(p.dayBp / 100).toFixed(2)}% today
+            </Text>
+          )}
+          <View style={ps.rows}>
+            {p.qtyLabel ? <SheetRow label="Quantity" value={p.qtyLabel} /> : null}
+            {p.pnlCents !== undefined ? (
+              <SheetRow
+                label="Unrealized P&L"
+                value={`${p.pnlCents >= 0 ? "+" : "-"}${money(Math.abs(p.pnlCents))}`}
+                color={p.pnlCents >= 0 ? T.jade : T.coral}
+              />
+            ) : null}
+            <SheetRow label="Of portfolio" value={pct >= 1 ? `${pct.toFixed(1)}%` : "<1%"} />
+            {p.sector ? <SheetRow label="Sector" value={p.sector} /> : null}
+          </View>
+          {strategies.length > 0 && (
+            <>
+              <Text style={ps.stratHead}>OPTION STRUCTURES</Text>
+              {strategies.map((st) => (
+                <View key={st.id} style={ps.strat}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={ps.stratLabel}>{st.label}</Text>
+                    <Text style={ps.stratValue}>{moneyCompact(st.cents)}</Text>
+                  </View>
+                  <Text style={ps.stratDetail}>{st.detail}</Text>
+                  {(st.curve?.length ?? 0) >= 2 && <PayoffMini st={st} />}
+                </View>
+              ))}
+            </>
+          )}
+          <Text style={ps.footnote}>Lots, basis detail, and trade history live on your Mac.</Text>
+        </ScrollView>
+      )}
+    </Sheet>
+  );
+}
+
+function SheetRow({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <View style={ps.row}>
+      <Text style={ps.rowLabel}>{label}</Text>
+      <Text style={[ps.rowValue, color ? { color } : null]}>{value}</Text>
+    </View>
+  );
+}
+
+const ps = StyleSheet.create({
+  symbol: { color: T.brass, fontSize: 15, fontFamily: F.monoSemiBold, marginTop: 4 },
+  name: { color: T.muted, fontSize: 13.5, fontFamily: F.sans, marginTop: 2 },
+  value: { color: T.paper, fontSize: 34, fontFamily: F.display, letterSpacing: -0.6, marginTop: 8 },
+  day: { fontSize: 13, fontFamily: F.monoSemiBold, marginTop: 3, marginBottom: 8 },
+  rows: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.line, marginTop: 8 },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: T.line,
+  },
+  rowLabel: { color: T.muted, fontSize: 14, fontFamily: F.sans },
+  rowValue: { color: T.paper, fontSize: 14, fontFamily: F.mono },
+  stratHead: { color: T.brass, fontSize: 10.5, fontFamily: F.sansSemiBold, letterSpacing: 1.8, marginTop: 16, marginBottom: 4 },
+  strat: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: T.line },
+  stratLabel: { color: T.paper, fontSize: 14, fontFamily: F.sansMedium },
+  stratValue: { color: T.paper, fontSize: 13, fontFamily: F.mono },
+  stratDetail: { color: T.faint, fontSize: 12, fontFamily: F.mono, marginTop: 2 },
+  footnote: { color: T.faint, fontSize: 12, fontFamily: F.sans, textAlign: "center", marginVertical: 16 },
+});
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.ink },
@@ -276,10 +408,14 @@ const s = StyleSheet.create({
   },
   stratValue: { color: T.paper, fontSize: 13, fontFamily: F.mono },
 
-  posRow: { paddingVertical: 10 },
-  posHead: { flexDirection: "row", alignItems: "baseline", gap: 10 },
-  symbol: { color: T.paper, fontSize: 13.5, fontFamily: F.monoSemiBold, flex: 1 },
-  posPct: { color: T.faint, fontSize: 11.5, fontFamily: F.mono },
+  posRow: { paddingVertical: 11 },
+  posHead: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  symbol: { color: T.brass, fontSize: 13.5, fontFamily: F.monoSemiBold },
+  posName: { color: T.muted, fontSize: 12.5, fontFamily: F.sans, flex: 1, marginTop: 1 },
+  posRight: { alignItems: "flex-end" },
+  dayChg: { fontSize: 11, fontFamily: F.mono, marginTop: 2 },
+  posMeta: { flexDirection: "row", gap: 12, marginTop: 7 },
+  posMetaText: { color: T.faint, fontSize: 11.5, fontFamily: F.mono },
   value: { color: T.paper, fontSize: 13.5, fontFamily: F.mono, minWidth: 70, textAlign: "right" },
   barWrap: { height: 4, borderRadius: 2, backgroundColor: T.ink, overflow: "hidden", marginTop: 7 },
   bar: { height: "100%", backgroundColor: T.brass, borderRadius: 2 },

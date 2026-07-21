@@ -79,7 +79,15 @@ export interface TxnSummary {
 export interface PositionSummary {
   symbol: string;
   cents: number; // current market value
-  // NOTE: no cost basis, no greeks, no lots. The phone must never receive these.
+  // Optional pre-rendered display fields (all computed on the desktop):
+  name?: string; // security name, e.g. "SPDR S&P 500 ETF Trust"
+  dayBp?: number; // day move in basis points, signed int (+82 = +0.82%)
+  pnlCents?: number; // unrealized P&L, signed — a conscious, pre-rendered
+  // output (reveals aggregate basis for THIS position; per-lot detail stays home)
+  qtyLabel?: string; // pre-rendered quantity, e.g. "46" or "17,919.28"
+  sector?: string; // assigned sector display name
+  // NOTE: still no per-lot data, no greeks, no raw basis fields — the strict
+  // validator rejects anything beyond the keys above.
 }
 
 // ── Investments (optional Summary extension — added post-v1, no bump) ──

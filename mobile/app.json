@@ -12,6 +12,11 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIViewControllerBasedStatusBarAppearance": false
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.dev.budgetr.companion"
+        ]
       }
     },
     "android": {
@@ -44,7 +49,8 @@
           "cameraPermission": "budgetr uses the camera only to scan your Mac's pairing code."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,
