@@ -8,7 +8,6 @@
     "scheme": "budgetr",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
       "bundleIdentifier": "dev.budgetr.companion",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false

@@ -38,6 +38,12 @@ export interface SyncOutcome {
 
 const TIMEOUT_MS = 10_000;
 
+// AbortSignal.timeout is missing from some Hermes builds — degrade to no
+// timeout rather than crashing at module scope or per-request.
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  return typeof AbortSignal !== "undefined" && "timeout" in AbortSignal ? AbortSignal.timeout(ms) : undefined;
+}
+
 function channelUrl(m: PairingMaterial, path: string): string {
   return `${m.relayUrl.replace(/\/$/, "")}/v1/channels/${m.channelId}${path}`;
 }
@@ -65,7 +71,7 @@ async function flushOutbox(material: PairingMaterial, ops: Op[]): Promise<void> 
       "Idempotency-Key": batch.batchId,
     },
     body: JSON.stringify(seal(batch, key)),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: timeoutSignal(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`outbox push failed (${res.status})`);
 }
@@ -80,7 +86,7 @@ export async function syncOnce(material: PairingMaterial, etag: string | null): 
     // 2. fetch the latest summary
     const res = await fetch(channelUrl(material, "/summary"), {
       headers: { ...authHeaders(material), ...(etag ? { "If-None-Match": etag } : {}) },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: timeoutSignal(TIMEOUT_MS),
     });
 
     if (res.status === 304) {
