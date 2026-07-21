@@ -1,0 +1,33 @@
+{
+  "name": "@budgetr/sync-crypto",
+  "version": "0.1.0",
+  "private": true,
+  "description": "budgetr companion — envelope encryption and pairing material",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers": "^0.7.14",
+    "libsodium-wrappers": "^0.7.15",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.9"
+  }
+}
