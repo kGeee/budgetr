@@ -17,21 +17,37 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   accounts,
+  allocationTargets,
   balanceSnapshots,
   budgets,
   categories,
+  dashboards,
+  dashboardWidgets,
+  expenseShares,
   fireSettings,
   holdings,
+  investmentGeographies,
   investmentTransactions,
   items,
   manualHoldings,
   netWorthMilestones,
+  people,
+  recurringStreams,
   savingsContributions,
   savingsGoals,
   securities,
+  settlements,
+  sharedExpenses,
+  tagRules,
+  tags,
+  transactionMatches,
+  transactionSplits,
+  transactionTags,
   transactions,
+  vendorGroupMembers,
+  vendorGroups,
 } from "@/db/schema";
-import { seedCategories } from "@/lib/seed-categories-data";
+import { REIMBURSABLE_CATEGORY_ID, seedCategories } from "@/lib/seed-categories-data";
 import { isFirstRunDone, markFirstRunDone, setDemoMode } from "@/lib/app-config";
 import { hasPlaidCredentials } from "@/lib/plaid";
 
@@ -41,6 +57,26 @@ import { hasPlaidCredentials } from "@/lib/plaid";
  * (which reinserts) and the "exit demo" flow (which stops here).
  */
 export function wipeFinancialData(): void {
+  // Newer overlays first (child → parent). Most would cascade from the
+  // transactions/accounts/people deletes below, but deleting explicitly keeps
+  // this correct regardless of FK-cascade state and makes the coverage obvious.
+  db.delete(transactionSplits).run();
+  db.delete(expenseShares).run();
+  db.delete(settlements).run();
+  db.delete(sharedExpenses).run();
+  db.delete(people).run();
+  db.delete(transactionMatches).run();
+  db.delete(transactionTags).run();
+  db.delete(tagRules).run();
+  db.delete(tags).run();
+  db.delete(vendorGroupMembers).run();
+  db.delete(vendorGroups).run();
+  db.delete(recurringStreams).run();
+  db.delete(dashboardWidgets).run();
+  db.delete(dashboards).run();
+  db.delete(allocationTargets).run();
+  db.delete(investmentGeographies).run();
+
   db.delete(savingsContributions).run();
   db.delete(savingsGoals).run();
   db.delete(netWorthMilestones).run();
@@ -116,6 +152,7 @@ export function seedDemoData(): { transactions: number; budgets: number } {
     { id: "sec_voo", ticker: "VOO", name: "Vanguard S&P 500 ETF", qty: 60, close: 540.0, basis: 24000 },
     { id: "sec_vti", ticker: "VTI", name: "Vanguard Total Stock Market ETF", qty: 90, close: 285.0, basis: 20000 },
     { id: "sec_amzn", ticker: "AMZN", name: "Amazon.com Inc.", qty: 40, close: 205.0, basis: 6000 },
+    { id: "sec_vxus", ticker: "VXUS", name: "Vanguard Total International Stock ETF", qty: 150, close: 62.0, basis: 8000 },
   ];
 
   // AAPL call spread ~3 months out (third Friday). OCC: ROOT+YYMMDD+C/P+strike*1000(8).
@@ -177,6 +214,7 @@ export function seedDemoData(): { transactions: number; budgets: number } {
   buy("sec_voo", daysAgo(560), 60, 400, "Buy VOO");
   buy("sec_vti", daysAgo(480), 90, 222, "Buy VTI");
   buy("sec_amzn", daysAgo(410), 40, 150, "Buy AMZN");
+  buy("sec_vxus", daysAgo(450), 150, 53.33, "Buy VXUS");
   for (const q of [270, 180, 90]) {
     div("sec_aapl", daysAgo(q), 76.8, "AAPL Dividend");
     div("sec_voo", daysAgo(q), 84.0, "VOO Dividend");
@@ -306,7 +344,198 @@ export function seedDemoData(): { transactions: number; budgets: number } {
     ])
     .run();
 
-  return { transactions: txRows.length, budgets: budRows.length };
+  // ── Extra fixed-id transactions for the feature overlays below ──────────────
+  // These need stable ids so splits / shares / settlements / matches can point at
+  // them, so they're built here rather than through the random generator above.
+  const REIMB = REIMBURSABLE_CATEGORY_ID;
+  const X = (o: Partial<typeof transactions.$inferInsert> & {
+    id: string; accountId: string; amount: number; date: string; name: string;
+  }): typeof transactions.$inferInsert => ({
+    isoCurrencyCode: "USD", merchantName: null, category: null, categoryDetailed: null,
+    pending: false, paymentChannel: "online", reviewed: true, ...o,
+  });
+  const extraTx: (typeof transactions.$inferInsert)[] = [
+    // Group expenses Jordan fronted (each split below).
+    X({ id: "txg_dinner", accountId: CREDIT, amount: 184.5, date: daysAgo(12), name: "OTTOS TAVERN", merchantName: "Otto's Tavern", category: "FOOD_AND_DRINK" }),
+    X({ id: "txg_airbnb", accountId: CREDIT, amount: 912.0, date: daysAgo(40), name: "AIRBNB * HMK2Q", merchantName: "Airbnb", category: "TRAVEL" }),
+    X({ id: "txg_concert", accountId: CREDIT, amount: 260.0, date: daysAgo(25), name: "AXS.COM TICKETS", merchantName: "AXS", category: "ENTERTAINMENT" }),
+    X({ id: "txg_grocery", accountId: CREDIT, amount: 128.4, date: daysAgo(6), name: "WHOLEFDS", merchantName: "Whole Foods Market", category: "FOOD_AND_DRINK" }),
+    // Repayments already recorded → filed under the Reimbursable transfer category.
+    X({ id: "txg_venmo_alex", accountId: CHECKING, amount: -289.5, date: daysAgo(8), name: "VENMO PAYMENT FROM ALEX RIVERA", merchantName: "Venmo", category: "TRANSFER_IN", userCategoryId: REIMB }),
+    X({ id: "txg_venmo_sam", accountId: CHECKING, amount: -61.5, date: daysAgo(9), name: "VENMO CASHOUT SAM CHEN", merchantName: "Venmo", category: "TRANSFER_IN", userCategoryId: REIMB }),
+    // Repayments NOT yet filed → these drive the "repayments to confirm" inbox on
+    // /shared. TRANSFER_IN keeps them out of income while they await confirmation.
+    X({ id: "txg_zelle_priya", accountId: CHECKING, amount: -130.0, date: daysAgo(3), name: "ZELLE PAYMENT FROM PRIYA PATEL", merchantName: "Zelle", category: "TRANSFER_IN", reviewed: false }),
+    X({ id: "txg_venmo_sam2", accountId: CHECKING, amount: -228.0, date: daysAgo(2), name: "VENMO PAYMENT FROM SAM CHEN", merchantName: "Venmo", category: "TRANSFER_IN", reviewed: false }),
+    // A refund pair (same account, offsetting, <5d) → refund suggestion inbox.
+    X({ id: "txg_amzn_buy", accountId: CREDIT, amount: 76.4, date: daysAgo(18), name: "AMAZON.COM*RT4D9", merchantName: "Amazon", category: "GENERAL_MERCHANDISE" }),
+    X({ id: "txg_amzn_refund", accountId: CREDIT, amount: -76.4, date: daysAgo(15), name: "AMAZON.COM REFUND", merchantName: "Amazon", category: "GENERAL_MERCHANDISE" }),
+    // A self-transfer pair (different accounts) → confirmed match below.
+    X({ id: "txg_xfer_out", accountId: CHECKING, amount: 1500.0, date: daysAgo(10), name: "TRANSFER TO SAVINGS", category: "TRANSFER_OUT" }),
+    X({ id: "txg_xfer_in", accountId: SAVINGS, amount: -1500.0, date: daysAgo(10), name: "TRANSFER FROM CHECKING", category: "TRANSFER_IN" }),
+    // A plain category split (not a bill split) — demonstrates the split badge.
+    X({ id: "txg_target", accountId: CREDIT, amount: 142.0, date: daysAgo(20), name: "TARGET", merchantName: "Target", category: "GENERAL_MERCHANDISE" }),
+  ];
+  db.insert(transactions).values(extraTx).run();
+
+  // ── Bill splitting: people, shared expenses, shares, settlements ────────────
+  db.insert(people)
+    .values([
+      { id: "p_alex", name: "Alex Rivera", handle: "@alex-rivera", color: null, archived: false, createdAt: NOW },
+      { id: "p_sam", name: "Sam Chen", handle: "@sam-chen", color: null, archived: false, createdAt: NOW },
+      { id: "p_priya", name: "Priya Patel", handle: "@priya", color: null, archived: false, createdAt: NOW },
+      { id: "p_marcus", name: "Marcus Bell", handle: null, color: null, archived: false, createdAt: NOW },
+    ])
+    .run();
+
+  db.insert(sharedExpenses)
+    .values([
+      { id: "se_dinner", transactionId: "txg_dinner", myShare: 61.5, note: "Dinner with Alex & Sam", itemsJson: null, createdAt: NOW },
+      { id: "se_airbnb", transactionId: "txg_airbnb", myShare: 228.0, note: "Tahoe weekend", itemsJson: null, createdAt: NOW },
+      { id: "se_concert", transactionId: "txg_concert", myShare: 130.0, note: "Concert — Priya's ticket", itemsJson: null, createdAt: NOW },
+      { id: "se_grocery", transactionId: "txg_grocery", myShare: 64.2, note: "Split with roommate", itemsJson: null, createdAt: NOW },
+    ])
+    .run();
+
+  db.insert(expenseShares)
+    .values([
+      { id: "es_dinner_alex", sharedExpenseId: "se_dinner", personId: "p_alex", amount: 61.5 },
+      { id: "es_dinner_sam", sharedExpenseId: "se_dinner", personId: "p_sam", amount: 61.5 },
+      { id: "es_airbnb_alex", sharedExpenseId: "se_airbnb", personId: "p_alex", amount: 228.0 },
+      { id: "es_airbnb_sam", sharedExpenseId: "se_airbnb", personId: "p_sam", amount: 228.0 },
+      { id: "es_airbnb_priya", sharedExpenseId: "se_airbnb", personId: "p_priya", amount: 228.0 },
+      { id: "es_concert_priya", sharedExpenseId: "se_concert", personId: "p_priya", amount: 130.0 },
+      { id: "es_grocery_marcus", sharedExpenseId: "se_grocery", personId: "p_marcus", amount: 64.2 },
+    ])
+    .run();
+
+  // Settlements already recorded (Alex square, Sam paid the dinner only).
+  db.insert(settlements)
+    .values([
+      { id: "st_alex", personId: "p_alex", transactionId: "txg_venmo_alex", amount: 289.5, date: daysAgo(8), note: null, createdAt: NOW },
+      { id: "st_sam", personId: "p_sam", transactionId: "txg_venmo_sam", amount: 61.5, date: daysAgo(9), note: "Dinner", createdAt: NOW },
+    ])
+    .run();
+
+  // ── transaction_splits: bill-split overlays + one plain category split ──────
+  // Each bill split = your share at its real category + the remainder parked in
+  // the Reimbursable transfer category (which reporting already nets out).
+  db.insert(transactionSplits)
+    .values([
+      { id: "sp_dinner_mine", transactionId: "txg_dinner", categoryId: "cat_food_and_drink", amount: 61.5, note: "Your share" },
+      { id: "sp_dinner_owed", transactionId: "txg_dinner", categoryId: REIMB, amount: 123.0, note: "Owed by 2 people" },
+      { id: "sp_airbnb_mine", transactionId: "txg_airbnb", categoryId: "cat_travel", amount: 228.0, note: "Your share" },
+      { id: "sp_airbnb_owed", transactionId: "txg_airbnb", categoryId: REIMB, amount: 684.0, note: "Owed by 3 people" },
+      { id: "sp_concert_mine", transactionId: "txg_concert", categoryId: "cat_entertainment", amount: 130.0, note: "Your share" },
+      { id: "sp_concert_owed", transactionId: "txg_concert", categoryId: REIMB, amount: 130.0, note: "Owed by 1 person" },
+      { id: "sp_grocery_mine", transactionId: "txg_grocery", categoryId: "cat_food_and_drink", amount: 64.2, note: "Your share" },
+      { id: "sp_grocery_owed", transactionId: "txg_grocery", categoryId: REIMB, amount: 64.2, note: "Owed by 1 person" },
+      // Plain category split — a Target run that was part household, part pharmacy.
+      { id: "sp_target_gm", transactionId: "txg_target", categoryId: "cat_general_merchandise", amount: 98.0, note: "Household" },
+      { id: "sp_target_med", transactionId: "txg_target", categoryId: "cat_medical", amount: 44.0, note: "Pharmacy" },
+    ])
+    .run();
+
+  // Confirm the self-transfer as a matched pair (both legs drop out of reporting).
+  db.insert(transactionMatches)
+    .values({ id: "tm_xfer", txnAId: "txg_xfer_out", txnBId: "txg_xfer_in", kind: "transfer", status: "confirmed", createdAt: NOW })
+    .run();
+
+  // ── Tags + auto-tag rules ───────────────────────────────────────────────────
+  db.insert(tags)
+    .values([
+      { id: "tag_vacation", name: "Vacation", color: "#6ea8fe" },
+      { id: "tag_subs", name: "Subscriptions", color: "#c07bd8" },
+      { id: "tag_work", name: "Work", color: "#e0b64a" },
+    ])
+    .run();
+  // Attach tags by merchant name so this survives the randomized ids above.
+  db.run(sql`INSERT INTO transaction_tags (transaction_id, tag_id)
+             SELECT id, 'tag_subs' FROM transactions
+             WHERE name IN ('NETFLIX','SPOTIFY','EQUINOX','COMCAST')`);
+  db.run(sql`INSERT INTO transaction_tags (transaction_id, tag_id)
+             SELECT id, 'tag_vacation' FROM transactions
+             WHERE name IN ('DELTA AIR LINES','MARRIOTT','AXS.COM TICKETS','AIRBNB * HMK2Q')`);
+  db.run(sql`INSERT INTO transaction_tags (transaction_id, tag_id)
+             SELECT id, 'tag_work' FROM transactions WHERE name = 'UBER TRIP'`);
+  db.insert(tagRules)
+    .values([
+      { id: "tr_air", pattern: "AIRBNB", label: "Travel", tagId: "tag_vacation", matchType: "contains", minAmount: null, maxAmount: null, accountId: null, categoryId: null, createdAt: NOW },
+      { id: "tr_netflix", pattern: "NETFLIX", label: "Streaming", tagId: "tag_subs", matchType: "contains", minAmount: null, maxAmount: null, accountId: null, categoryId: null, createdAt: NOW },
+      { id: "tr_uber", pattern: "UBER", label: "Rides", tagId: "tag_work", matchType: "contains", minAmount: null, maxAmount: null, accountId: null, categoryId: null, createdAt: NOW },
+    ])
+    .run();
+
+  // ── Recurring streams (subscriptions + payroll) ─────────────────────────────
+  const recurRows: (typeof recurringStreams.$inferInsert)[] = RECURRING.map((r, i) => {
+    const last = new Date(NOW);
+    last.setDate(r.day);
+    if (last > NOW) last.setMonth(last.getMonth() - 1);
+    const next = new Date(last);
+    next.setMonth(next.getMonth() + 1);
+    const amt = r.lo === r.hi ? r.lo : Math.round(((r.lo + r.hi) / 2) * 100) / 100;
+    return {
+      id: `rs_${i}`, accountId: r.acct, direction: "outflow",
+      description: r.merchant, merchantName: r.merchant, category: r.cat,
+      frequency: "MONTHLY", averageAmount: amt, lastAmount: amt,
+      lastDate: iso(last), predictedNextDate: iso(next), isoCurrencyCode: "USD",
+      isActive: true, status: "MATURE", updatedAt: NOW,
+    };
+  });
+  recurRows.push({
+    id: "rs_payroll", accountId: CHECKING, direction: "inflow",
+    description: "Acme Corp", merchantName: "Acme Corp", category: "INCOME",
+    frequency: "BIWEEKLY", averageAmount: 3200, lastAmount: 3200,
+    lastDate: daysAgo(4), predictedNextDate: daysAgo(-10), isoCurrencyCode: "USD",
+    isActive: true, status: "MATURE", updatedAt: NOW,
+  });
+  db.insert(recurringStreams).values(recurRows).run();
+
+  // ── Vendor group (merge the two grocery stores into one canonical vendor) ───
+  db.insert(vendorGroups).values({ id: "vg_grocery", name: "Groceries", createdAt: NOW }).run();
+  db.insert(vendorGroupMembers)
+    .values([
+      { vendorKey: "Whole Foods Market", groupId: "vg_grocery" },
+      { vendorKey: "Trader Joe's", groupId: "vg_grocery" },
+    ])
+    .run();
+
+  // ── A saved custom dashboard ────────────────────────────────────────────────
+  db.insert(dashboards).values({ id: "dash_review", name: "Monthly Review", sortOrder: 0, createdAt: NOW }).run();
+  db.insert(dashboardWidgets)
+    .values([
+      { id: "dw_1", dashboardId: "dash_review", type: "net-worth", config: null, sortOrder: 0 },
+      { id: "dw_2", dashboardId: "dash_review", type: "spend-by-category", config: JSON.stringify({ days: 30 }), sortOrder: 1 },
+      { id: "dw_3", dashboardId: "dash_review", type: "cashflow", config: JSON.stringify({ months: 6 }), sortOrder: 2 },
+      { id: "dw_4", dashboardId: "dash_review", type: "top-vendors", config: JSON.stringify({ days: 90, limit: 8 }), sortOrder: 3 },
+      { id: "dw_5", dashboardId: "dash_review", type: "budget-summary", config: null, sortOrder: 4 },
+    ])
+    .run();
+
+  // ── Allocation targets + geography overrides (rebalance drift + region chart) ─
+  db.insert(allocationTargets)
+    .values([
+      { targetKey: "class:stocks", target: 70 },
+      { targetKey: "class:crypto", target: 5 },
+      { targetKey: "class:options", target: 5 },
+      { targetKey: "class:cash", target: 15 },
+      { targetKey: "class:bonds", target: 5 },
+    ])
+    .run();
+  db.insert(investmentGeographies)
+    .values([
+      { sectorKey: "sym:AAPL", region: "United States" },
+      { sectorKey: "sym:MSFT", region: "United States" },
+      { sectorKey: "sym:NVDA", region: "United States" },
+      { sectorKey: "sym:AMZN", region: "United States" },
+      { sectorKey: "sym:VOO", region: "United States" },
+      { sectorKey: "sym:VTI", region: "United States" },
+      { sectorKey: "sym:VXUS", region: "International" },
+      { sectorKey: "man:man_btc", region: "Global" },
+    ])
+    .run();
+
+  return { transactions: txRows.length + extraTx.length, budgets: budRows.length };
 }
 
 /**
