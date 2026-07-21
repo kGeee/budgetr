@@ -11,7 +11,10 @@ import { money, moneyCompact } from "@/format";
 import * as haptics from "@/haptics";
 import { F, PIE_COLORS, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated from "react-native-reanimated";
 import { Aurora, Card, Donut, Eyebrow, PageHead, Spark, SyncBanner } from "@/ui/bits";
+import { AnimatedMoney, useEntering } from "@/ui/motion";
 
 /**
  * Expiry payoff curve, phone-sized — the desktop PayoffDiagram's shape:
@@ -105,6 +108,8 @@ function dteLabel(expiry: number): { text: string; color: string } {
 export default function Holdings() {
   const { summary, refresh, refreshing } = useCompanion();
   const [openStrategy, setOpenStrategy] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
+  const entering = useEntering();
   const positions = summary?.positions ?? [];
   const inv = summary?.investments;
   const total = inv?.valueCents ?? positions.reduce((acc, p) => acc + p.cents, 0);
@@ -113,7 +118,7 @@ export default function Holdings() {
     <View style={s.root}>
       <Aurora />
       <ScrollView
-        contentContainerStyle={s.content}
+        contentContainerStyle={[s.content, { paddingTop: insets.top + 18 }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -132,11 +137,13 @@ export default function Holdings() {
           <Text style={s.emptyText}>No positions synced.</Text>
         ) : (
           <>
+            <Animated.View entering={entering(0)}>
             <Card style={s.hero}>
               <Eyebrow>Portfolio value</Eyebrow>
-              <Text style={s.heroValue}>{money(total)}</Text>
+              <AnimatedMoney cents={total} style={s.heroValue} />
               {inv && inv.spark.length > 1 && <Spark points={inv.spark} height={72} />}
             </Card>
+            </Animated.View>
 
             {inv && inv.sectors.length > 0 && (
               <Card>
@@ -238,7 +245,7 @@ export default function Holdings() {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.ink },
-  content: { padding: 18, paddingTop: 74, paddingBottom: 44 },
+  content: { padding: 18, paddingBottom: 108 },
   emptyText: { color: T.muted, textAlign: "center", marginTop: 60, fontSize: 14, fontFamily: F.sans },
   hero: { paddingVertical: 22 },
   heroValue: { color: T.paper, fontSize: 36, fontFamily: F.display, letterSpacing: -0.6, marginTop: 8 },

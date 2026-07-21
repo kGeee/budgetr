@@ -28,12 +28,15 @@ export function Eyebrow({ children, color = T.brass }: { children: string; color
 }
 
 /** Desktop PageHead: eyebrow date, Fraunces display title, hairline below. */
-export function PageHead({ title }: { title: string }) {
+export function PageHead({ title, action }: { title: string; action?: React.ReactNode }) {
   const date = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   return (
     <View style={s.pageHead}>
-      <Eyebrow>{date}</Eyebrow>
-      <Text style={s.pageTitle}>{title}</Text>
+      <View style={{ flex: 1 }}>
+        <Eyebrow>{date}</Eyebrow>
+        <Text style={s.pageTitle}>{title}</Text>
+      </View>
+      {action}
     </View>
   );
 }
@@ -58,15 +61,47 @@ export function Aurora() {
   );
 }
 
-/** "Synced Xm ago" + error/pending state — errors are states, not crashes. */
+/**
+ * "Synced Xm ago" + error/pending state — errors are states, not crashes.
+ * Past 24h the banner turns brass and says so plainly: a glance app must
+ * never let stale numbers pass as fresh (spec T6 stale-cache warning).
+ */
 export function SyncBanner() {
   const { lastSyncAt, syncError, pendingOps } = useCompanion();
+  const stale = lastSyncAt !== null && Date.now() / 1000 - lastSyncAt > 24 * 3600;
+  const warn = Boolean(syncError) || stale;
   return (
     <View style={s.bannerRow}>
-      <Text style={[s.bannerText, syncError ? { color: T.brass } : null]} numberOfLines={1}>
-        {syncError ? `${syncError} · ` : ""}synced {agoLabel(lastSyncAt)}
+      <Text style={[s.bannerText, warn ? { color: T.brass } : null]} numberOfLines={1}>
+        {syncError ? `${syncError} · ` : stale ? "⚠ showing old data · " : ""}synced {agoLabel(lastSyncAt)}
         {pendingOps.length > 0 ? ` · ${pendingOps.length} edit${pendingOps.length > 1 ? "s" : ""} pending` : ""}
       </Text>
+    </View>
+  );
+}
+
+/** Loading placeholder: breathing panel blocks instead of a blank screen. */
+export function Skeleton() {
+  const [pulse, setPulse] = React.useState(false);
+  React.useEffect(() => {
+    const id = setInterval(() => setPulse((p) => !p), 700);
+    return () => clearInterval(id);
+  }, []);
+  const blocks = [140, 92, 220];
+  return (
+    <View style={{ flex: 1, backgroundColor: T.ink, padding: 18, paddingTop: 110 }}>
+      {blocks.map((h, i) => (
+        <View
+          key={i}
+          style={{
+            height: h,
+            borderRadius: T.radius,
+            backgroundColor: pulse ? T.panel : T.panel2,
+            marginBottom: 14,
+            opacity: 0.8,
+          }}
+        />
+      ))}
     </View>
   );
 }
@@ -293,7 +328,7 @@ export function Bars({ points, height = 72 }: { points: SparkPoint[]; height?: n
  * and the same PIE_COLORS. Hairline gaps between slices; the legend is the
  * caller's job (it needs layout the chart shouldn't own).
  */
-export function Donut({ slices, size = 132 }: { slices: Array<{ cents: number; color: string }>; size?: number }) {
+export function Donut({ slices, size = 132 }: { slices: { cents: number; color: string }[]; size?: number }) {
   const total = slices.reduce((a, sl) => a + Math.max(0, sl.cents), 0);
   if (total <= 0) return null;
   const r = size / 2;
@@ -349,6 +384,9 @@ const s = StyleSheet.create({
     textTransform: "uppercase",
   },
   pageHead: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: T.line,
     paddingBottom: 16,

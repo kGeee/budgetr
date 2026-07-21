@@ -10,7 +10,8 @@
     "ios": {
       "bundleIdentifier": "dev.budgetr.companion",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIViewControllerBasedStatusBarAppearance": false
       }
     },
     "android": {
@@ -31,9 +32,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#101418",
+          "backgroundColor": "#080b0a",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 120
         }
       ],
       "expo-secure-store",

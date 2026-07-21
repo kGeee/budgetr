@@ -10,7 +10,10 @@ import { categoryLabel, money } from "@/format";
 import * as haptics from "@/haptics";
 import { F, stateColor, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated from "react-native-reanimated";
 import { Aurora, Card, Eyebrow, PageHead, SyncBanner } from "@/ui/bits";
+import { useEntering } from "@/ui/motion";
 
 /**
  * The desktop Budgets page's pace chart, phone-sized: cumulative month spend
@@ -199,6 +202,8 @@ const pc = StyleSheet.create({
 export default function Budgets() {
   const { summary, refresh, refreshing } = useCompanion();
   const [openCat, setOpenCat] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
+  const entering = useEntering();
 
   const budgets = summary?.budgets ?? [];
 
@@ -206,7 +211,7 @@ export default function Budgets() {
     <View style={s.root}>
       <Aurora />
       <ScrollView
-        contentContainerStyle={s.content}
+        contentContainerStyle={[s.content, { paddingTop: insets.top + 18 }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -220,7 +225,9 @@ export default function Budgets() {
       >
         <PageHead title="Budgets" />
         <SyncBanner />
-        <PaceChart spendByDay={summary?.spendByDay ?? []} budgets={budgets} />
+        <Animated.View entering={entering(0)}>
+          <PaceChart spendByDay={summary?.spendByDay ?? []} budgets={budgets} />
+        </Animated.View>
         {budgets.length === 0 && <Text style={s.emptyText}>No budgets set — add limits on your Mac.</Text>}
 
         {budgets.map((b) => {
@@ -279,7 +286,7 @@ export default function Budgets() {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.ink },
-  content: { padding: 18, paddingTop: 74, paddingBottom: 44 },
+  content: { padding: 18, paddingBottom: 108 },
   emptyText: { color: T.muted, textAlign: "center", marginTop: 60, fontSize: 14, fontFamily: F.sans },
   head: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 12 },
   name: { color: T.paper, fontSize: 15.5, fontFamily: F.sansSemiBold, flexShrink: 1 },

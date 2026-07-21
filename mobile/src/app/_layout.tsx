@@ -20,8 +20,10 @@ import {
 } from "@expo-google-fonts/hanken-grotesk";
 import { SplineSansMono_500Medium, SplineSansMono_600SemiBold } from "@expo-google-fonts/spline-sans-mono";
 import { ArrowLeftRight, LayoutDashboard, LineChart, Wallet } from "lucide-react-native";
+import { BlurView } from "expo-blur";
 import { CompanionProvider, useCompanion } from "@/state/companion";
 import { PairingScreen } from "@/ui/pairing";
+import { Skeleton } from "@/ui/bits";
 import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 
@@ -29,7 +31,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function Gate({ children }: { children: React.ReactNode }) {
   const { phase } = useCompanion();
-  if (phase === "loading") return <View style={s.blank} />;
+  if (phase === "loading") return <Skeleton />;
   if (phase === "unpaired") return <PairingScreen />;
   if (phase === "update-required") {
     return (
@@ -72,7 +74,21 @@ export default function RootLayout() {
           screenOptions={{
             headerShown: false,
             sceneStyle: { backgroundColor: T.ink },
-            tabBarStyle: { backgroundColor: T.panel, borderTopColor: T.line },
+            // Translucent chrome: content scrolls UNDER the tab bar, which
+            // reads as a floating material rather than an opaque strip.
+            tabBarStyle: {
+              position: "absolute",
+              backgroundColor: "transparent",
+              borderTopColor: T.line,
+              elevation: 0,
+            },
+            tabBarBackground: () => (
+              <BlurView
+                tint="dark"
+                intensity={36}
+                style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(19,26,24,0.72)" }]}
+              />
+            ),
             tabBarActiveTintColor: T.jade,
             tabBarInactiveTintColor: T.faint,
             tabBarLabelStyle: { fontFamily: F.sansMedium, fontSize: 10 },
