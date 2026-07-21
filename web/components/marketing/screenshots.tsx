@@ -1,4 +1,6 @@
-import { SITE } from "@/lib/site";
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+import { SITE, demoEnabled, DEMO_HREF } from "@/lib/site";
 
 /**
  * A screenshot framed as a small app window — faux titlebar with brand-coloured
@@ -121,6 +123,15 @@ export function ScreenshotShowcase() {
           Net worth, spending, investments, options, and taxes — every screen runs locally on
           your Mac.
         </p>
+        {demoEnabled() && (
+          <Link
+            href={DEMO_HREF}
+            className="group mt-6 inline-flex items-center gap-1.5 rounded-full border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-4 py-2 text-sm font-medium text-[var(--brass)] transition hover:border-[var(--brass)]"
+          >
+            Try the live demo — no download
+            <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        )}
       </div>
 
       <div className="mt-12 space-y-16 sm:space-y-24">

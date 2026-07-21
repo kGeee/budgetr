@@ -8,8 +8,10 @@ import { CurrencyInit, CurrencySwitcher } from "@/components/currency-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 import { DemoBanner } from "@/components/demo-banner";
+import { BuyLink } from "@/components/marketing/marketing-shell";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
 import { getFinnhubKey, getPlaidConfig, isDemoMode } from "@/lib/app-config";
+import { demoEnabled } from "@/lib/site";
 import { hasPlaidCredentials } from "@/lib/plaid";
 import { getAccounts, getDisplayCurrencyRates } from "@/lib/queries";
 import { OBF_COOKIE, hiddenFromCookie, setHidden } from "@/lib/scale";
@@ -27,13 +29,15 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  // On a marketing-only deployment (MARKETING_ONLY set), the private dashboard
-  // isn't served — bail before touching the local DB.
-  if (process.env.MARKETING_ONLY) notFound();
+  // The read-only web demo (DEMO_DB) serves the real dashboard on the marketing
+  // site backed by an in-memory demo DB. A marketing-only deploy WITHOUT the demo
+  // still 404s the private dashboard before touching any DB.
+  const webDemo = demoEnabled();
+  if (process.env.MARKETING_ONLY && !webDemo) notFound();
 
-  // Fresh install with no keys and no linked accounts → load the bundled demo
-  // dataset so the very first screen is a fully populated, explorable dashboard
-  // (not an empty shell). No-op once demo mode or real data exists.
+  // Fresh install (or every web-demo cold start) with no keys and no linked
+  // accounts → load the demo dataset so the first screen is a fully populated,
+  // explorable dashboard (not an empty shell). No-op once data exists.
   ensureFirstRunDemo();
 
   // Seed privacy mode from the cookie before any server component formats
@@ -71,18 +75,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <CurrencyInit currency={displayCurrency} rates={ratesMap} />
       <RegisterSW />
       <div className="mx-auto flex min-h-dvh max-w-[1500px]">
-        <Sidebar accounts={accounts} />
+        <Sidebar accounts={accounts} webDemo={webDemo} />
         <div className="flex min-w-0 flex-1 flex-col">
-          {demoInitial && <DemoBanner initial={demoInitial} />}
+          {demoInitial && <DemoBanner initial={demoInitial} webDemo={webDemo} />}
           {/* pt uses the iOS safe-area inset so the notch/status bar never
               covers the controls in standalone (Add to Home Screen) mode. */}
           <header className="material sticky top-0 z-20 flex items-center gap-2 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-4 sm:px-8">
-            <MobileNav />
+            <MobileNav webDemo={webDemo} />
             <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
               <CurrencySwitcher current={displayCurrency} />
               <ThemeToggle initialTheme={theme} />
               <ObfuscationToggle initialHidden={obfHidden} />
-              <SyncButton />
+              {/* Read-only demo: no live Sync — offer the download instead. */}
+              {webDemo ? <BuyLink label="Download" className="!px-3 !py-1.5" /> : <SyncButton />}
             </div>
           </header>
           <main className="flex-1 px-5 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 lg:pt-10">

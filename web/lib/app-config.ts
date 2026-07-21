@@ -168,7 +168,8 @@ export function isFirstRunDone(): boolean {
   return readSetting(K_FIRST_RUN_DONE) === "1";
 }
 
-/** Mark first-run handling complete (see isFirstRunDone). */
+/** Mark first-run handling complete (see isFirstRunDone). Call inside the
+ * ensureFirstRunDemo transaction so it commits atomically with the seed. */
 export function markFirstRunDone(): void {
   writeSetting(K_FIRST_RUN_DONE, "1");
 }

@@ -323,18 +323,43 @@ export function seedDemoData(): { transactions: number; budgets: number } {
  * Returns true if it seeded this call (the caller should re-read data).
  */
 export function ensureFirstRunDemo(): boolean {
+  // Fast path: already handled (the common case on every request after the first).
   if (isFirstRunDone()) return false;
 
-  // Real credentials or accounts already present (e.g. env-configured keys, or a
-  // migrated DB) → this isn't a fresh install; mark handled and never seed demo.
-  const hasItems = db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM items`)?.n ?? 0;
-  if (hasPlaidCredentials() || hasItems > 0) {
-    markFirstRunDone();
-    return false;
-  }
+  // Serialize the whole check-and-seed in one IMMEDIATE transaction. Next renders
+  // the layout and page for a request in parallel — in production each in its own
+  // worker with its own SQLite connection — and both call this. Without an
+  // exclusive lock their seed passes interleave and corrupt the data (duplicate
+  // rows) or lose the demo flag. BEGIN IMMEDIATE grabs the write lock up front, so
+  // the second caller blocks, then re-checks and finds the work already done.
+  // The read-only web demo (in-memory DB) must ALWAYS show the demo dataset, even
+  // if stray Plaid env vars are present on the host — so it skips the "already
+  // configured" bail below.
+  const webDemo = Boolean(process.env.DEMO_DB);
 
-  seedDemoData();
-  setDemoMode(true);
-  markFirstRunDone();
-  return true;
+  return db.transaction(
+    () => {
+      if (isFirstRunDone()) return false;
+
+      // Already have data (real accounts, or demo already seeded this instance).
+      const hasItems = db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM items`)?.n ?? 0;
+      if (hasItems > 0) {
+        markFirstRunDone();
+        return false;
+      }
+
+      // Real install with keys entered but nothing linked yet → let the user
+      // onboard for real; don't inject demo data. (The web demo always seeds.)
+      if (!webDemo && hasPlaidCredentials()) {
+        markFirstRunDone();
+        return false;
+      }
+
+      seedDemoData();
+      setDemoMode(true);
+      markFirstRunDone();
+      return true;
+    },
+    { behavior: "immediate" },
+  );
 }

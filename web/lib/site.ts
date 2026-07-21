@@ -35,3 +35,15 @@ export function hasCheckout(): boolean {
 export function primaryCtaHref(): string {
   return hasCheckout() ? SITE.checkoutUrl : SITE.downloadUrl;
 }
+
+/** Where the "try the live demo" CTA points — the read-only demo dashboard. */
+export const DEMO_HREF = "/overview";
+
+/**
+ * True on the read-only web-demo build: the marketing deploy sets DEMO_DB=1 to
+ * serve a live, in-memory demo dashboard (see db/index.ts). Server-only — the
+ * flag isn't exposed to the client (reads false there), so only call this from
+ * server components deciding whether to surface the live-demo CTA. */
+export function demoEnabled(): boolean {
+  return Boolean(process.env.DEMO_DB);
+}

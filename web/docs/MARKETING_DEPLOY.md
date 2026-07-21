@@ -34,6 +34,26 @@ The purchase/download CTA is driven entirely by env (`lib/site.ts`): with a
 checkout URL set the button is "Buy · $29"; with none it falls back to the free
 GitHub download, so the page is never a dead end.
 
+### Live demo (`DEMO_DB=1`)
+
+Adding **`DEMO_DB=1`** turns on a live, read-only demo of the real dashboard so
+visitors can try budgetr before downloading:
+
+- The landing/`#screens` CTAs surface a **"Try the live demo"** button → `/overview`.
+- `app/(app)/layout.tsx` relaxes its `notFound()` so the dashboard routes render
+  (they still 404 on a marketing deploy *without* `DEMO_DB`).
+- `db/index.ts` opens an **in-memory** SQLite DB (never disk), applies
+  `db/demo-schema.ts`, and `lib/demo-data.ts` seeds the "Jordan Lee" dataset on
+  the first request of each serverless cold start — so it works on Vercel's
+  read-only filesystem and stays date-fresh.
+- The dashboard is read-only: Sync, Connect, and Settings are hidden, and the
+  demo banner's CTA becomes **"Download budgetr."** (Deep in-page edits still
+  operate on the visitor's isolated in-memory copy and reset on the next cold
+  start.)
+
+> After any schema change (new migration), regenerate the demo schema:
+> `bash scripts/gen-demo-schema.sh` (rewrites `db/demo-schema.ts`).
+
 ---
 
 ## Environment variables
@@ -41,6 +61,7 @@ GitHub download, so the page is never a dead end.
 | Variable | Required | Purpose | Example |
 | --- | --- | --- | --- |
 | `MARKETING_ONLY` | ✅ | Enables marketing mode (build + runtime). | `1` |
+| `DEMO_DB` | optional | Serves a **live, read-only demo dashboard** on the marketing site (the "Try the live demo" CTA → `/overview`). Backed by an **in-memory** SQLite DB seeded per cold start (no persistent filesystem needed — safe on Vercel serverless), re-seeded with current dates each time. Unset ⇒ dashboard routes 404 as before. | `1` |
 | `NEXT_PUBLIC_CHECKOUT_URL` | ✅ (to sell) | Polar hosted checkout link — the "Buy" CTA. Unset ⇒ free-download fallback. | `https://buy.polar.sh/polar_cl_xxxxxxxx` |
 | `NEXT_PUBLIC_SITE_URL` | ✅ | Canonical origin for OpenGraph / `metadataBase`. | `https://budgetr.app` |
 | `NEXT_PUBLIC_PRICE` | optional | Display price (default `$29`). | `$29` |
