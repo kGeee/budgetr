@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { PayoffDiagram } from "@/components/payoff-diagram";
 import {
   AllocationDonut,
   PIE_COLORS,
@@ -1029,17 +1030,26 @@ const fmtSigned = (n: number | null, currency: string) =>
 /** Metric row shared by the mobile cards: right value, colored day %, and a summary line. */
 function MobileCardBody({ m }: { m: RowMetrics }) {
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
-      {m.qty != null && (
+    <>
+      {/* Allocation bar — mirrors the companion app's ranked-positions look. */}
+      <div className="mt-2.5 h-[3px] overflow-hidden rounded-full bg-[var(--line)]">
+        <span
+          className="block h-full rounded-full bg-[var(--brass)]"
+          style={{ width: `${Math.max(2, Math.min(100, m.weight))}%` }}
+        />
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
+        {m.qty != null && (
+          <span>
+            Qty <span className="mono text-[var(--paper)]/80">{m.qty.toLocaleString()}</span>
+          </span>
+        )}
         <span>
-          Qty <span className="mono text-[var(--paper)]/80">{m.qty.toLocaleString()}</span>
+          P&amp;L <span className={`mono ${signedColor(m.pnl)}`}>{fmtSigned(m.pnl, m.currency)}</span>
         </span>
-      )}
-      <span>
-        P&amp;L <span className={`mono ${signedColor(m.pnl)}`}>{fmtSigned(m.pnl, m.currency)}</span>
-      </span>
-      <span className="mono">{m.weight.toFixed(1)}%</span>
-    </div>
+        <span className="mono">{m.weight.toFixed(1)}% of portfolio</span>
+      </div>
+    </>
   );
 }
 
@@ -1050,7 +1060,7 @@ function HoldingCardMobile({ h, m }: { h: HoldingRow; m: RowMetrics }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+            <span className="mono font-semibold tracking-tight text-[var(--brass)]">{h.ticker ?? "—"}</span>
             {isOptionable(h) && <OptionsChip ticker={h.ticker as string} />}
           </div>
           {h.securityName && (
@@ -1084,7 +1094,7 @@ function OptionGroupCardMobile({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-[var(--brass)]">{underlying}</span>
+            <span className="mono font-semibold tracking-tight text-[var(--brass)]">{underlying}</span>
             <OptionsChip ticker={underlying} />
           </div>
           <p className="mt-0.5 text-xs text-[var(--muted)]">
@@ -1312,6 +1322,48 @@ function OptionGroupRow({
                         )}
                       </div>
                     </div>
+                    {/* The options desk's signature payoff curve, right where the
+                        position lives — economics chips + expiry P&L diagram. */}
+                    {st.payoffLegs && st.payoffLegs.length > 0 && (
+                      <div className="mt-3 border-t border-line/60 pt-3">
+                        <div className="mb-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                          <span className="text-[var(--muted)]">
+                            Max profit{" "}
+                            <span className="mono text-[var(--jade)]">
+                              {st.maxProfitUnbounded
+                                ? "Unlimited"
+                                : st.maxProfit != null
+                                  ? formatMoney(st.maxProfit, currency)
+                                  : "—"}
+                            </span>
+                          </span>
+                          <span className="text-[var(--muted)]">
+                            Max loss{" "}
+                            <span className="mono text-[var(--coral)]">
+                              {st.maxLossUnbounded
+                                ? "Unlimited"
+                                : st.maxLoss != null
+                                  ? formatMoney(st.maxLoss, currency)
+                                  : "—"}
+                            </span>
+                          </span>
+                          {(st.breakevens?.length ?? 0) > 0 && (
+                            <span className="text-[var(--muted)]">
+                              Breakeven{" "}
+                              <span className="mono text-[var(--paper)]">
+                                {st.breakevens!.map((b) => formatStrike(b)).join(" · ")}
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                        <PayoffDiagram
+                          legs={st.payoffLegs}
+                          currentPrice={underlyingPrices[underlying] ?? null}
+                          breakevens={st.breakevens}
+                          className="w-full"
+                        />
+                      </div>
+                    )}
                     <ul className="mt-2 space-y-1 border-t border-line/60 pt-2">
                       {stLegs.map(({ h, p }) => {
                         const long = (h.quantity ?? 0) >= 0;
