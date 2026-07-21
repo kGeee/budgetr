@@ -155,3 +155,61 @@ describe("pairing store", () => {
     expect(store.getAppliedOpIds()).toEqual([]);
   });
 });
+
+describe("investments read-model", () => {
+  it("builds spark, sectors, and options strategies from holdings", async () => {
+    const ts = new Date(NOW * 1000);
+    db.insert(schema.accounts)
+      .values({ id: "acc-brokerage", itemId: "item-1", source: "manual", name: "Brokerage", type: "investment", currentBalance: 20000, updatedAt: ts })
+      .run();
+    db.insert(schema.securities)
+      .values([
+        { id: "sec-voo", tickerSymbol: "VOO", name: "Vanguard S&P 500", type: "etf" },
+        // bull call spread on AAPL: long 190C / short 200C, same expiry
+        { id: "sec-c190", tickerSymbol: "AAPL260918C00190000", name: "AAPL Call 190", type: "derivative" },
+        { id: "sec-c200", tickerSymbol: "AAPL260918C00200000", name: "AAPL Call 200", type: "derivative" },
+      ])
+      .run();
+    db.insert(schema.holdings)
+      .values([
+        { id: "acc-brokerage:sec-voo", accountId: "acc-brokerage", securityId: "sec-voo", quantity: 30, institutionValue: 15000, updatedAt: ts },
+        { id: "acc-brokerage:sec-c190", accountId: "acc-brokerage", securityId: "sec-c190", quantity: 1, institutionValue: 1200, updatedAt: ts },
+        { id: "acc-brokerage:sec-c200", accountId: "acc-brokerage", securityId: "sec-c200", quantity: -1, institutionValue: -400, updatedAt: ts },
+      ])
+      .run();
+    db.insert(schema.investmentSectors)
+      .values([
+        { sectorKey: "sym:VOO", sector: "Broad Market" },
+        { sectorKey: "sym:AAPL", sector: "Technology" },
+      ])
+      .run();
+    db.insert(schema.balanceSnapshots)
+      .values([
+        { accountId: "acc-brokerage", date: "2026-07-19", balance: 19000, type: "investment" },
+        { accountId: "acc-brokerage", date: "2026-07-20", balance: 20000, type: "investment" },
+      ])
+      .run();
+
+    const summary = core.buildSummary(buildReadModel(NOW));
+    core.assertValidSummary(summary);
+    const inv = summary.investments!;
+
+    expect(inv.valueCents).toBe(1_580_000); // 15000 + 1200 - 400 dollars → cents
+    expect(inv.spark.map((p) => p.cents)).toEqual([1_900_000, 2_000_000]);
+
+    const sectorMap = Object.fromEntries(inv.sectors.map((sl) => [sl.sector, sl.cents]));
+    expect(sectorMap["Broad Market"]).toBe(1_500_000);
+    expect(sectorMap["Technology"]).toBe(80_000); // both option legs under AAPL
+
+    expect(inv.strategies).toHaveLength(1);
+    const st = inv.strategies[0]!;
+    expect(st.underlying).toBe("AAPL");
+    expect(st.label).toBe("Bull call spread");
+    expect(st.cents).toBe(80_000);
+    expect(Object.keys(st).sort()).toEqual(["cents", "detail", "expiry", "id", "label", "underlying"]);
+
+    // option legs fold into their underlying in positions
+    expect(summary.positions.find((p) => p.symbol === "AAPL")?.cents).toBe(80_000);
+    expect(summary.positions.some((p) => p.symbol.includes("C00190000"))).toBe(false);
+  });
+});

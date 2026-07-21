@@ -38,6 +38,10 @@ export interface Summary {
   recent: TxnSummary[]; // most-recent first; ~40 items
   positions: PositionSummary[]; // descending by value
   alerts: AlertSummary[];
+  investments?: InvestmentsSummary; // optional: older writers simply omit it
+  // Daily spending totals (positive cents per day, days with no spend absent),
+  // ascending, ≤ MAX_SPARK_POINTS. Backs the Budgets/Activity charts.
+  spendByDay?: SparkPoint[];
 }
 
 export interface SparkPoint {
@@ -76,6 +80,33 @@ export interface PositionSummary {
   symbol: string;
   cents: number; // current market value
   // NOTE: no cost basis, no greeks, no lots. The phone must never receive these.
+}
+
+// ── Investments (optional Summary extension — added post-v1, no bump) ──
+// Everything here is derived and lossy: market values, sector buckets, and
+// PRE-RENDERED strategy labels. maxProfit / maxLoss / breakevens / payoff
+// legs are basis-derived on the desktop and MUST NOT cross the wire —
+// validators are strict-keyed on these shapes to enforce that.
+
+export interface SectorSlice {
+  sector: string; // display name, e.g. "Technology", "Other", "Unclassified"
+  cents: number; // current market value in this bucket
+}
+
+export interface StrategySummary {
+  id: string; // stable slug, e.g. "AAPL:2026-08-21:bull-call-spread"
+  underlying: string; // ticker
+  label: string; // pre-rendered, e.g. "Bull call spread"
+  detail: string; // pre-rendered, e.g. "$430 / $450 · Aug 21 '26"
+  expiry: number; // unix seconds — drives "topical" ordering + DTE display
+  cents: number; // current market value of the structure (signed)
+}
+
+export interface InvestmentsSummary {
+  valueCents: number;
+  spark: SparkPoint[]; // investment accounts only; ascending; ≤ MAX_SPARK_POINTS
+  sectors: SectorSlice[]; // descending by value; ≤ MAX_SECTOR_SLICES (rest in "Other")
+  strategies: StrategySummary[]; // soonest expiry first; ≤ MAX_STRATEGIES
 }
 
 export type AlertKind = 'overspend' | 'large_move' | 'low_balance' | 'other';
@@ -119,3 +150,5 @@ export interface DismissAlertOp extends OpBase {
 export const MAX_APPLIED_OP_IDS = 200;
 export const MAX_RECENT_TXNS = 40;
 export const MAX_SPARK_POINTS = 92;
+export const MAX_SECTOR_SLICES = 10;
+export const MAX_STRATEGIES = 8;

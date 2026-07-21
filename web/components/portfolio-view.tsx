@@ -900,33 +900,36 @@ function HoldingRowView({
         </td>
         <td className="py-3.5 pr-3 pl-1">
           <div className="flex flex-col gap-1">
-            <span className="inline-flex items-center gap-2">
-              <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-              {isOptionable(h) && (
-                <Link
-                  href={`/investments/options/${encodeURIComponent(h.ticker as string)}`}
-                  title={`Options desk for ${h.ticker}`}
-                  className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
-                >
-                  Options
-                  <ArrowUpRight size={10} />
-                </Link>
-              )}
-              {h.ticker && !parseOccSymbol(h.ticker) && (
-                <Link
-                  href={`/fundamentals?ticker=${encodeURIComponent(h.ticker)}`}
-                  title={`Fundamentals for ${h.ticker}`}
-                  className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
-                >
-                  Fundamentals
-                  <ArrowUpRight size={10} />
-                </Link>
-              )}
+            <span className="inline-flex items-center gap-2.5">
+              <span className="mono font-semibold tracking-tight text-[var(--brass)]">{h.ticker ?? "—"}</span>
               <span
                 className="max-w-[240px] truncate text-[var(--muted)]"
                 title={h.securityName ?? undefined}
               >
                 {cleanSecurityName(h.securityName)}
+              </span>
+              {/* Quiet row actions — revealed on hover so 45 rows don't shout. */}
+              <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 md:inline-flex">
+                {isOptionable(h) && (
+                  <Link
+                    href={`/investments/options/${encodeURIComponent(h.ticker as string)}`}
+                    title={`Options desk for ${h.ticker}`}
+                    className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+                  >
+                    Options
+                    <ArrowUpRight size={10} />
+                  </Link>
+                )}
+                {h.ticker && !parseOccSymbol(h.ticker) && (
+                  <Link
+                    href={`/fundamentals?ticker=${encodeURIComponent(h.ticker)}`}
+                    title={`Fundamentals for ${h.ticker}`}
+                    className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+                  >
+                    Fundamentals
+                    <ArrowUpRight size={10} />
+                  </Link>
+                )}
               </span>
               {h.manual && (
                 <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
@@ -1240,18 +1243,18 @@ function OptionGroupRow({
           </span>
         </td>
         <td className="py-3.5 pr-3 pl-1">
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <span className="font-medium text-[var(--brass)]">{underlying}</span>
+          <span className="inline-flex flex-wrap items-center gap-2.5">
+            <span className="mono font-semibold tracking-tight text-[var(--brass)]">{underlying}</span>
+            <span className="text-[var(--muted)]">{summary}</span>
             <Link
               href={`/investments/options/${encodeURIComponent(underlying)}`}
               onClick={(e) => e.stopPropagation()}
               title={`Options desk for ${underlying}`}
-              className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+              className="hidden items-center gap-0.5 text-[11px] text-[var(--faint)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-[var(--brass)] md:inline-flex"
             >
-              options
+              Options
               <ArrowUpRight size={10} />
             </Link>
-            <span className="text-[var(--muted)]">{summary}</span>
             {Number.isFinite(soonestDte) && (
               <span
                 className={`mono rounded px-1.5 py-0.5 text-[10px] ${
@@ -1910,15 +1913,15 @@ function SignedCurrencyCell({ amount, currency }: { amount: number | null; curre
 function WeightCell({ pct }: { pct: number }) {
   const w = Math.max(0, Math.min(100, pct));
   return (
-    <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">
-      <span className="inline-flex items-center justify-end gap-2">
-        <span className="hidden h-1 w-10 overflow-hidden rounded-full bg-[var(--line)] sm:inline-block">
+    <td className="mono px-3 py-3.5 text-right">
+      <span className="inline-flex items-center justify-end gap-2.5">
+        <span className="hidden h-[3px] w-14 overflow-hidden rounded-full bg-[var(--line)] sm:inline-block">
           <span
-            className="block h-full rounded-full bg-[var(--brass-dim)]"
-            style={{ width: `${w}%` }}
+            className="block h-full rounded-full bg-[var(--brass)]"
+            style={{ width: `${Math.max(2, w)}%` }}
           />
         </span>
-        {pct.toFixed(1)}%
+        <span className="min-w-[3.25rem] text-[var(--paper)]">{pct.toFixed(1)}%</span>
       </span>
     </td>
   );

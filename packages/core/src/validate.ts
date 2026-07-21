@@ -43,7 +43,11 @@ export class ContractVersionError extends Error {
 const ACCOUNT_KINDS = new Set(['depository', 'credit', 'investment', 'loan', 'other']);
 const BUDGET_STATES = new Set(['ok', 'warn', 'over']);
 const ALERT_KINDS = new Set(['overspend', 'large_move', 'low_balance', 'other']);
+// STRICT-keyed shapes: anything beyond these keys is a privacy leak (basis,
+// greeks, payoff legs, lots) and rejects the whole summary.
 const POSITION_KEYS = new Set(['symbol', 'cents']);
+const SECTOR_KEYS = new Set(['sector', 'cents']);
+const STRATEGY_KEYS = new Set(['id', 'underlying', 'label', 'detail', 'expiry', 'cents']);
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -66,6 +70,19 @@ function reqArr(x: unknown, path: string): asserts x is unknown[] {
   req(Array.isArray(x), path, 'must be an array');
 }
 
+function validateSpark(x: unknown, path: string): void {
+  reqArr(x, path);
+  let prevD = -Infinity;
+  x.forEach((p, i) => {
+    const pp = `${path}[${i}]`;
+    req(isRecord(p), pp, 'must be an object');
+    reqInt(p.d, `${pp}.d`);
+    reqInt(p.cents, `${pp}.cents`);
+    req(p.d > prevD, `${pp}.d`, 'spark must be strictly ascending by day');
+    prevD = p.d as number;
+  });
+}
+
 export function assertValidSummary(s: unknown): asserts s is Summary {
   req(isRecord(s), '$', 'must be an object');
   reqInt(s.v, '$.v');
@@ -78,16 +95,7 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
 
   req(isRecord(s.netWorth), '$.netWorth', 'must be an object');
   reqInt(s.netWorth.cents, '$.netWorth.cents');
-  reqArr(s.netWorth.spark, '$.netWorth.spark');
-  let prevD = -Infinity;
-  s.netWorth.spark.forEach((p, i) => {
-    const path = `$.netWorth.spark[${i}]`;
-    req(isRecord(p), path, 'must be an object');
-    reqInt(p.d, `${path}.d`);
-    reqInt(p.cents, `${path}.cents`);
-    req(p.d > prevD, `${path}.d`, 'spark must be strictly ascending by day');
-    prevD = p.d;
-  });
+  validateSpark(s.netWorth.spark, '$.netWorth.spark');
 
   reqArr(s.accounts, '$.accounts');
   s.accounts.forEach((a, i) => {
@@ -143,6 +151,43 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
     reqStr(a.text, `${path}.text`);
     reqInt(a.ts, `${path}.ts`);
   });
+
+  if (s.spendByDay !== undefined) validateSpark(s.spendByDay, '$.spendByDay');
+
+  if (s.investments !== undefined) {
+    const inv = s.investments;
+    req(isRecord(inv), '$.investments', 'must be an object');
+    reqInt(inv.valueCents, '$.investments.valueCents');
+    validateSpark(inv.spark, '$.investments.spark');
+
+    reqArr(inv.sectors, '$.investments.sectors');
+    inv.sectors.forEach((sl, i) => {
+      const path = `$.investments.sectors[${i}]`;
+      req(isRecord(sl), path, 'must be an object');
+      reqStr(sl.sector, `${path}.sector`);
+      reqInt(sl.cents, `${path}.cents`);
+      for (const k of Object.keys(sl)) {
+        req(SECTOR_KEYS.has(k), `${path}.${k}`, 'sector slices may only carry sector + cents');
+      }
+    });
+
+    reqArr(inv.strategies, '$.investments.strategies');
+    inv.strategies.forEach((st, i) => {
+      const path = `$.investments.strategies[${i}]`;
+      req(isRecord(st), path, 'must be an object');
+      reqStr(st.id, `${path}.id`);
+      reqStr(st.underlying, `${path}.underlying`);
+      reqStr(st.label, `${path}.label`);
+      req(typeof st.detail === 'string', `${path}.detail`, 'must be a string');
+      reqInt(st.expiry, `${path}.expiry`);
+      reqInt(st.cents, `${path}.cents`);
+      // STRICT: maxProfit/maxLoss/breakevens/payoffLegs are basis-derived and
+      // must never cross the wire.
+      for (const k of Object.keys(st)) {
+        req(STRATEGY_KEYS.has(k), `${path}.${k}`, 'strategies carry only pre-rendered labels and value');
+      }
+    });
+  }
 }
 
 function assertValidOp(op: unknown, path: string): asserts op is Op {

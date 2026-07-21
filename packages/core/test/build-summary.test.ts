@@ -176,3 +176,60 @@ describe('computeBudgetState', () => {
     expect(computeBudgetState(1, 0)).toBe('over');
   });
 });
+
+describe('investments extension', () => {
+  const inv = () => ({
+    valueCents: 1_200_000,
+    spark: [
+      { d: 1_749_000_000, cents: 1_100_000 },
+      { d: 1_749_086_400, cents: 1_200_000 },
+    ],
+    sectors: Array.from({ length: 14 }, (_, i) => ({ sector: `Sector${String(i).padStart(2, '0')}`, cents: (14 - i) * 10_000 })),
+    strategies: [
+      {
+        id: 'AAPL:2026-08-21:bull-call-spread',
+        underlying: 'AAPL',
+        label: 'Bull call spread',
+        detail: '$430 / $450 · Aug 21 ’26',
+        expiry: 1_787_000_000,
+        cents: 45_000,
+        // basis-derived fields that MUST be stripped:
+        maxProfit: 2_000,
+        maxLoss: 500,
+        payoffLegs: [{ strike: 430 }],
+      },
+      {
+        id: 'SPY:2026-07-24:short-put',
+        underlying: 'SPY',
+        label: 'Short put',
+        detail: '$560 · Jul 24 ’26',
+        expiry: 1_784_700_000,
+        cents: -12_000,
+      },
+    ],
+  });
+
+  it('is omitted when the model has no investments', () => {
+    const s = buildSummary(baseModel());
+    expect(s.investments).toBeUndefined();
+  });
+
+  it('buckets sectors past the cap into "Other" and keeps them descending', () => {
+    const s = buildSummary(baseModel({ investments: inv() }));
+    const sectors = s.investments!.sectors;
+    expect(sectors).toHaveLength(10);
+    expect(sectors.at(-1)!.sector).toBe('Other');
+    const total = sectors.reduce((a, x) => a + x.cents, 0);
+    expect(total).toBe(inv().sectors.reduce((a, x) => a + x.cents, 0));
+    for (let i = 1; i < sectors.length - 1; i++) {
+      expect(sectors[i - 1]!.cents).toBeGreaterThanOrEqual(sectors[i]!.cents);
+    }
+  });
+
+  it('sorts strategies soonest-expiry-first and strips basis-derived fields', () => {
+    const s = buildSummary(baseModel({ investments: inv() }));
+    const st = s.investments!.strategies;
+    expect(st.map((x) => x.underlying)).toEqual(['SPY', 'AAPL']); // topical first
+    expect(Object.keys(st[1]!).sort()).toEqual(['cents', 'detail', 'expiry', 'id', 'label', 'underlying']);
+  });
+});

@@ -104,3 +104,41 @@ describe('assertValidOutbox', () => {
     expect(() => assertValidOutbox(b)).toThrow(ContractValidationError);
   });
 });
+
+describe('investments validation', () => {
+  const withInvestments = () => {
+    const s = validSummary();
+    s.investments = {
+      valueCents: 100,
+      spark: [{ d: 1, cents: 100 }],
+      sectors: [{ sector: 'Technology', cents: 100 }],
+      strategies: [
+        { id: 'x', underlying: 'AAPL', label: 'Long call', detail: '$200 · Aug 21', expiry: 1_787_000_000, cents: 100 },
+      ],
+    };
+    return s;
+  };
+
+  it('accepts a valid investments block (and summaries without one)', () => {
+    expect(() => assertValidSummary(withInvestments())).not.toThrow();
+    expect(() => assertValidSummary(validSummary())).not.toThrow();
+  });
+
+  it('rejects basis-derived fields on strategies — the privacy gate', () => {
+    const s = withInvestments();
+    s.investments.strategies[0].maxProfit = 2000;
+    expect(() => assertValidSummary(s)).toThrow(/pre-rendered/);
+  });
+
+  it('rejects extra fields on sector slices', () => {
+    const s = withInvestments();
+    s.investments.sectors[0].costBasisCents = 1;
+    expect(() => assertValidSummary(s)).toThrow(/sector \+ cents/);
+  });
+
+  it('rejects float cents inside investments', () => {
+    const s = withInvestments();
+    s.investments.valueCents = 10.5;
+    expect(() => assertValidSummary(s)).toThrow(ContractValidationError);
+  });
+});

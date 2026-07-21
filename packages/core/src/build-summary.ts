@@ -8,11 +8,15 @@
 import {
   MAX_APPLIED_OP_IDS,
   MAX_RECENT_TXNS,
+  MAX_SECTOR_SLICES,
   MAX_SPARK_POINTS,
+  MAX_STRATEGIES,
   SUMMARY_VERSION,
   type AccountKind,
   type AlertKind,
   type BudgetState,
+  type InvestmentsSummary,
+  type SparkPoint,
   type Summary,
 } from './contracts.js';
 import { assertValidSummary } from './validate.js';
@@ -38,6 +42,24 @@ export interface DesktopReadModel {
   }>;
   positions: Array<{ symbol: string; cents: number; [extra: string]: unknown }>;
   alerts: Array<{ id: string; kind: AlertKind; text: string; ts: number }>;
+  // Daily spending totals, positive cents. Optional.
+  spendByDay?: Array<{ d: number; cents: number }>;
+  // Optional investments detail. Strategy inputs may carry extra fields
+  // (maxProfit, payoffLegs, …) — buildSummary strips to the contract shape.
+  investments?: {
+    valueCents: number;
+    spark: Array<{ d: number; cents: number }>;
+    sectors: Array<{ sector: string; cents: number }>;
+    strategies: Array<{
+      id: string;
+      underlying: string;
+      label: string;
+      detail: string;
+      expiry: number;
+      cents: number;
+      [extra: string]: unknown;
+    }>;
+  };
 }
 
 // warn at ≥85% of limit, over when spent exceeds limit. Integer-only math.
@@ -62,17 +84,56 @@ function seconds(x: number, what: string): number {
   return cents(x, what); // same rule: finite → integer
 }
 
-export function buildSummary(model: DesktopReadModel): Summary {
-  // Sort ascending, round, then dedupe by day (last write wins) so the spark
-  // is strictly ascending — the validator rejects duplicate day keys.
-  const sparkByDay = new Map<number, number>();
-  for (const [i, p] of [...model.netWorthSpark].sort((a, b) => a.d - b.d).entries()) {
-    sparkByDay.set(seconds(p.d, `spark[${i}].d`), cents(p.cents, `spark[${i}].cents`));
+// Sort ascending, round, then dedupe by day (last write wins) so the spark is
+// strictly ascending — the validator rejects duplicate day keys.
+function buildSpark(raw: Array<{ d: number; cents: number }>, what: string): SparkPoint[] {
+  const byDay = new Map<number, number>();
+  for (const [i, p] of [...raw].sort((a, b) => a.d - b.d).entries()) {
+    byDay.set(seconds(p.d, `${what}[${i}].d`), cents(p.cents, `${what}[${i}].cents`));
   }
-  const spark = [...sparkByDay.entries()]
+  return [...byDay.entries()]
     .sort((a, b) => a[0] - b[0])
     .slice(-MAX_SPARK_POINTS)
     .map(([d, c]) => ({ d, cents: c }));
+}
+
+function buildInvestments(inv: NonNullable<DesktopReadModel['investments']>): InvestmentsSummary {
+  // Descending by value; everything past the cap collapses into "Other" so
+  // the donut stays legible and the blob stays bounded.
+  const sorted = [...inv.sectors]
+    .map((s) => ({ sector: s.sector, cents: cents(s.cents, `sector ${s.sector}`) }))
+    .sort((a, b) => b.cents - a.cents || (a.sector < b.sector ? -1 : a.sector > b.sector ? 1 : 0));
+  const kept = sorted.slice(0, MAX_SECTOR_SLICES - 1);
+  const rest = sorted.slice(MAX_SECTOR_SLICES - 1);
+  const sectors =
+    rest.length > 1
+      ? [...kept, { sector: 'Other', cents: rest.reduce((acc, s) => acc + s.cents, 0) }]
+      : sorted.slice(0, MAX_SECTOR_SLICES);
+
+  // "Topical" = soonest expiry first. Strip to exactly the contract keys:
+  // anything basis-derived (maxProfit, payoffLegs, …) dies here.
+  const strategies = [...inv.strategies]
+    .sort((a, b) => a.expiry - b.expiry || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .slice(0, MAX_STRATEGIES)
+    .map((st) => ({
+      id: st.id,
+      underlying: st.underlying,
+      label: st.label,
+      detail: st.detail,
+      expiry: seconds(st.expiry, `strategy ${st.id} expiry`),
+      cents: cents(st.cents, `strategy ${st.id}`),
+    }));
+
+  return {
+    valueCents: cents(inv.valueCents, 'investments value'),
+    spark: buildSpark(inv.spark, 'investments.spark'),
+    sectors,
+    strategies,
+  };
+}
+
+export function buildSummary(model: DesktopReadModel): Summary {
+  const spark = buildSpark(model.netWorthSpark, 'spark');
 
   const accounts = [...model.accounts]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -118,6 +179,8 @@ export function buildSummary(model: DesktopReadModel): Summary {
     recent,
     positions,
     alerts,
+    ...(model.investments ? { investments: buildInvestments(model.investments) } : {}),
+    ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
   };
 
   assertValidSummary(summary); // generation is also the trust edge
