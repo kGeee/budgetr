@@ -38,6 +38,34 @@ export function categorySlug(plaid: string): string {
 }
 
 /**
+ * The holding category for money fronted on behalf of other people (see the
+ * shared-expenses tables in db/schema.ts). It maps to no Plaid primary — nothing
+ * lands here automatically; only the bill splitter and settlement flow assign it.
+ *
+ * The `transfer` group is what makes the accounting work: every spend/income
+ * query in lib/queries.ts skips that group, so the reimbursable slice of a split
+ * bill drops out of your category spend and the repayment inflows don't read as
+ * income. Seeded by fixed id (not plaidPrimary, which is null here).
+ */
+export const REIMBURSABLE_CATEGORY_ID = "cat_reimbursable";
+
+export function seedReimbursableCategory(): number {
+  return db
+    .insert(categories)
+    .values({
+      id: REIMBURSABLE_CATEGORY_ID,
+      name: "Reimbursable",
+      icon: "Users",
+      group: "transfer",
+      plaidPrimary: null,
+      sortOrder: CATEGORY_SEED.length,
+      archived: false,
+    })
+    .onConflictDoNothing({ target: categories.id })
+    .run().changes;
+}
+
+/**
  * Idempotent category seed — inserts any missing plaidPrimary, never clobbering
  * an existing mapping (so user renames/archives survive). Returns how many rows
  * were newly inserted.
@@ -61,7 +89,7 @@ export function seedCategories(): number {
       .run();
     inserted += res.changes;
   }
-  return inserted;
+  return inserted + seedReimbursableCategory();
 }
 
 /** Number of categories currently in the table. */

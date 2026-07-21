@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { CategoryIcon } from "@/components/category-pill";
+import { SplitBillButton } from "@/components/split-bill-modal";
 import {
   addTagToTransaction,
   applyCategoryToVendor,
@@ -285,6 +286,11 @@ export function TransactionDetail({
               <Field label="Split">
                 {/* key remounts per transaction → fresh load of that txn's splits */}
                 <SplitEditor key={t.id} transaction={t} categories={categories} />
+                {/* Splitting with people also writes category splits, so the two
+                    editors are alternatives — the modal warns before replacing. */}
+                <div className="mt-2">
+                  <SplitBillButton key={t.id} transaction={t} categories={categories} />
+                </div>
               </Field>
 
               {/* Recurring */}
