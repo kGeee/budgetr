@@ -83,3 +83,46 @@ export async function getQuotes(symbols: string[]): Promise<Record<string, Quote
 
   return out;
 }
+
+// ── Earnings calendar ────────────────────────────────────────────────
+//
+// A single unfiltered /calendar/earnings call returns every US company
+// reporting in the window, so we fetch the whole window once and index it by
+// symbol rather than making one rate-limited call per ticker. This is exactly
+// what an options scanner needs: "does this underlying report before my expiry?"
+// is the single most important risk flag for selling premium.
+
+const YMD = (d: Date) => d.toISOString().slice(0, 10);
+
+type FinnhubEarningsRow = { symbol?: string; date?: string };
+
+/**
+ * Map of upper-cased symbol → next earnings date (YYYY-MM-DD) within the given
+ * window (default: today through +90d). Only the earliest upcoming date per
+ * symbol is kept. Empty object when no key is configured or the call fails, so
+ * callers degrade to "no known earnings" rather than breaking.
+ */
+export async function getEarningsCalendar(
+  from: string = YMD(new Date()),
+  to: string = YMD(new Date(Date.now() + 90 * 86_400_000)),
+): Promise<Record<string, string>> {
+  const token = finnhubToken();
+  if (!token) return {};
+
+  try {
+    const url = `${BASE}/calendar/earnings?from=${from}&to=${to}&token=${token}`;
+    const res = await fetch(url, { next: { revalidate: 43_200 } }); // 12h
+    if (!res.ok) return {};
+    const j = (await res.json()) as { earningsCalendar?: FinnhubEarningsRow[] };
+    const out: Record<string, string> = {};
+    for (const row of j.earningsCalendar ?? []) {
+      const sym = row.symbol?.trim().toUpperCase();
+      if (!sym || !row.date) continue;
+      // Keep the earliest date per symbol within the window.
+      if (!out[sym] || row.date < out[sym]) out[sym] = row.date;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
