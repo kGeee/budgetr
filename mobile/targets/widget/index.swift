@@ -20,6 +20,11 @@ struct WidgetPayload: Codable {
     var spark: [Int] // most recent ≤30 daily net-worth values, cents
     var spentCents: Int
     var budgetCents: Int // 0 = no budgets configured
+    // Budget pace line (optional: older app writers omit these). budgetCum is
+    // cumulative month-to-date spend in cents, one point per elapsed day.
+    var budgetCum: [Int]?
+    var daysInMonth: Int?
+    var dayOfMonth: Int?
 }
 
 func loadPayload() -> WidgetPayload? {
@@ -36,7 +41,10 @@ let placeholderPayload = WidgetPayload(
     netWorthCents: 12_345_678,
     spark: [92, 94, 93, 96, 97, 95, 99, 101, 100, 104, 106, 105, 109, 111, 114].map { $0 * 100_000 },
     spentCents: 187_500,
-    budgetCents: 250_000
+    budgetCents: 250_000,
+    budgetCum: [8, 21, 33, 40, 55, 71, 84, 96, 110, 128, 141, 156, 168, 181].map { $0 * 1_000 },
+    daysInMonth: 30,
+    dayOfMonth: 14
 )
 
 // ── Theme (Private Ledger, hex-matched to the app) ───────────────────
@@ -282,6 +290,161 @@ struct WidgetEntryView: View {
     }
 }
 
+// ── Budget pace line graph ───────────────────────────────────────────
+
+struct BudgetPaceChart: View {
+    let payload: WidgetPayload
+
+    var body: some View {
+        let cum = payload.budgetCum ?? []
+        let dim = payload.daysInMonth ?? 30
+        let limit = payload.budgetCents
+        let spent = cum.last ?? 0
+        let yMax = max(limit, spent, 1)
+        let ahead = spent > paceToDate
+
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let denom = CGFloat(max(1, dim - 1))
+            ZStack {
+                // even-pace guide: 0 → total budget across the whole month
+                Path { p in
+                    p.move(to: CGPoint(x: 0, y: h))
+                    p.addLine(to: CGPoint(x: w, y: h - h * CGFloat(limit) / CGFloat(yMax)))
+                }
+                .stroke(Color.mutedInk.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+
+                // cumulative spend to date — jade under pace, coral once ahead
+                Path { p in
+                    for (i, v) in cum.enumerated() {
+                        let x = CGFloat(i) / denom * w
+                        let y = h - h * CGFloat(v) / CGFloat(yMax)
+                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                }
+                .stroke(ahead ? Color.coral : Color.jade, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            }
+        }
+    }
+
+    // Even-pace budget for the days elapsed so far.
+    private var paceToDate: Int {
+        let dim = payload.daysInMonth ?? 30
+        let dom = payload.dayOfMonth ?? (payload.budgetCum?.count ?? 0)
+        return dim > 0 ? Int(Double(payload.budgetCents) * Double(dom) / Double(dim)) : 0
+    }
+}
+
+private func hasBudgetPace(_ payload: WidgetPayload) -> Bool {
+    payload.budgetCents > 0 && (payload.budgetCum?.count ?? 0) > 1
+}
+
+struct BudgetSmallView: View {
+    let payload: WidgetPayload
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                EyebrowText(text: "Budget pace")
+                Spacer()
+                StaleNote(asOf: payload.asOf)
+            }
+            if hasBudgetPace(payload) {
+                Text(formatCents(payload.budgetCum?.last ?? 0, compact: true))
+                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .foregroundStyle(Color.paper)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                    .privacySensitive()
+                Text("of \(formatCents(payload.budgetCents, compact: true)) this month")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.mutedInk)
+                Spacer(minLength: 2)
+                BudgetPaceChart(payload: payload)
+                    .frame(height: 30)
+                    .privacySensitive()
+            } else {
+                Spacer()
+                Text("No budgets set")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.mutedInk)
+                Spacer()
+            }
+        }
+    }
+}
+
+struct BudgetMediumView: View {
+    let payload: WidgetPayload
+    var body: some View {
+        let cum = payload.budgetCum ?? []
+        let spent = cum.last ?? 0
+        let dim = payload.daysInMonth ?? 30
+        let dom = payload.dayOfMonth ?? cum.count
+        let pace = dim > 0 ? Int(Double(payload.budgetCents) * Double(dom) / Double(dim)) : 0
+        let ahead = spent > pace
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    EyebrowText(text: "Budget pace")
+                    Spacer()
+                    StaleNote(asOf: payload.asOf)
+                }
+                if hasBudgetPace(payload) {
+                    Text(formatCents(spent))
+                        .font(.system(size: 24, weight: .semibold, design: .serif))
+                        .foregroundStyle(ahead ? Color.coral : Color.paper)
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                        .privacySensitive()
+                    Text(ahead ? "ahead of pace" : "on track")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(ahead ? Color.coral : Color.jade)
+                    Spacer(minLength: 2)
+                    Text("\(formatCents(spent, compact: true)) of \(formatCents(payload.budgetCents, compact: true))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.mutedInk)
+                        .privacySensitive()
+                } else {
+                    Spacer()
+                    Text("No budgets set")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.mutedInk)
+                    Spacer()
+                }
+            }
+            .frame(maxWidth: 120, alignment: .leading)
+            if hasBudgetPace(payload) {
+                BudgetPaceChart(payload: payload)
+                    .privacySensitive()
+            }
+        }
+    }
+}
+
+struct BudgetEntryView: View {
+    @Environment(\.widgetFamily) var family
+    let entry: Entry
+
+    var body: some View {
+        Group {
+            if let payload = entry.payload {
+                switch family {
+                case .systemMedium:
+                    BudgetMediumView(payload: payload)
+                default:
+                    BudgetSmallView(payload: payload)
+                }
+            } else {
+                EmptyStateView()
+            }
+        }
+        .containerBackground(for: .widget) {
+            Color.panel
+        }
+    }
+}
+
 // ── Bundle ───────────────────────────────────────────────────────────
 
 struct BudgetrWidget: Widget {
@@ -295,9 +458,21 @@ struct BudgetrWidget: Widget {
     }
 }
 
+struct BudgetPaceWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "budgetrBudgetPace", provider: Provider()) { entry in
+            BudgetEntryView(entry: entry)
+        }
+        .configurationDisplayName("budgetr — Budget")
+        .description("Month-to-date spending against an even-pace line, end-to-end encrypted from your Mac.")
+        .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
 @main
 struct BudgetrWidgets: WidgetBundle {
     var body: some Widget {
         BudgetrWidget()
+        BudgetPaceWidget()
     }
 }
