@@ -33,13 +33,20 @@ export const HISTORY_DAYS = 30;
  * fetch: the (ticker, date, expiry, strike, right) unique key makes repeats
  * update in place. Returns the number of contracts written.
  */
-export function captureIvSnapshots(ticker: string, chain: OptionChain, spot: number | null): number {
+export function captureIvSnapshots(
+  ticker: string,
+  chain: OptionChain,
+  spot: number | null,
+  band?: { lo?: number; hi?: number },
+): number {
   const today = new Date().toISOString().slice(0, 10);
   const now = new Date();
+  const lo = band?.lo ?? BAND_LO;
+  const hi = band?.hi ?? BAND_HI;
   let written = 0;
 
   const rows = chain.contracts.flatMap((c) => {
-    if (spot != null && (c.strike < spot * BAND_LO || c.strike > spot * BAND_HI)) return [];
+    if (spot != null && (c.strike < spot * lo || c.strike > spot * hi)) return [];
     const dte = daysToExpiry(c.expiry, now);
     if (dte < 0) return [];
 

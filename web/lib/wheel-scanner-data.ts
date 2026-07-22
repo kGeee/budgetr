@@ -92,7 +92,11 @@ export type ScanOptions = {
   universe?: string[];
   /** Max candidates returned (after ranking). */
   limit?: number;
-  /** Persist today's IV surface for each scanned ticker (slower; bootstraps IV rank). */
+  /**
+   * Persist a near-ATM slice of today's IV for each scanned ticker so IV rank
+   * accrues from scans (not only option-page visits). Idempotent per day and
+   * strike-banded to stay cheap. Defaults on.
+   */
   capture?: boolean;
 };
 
@@ -116,6 +120,7 @@ export async function scanWheelPuts(opts: ScanOptions = {}): Promise<ScanResult>
   });
 
   const now = new Date();
+  const capture = opts.capture ?? true;
   const all: PutCandidate[] = [];
   let scanned = 0;
 
@@ -123,9 +128,10 @@ export async function scanWheelPuts(opts: ScanOptions = {}): Promise<ScanResult>
     if (!chain) continue;
     scanned += 1;
     const spot = chain.underlyingPrice;
-    if (opts.capture && spot != null) {
+    if (capture && spot != null) {
       try {
-        captureIvSnapshots(ticker, chain, spot);
+        // Near-ATM band keeps the write small while covering the strikes IV rank reads.
+        captureIvSnapshots(ticker, chain, spot, { lo: 0.85, hi: 1.15 });
       } catch {
         /* capture is best-effort */
       }

@@ -64,6 +64,7 @@ function equityPositions(): Array<{ ticker: string; value: number }> {
   for (const h of getHoldings()) {
     const t = h.ticker?.trim().toUpperCase();
     if (!t || parseOccSymbol(t)) continue; // skip options
+    if (t.includes(":") || t.includes("/")) continue; // skip cash/currency pseudo-tickers (e.g. CUR:USD)
     const v = h.value ?? 0;
     if (!(v > 0)) continue;
     byTicker.set(t, (byTicker.get(t) ?? 0) + v);
@@ -87,14 +88,25 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R
 }
 
 export async function buildAnalysisData(): Promise<AnalysisData> {
-  const positions = equityPositions();
-  const tickers = positions.map((p) => p.ticker);
-  const totalValue = positions.reduce((a, p) => a + p.value, 0);
+  const candidates = equityPositions();
 
-  // Benchmark + per-ticker OHLCV (cached 6h), fanned out with a small cap.
-  const [spyCloses, ohlcvList, profiles, financials, earnings] = await Promise.all([
+  // Fetch the benchmark + per-ticker OHLCV first (cached 6h). This lets us drop
+  // anything without a real listed price history — money-market funds, cash
+  // sweeps, opaque symbols — before spending Finnhub calls or diluting weights
+  // with holdings that can't be analyzed.
+  const [spyCloses, ohlcvAll] = await Promise.all([
     getDailyCloses("SPY", 12),
-    mapLimit(tickers, 8, (t) => getDailyOHLCV(t, 12)),
+    mapLimit(candidates.map((c) => c.ticker), 8, (t) => getDailyOHLCV(t, 12)),
+  ]);
+
+  const kept = candidates
+    .map((pos, i) => ({ pos, bars: ohlcvAll[i] ?? [] }))
+    .filter((k) => k.bars.length > 20); // enough history to compute technicals
+
+  const tickers = kept.map((k) => k.pos.ticker);
+  const totalValue = kept.reduce((a, k) => a + k.pos.value, 0);
+
+  const [profiles, financials, earnings] = await Promise.all([
     getCompanyProfiles(tickers),
     getBasicFinancials(tickers),
     getEarningsCalendar(),
@@ -103,8 +115,7 @@ export async function buildAnalysisData(): Promise<AnalysisData> {
   const spySeries: CloseSeries = spyCloses.map((p) => ({ date: p.date, close: p.close }));
   const closesByTicker = new Map<string, CloseSeries>();
 
-  const holdings: HoldingAnalytics[] = positions.map((pos, i) => {
-    const bars = ohlcvList[i] ?? [];
+  const holdings: HoldingAnalytics[] = kept.map(({ pos, bars }) => {
     const closes = bars.map((b) => b.close);
     const series: CloseSeries = bars.map((b) => ({ date: b.date, close: b.close }));
     closesByTicker.set(pos.ticker, series);

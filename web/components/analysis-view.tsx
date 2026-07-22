@@ -43,9 +43,23 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
     return [...data.holdings].sort((a, b) => val(b) - val(a));
   }, [data.holdings, sort]);
 
+  // Clamp to a readable window so one meme-stock outlier (100%+ vol, 200%+
+  // return) doesn't compress everything else into the corner. Raw values still
+  // show in the tooltip; clamped points sit on the edge.
+  const X_MAX = 80;
+  const Y_MIN = -60;
+  const Y_MAX = 120;
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   const scatter = data.holdings
     .filter((h) => h.realizedVol != null && h.return1y != null)
-    .map((h) => ({ ticker: h.ticker, x: h.realizedVol!, y: h.return1y!, z: h.weightPct }));
+    .map((h) => ({
+      ticker: h.ticker,
+      x: clamp(h.realizedVol!, 0, X_MAX),
+      y: clamp(h.return1y!, Y_MIN, Y_MAX),
+      z: h.weightPct,
+      rawX: h.realizedVol!,
+      rawY: h.return1y!,
+    }));
 
   if (data.holdings.length === 0) {
     return (
@@ -99,11 +113,11 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
           <ResponsiveContainer width="100%" height={240}>
             <ScatterChart margin={{ top: 8, right: 12, bottom: 20, left: 4 }}>
               <CartesianGrid stroke={t.grid} strokeDasharray="3 3" />
-              <XAxis type="number" dataKey="x" name="Volatility" unit="%" tick={t.tick} label={{ value: "Volatility", position: "insideBottom", offset: -8, fill: t.muted, fontSize: 11 }} />
-              <YAxis type="number" dataKey="y" name="Return" unit="%" tick={t.tick} />
+              <XAxis type="number" dataKey="x" name="Volatility" unit="%" domain={[0, X_MAX]} tick={t.tick} label={{ value: "Volatility", position: "insideBottom", offset: -8, fill: t.muted, fontSize: 11 }} />
+              <YAxis type="number" dataKey="y" name="Return" unit="%" domain={[Y_MIN, Y_MAX]} tick={t.tick} />
               <ZAxis type="number" dataKey="z" range={[40, 400]} />
               <Tooltip cursor={{ strokeDasharray: "3 3", stroke: t.grid }} content={<ScatterTip />} />
-              <Scatter data={scatter}>
+              <Scatter data={scatter} isAnimationActive={false}>
                 {scatter.map((d) => (
                   <Cell key={d.ticker} fill={d.y >= 0 ? t.jade : t.coral} fillOpacity={0.75} stroke={t.dotStroke} />
                 ))}
@@ -181,7 +195,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
 
 function ScatterTip(props: TooltipProps<number, string>) {
   const active = (props as { active?: boolean }).active;
-  const payload = (props as { payload?: Array<{ payload?: { ticker: string; x: number; y: number; z: number } }> }).payload;
+  const payload = (props as { payload?: Array<{ payload?: { ticker: string; rawX: number; rawY: number; z: number } }> }).payload;
   if (!active || !payload?.length) return null;
   const p = payload[0]?.payload;
   if (!p) return null;
@@ -189,7 +203,7 @@ function ScatterTip(props: TooltipProps<number, string>) {
     <div className="rounded-md border border-[var(--line-strong)] bg-[var(--chart-tooltip-bg)] px-2.5 py-1.5 text-xs">
       <div className="font-medium text-[var(--paper)]">{p.ticker}</div>
       <div className="text-[var(--muted)]">
-        {pct(p.y, 1)} 1y · {p.x.toFixed(0)}% vol · {p.z.toFixed(1)}% wt
+        {pct(p.rawY, 1)} 1y · {p.rawX.toFixed(0)}% vol · {p.z.toFixed(1)}% wt
       </div>
     </div>
   );
