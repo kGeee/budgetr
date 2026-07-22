@@ -67,6 +67,59 @@ export async function getDailyCloses(ticker: string, months = 12): Promise<Price
   }
 }
 
+export type OHLCVPoint = { date: string; open: number; high: number; low: number; close: number; volume: number | null };
+
+/**
+ * Daily OHLCV history for a ticker over the last `months`, oldest first. Same
+ * chart endpoint as getDailyCloses but keeps open/high/low/volume (which the
+ * closes-only path discards) — needed for ATR-based stops, RSI, and range.
+ */
+export async function getDailyOHLCV(ticker: string, months = 12): Promise<OHLCVPoint[]> {
+  const sym = ticker.trim().toUpperCase();
+  const range = rangeForMonths(months);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+    sym,
+  )}?range=${range}&interval=1d`;
+
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, next: { revalidate: 21600 } });
+    if (!res.ok) return [];
+    const j = (await res.json()) as {
+      chart?: {
+        result?: Array<{
+          timestamp?: number[];
+          indicators?: {
+            quote?: Array<{ open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]; volume?: (number | null)[] }>;
+          };
+        }>;
+      };
+    };
+    const r = j.chart?.result?.[0];
+    const ts = r?.timestamp ?? [];
+    const q = r?.indicators?.quote?.[0];
+    const out: OHLCVPoint[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      const close = q?.close?.[i];
+      const open = q?.open?.[i];
+      const high = q?.high?.[i];
+      const low = q?.low?.[i];
+      if ([open, high, low, close].every((v) => typeof v === "number" && Number.isFinite(v))) {
+        out.push({
+          date: new Date(ts[i] * 1000).toISOString().slice(0, 10),
+          open: open as number,
+          high: high as number,
+          low: low as number,
+          close: close as number,
+          volume: typeof q?.volume?.[i] === "number" ? (q!.volume![i] as number) : null,
+        });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** A corporate split event fetched from Yahoo. Ratio is shares-after : before. */
 export type SplitEvent = { date: string; numerator: number; denominator: number };
 

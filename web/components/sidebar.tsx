@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   ArrowLeftRight,
   LineChart,
+  Gauge,
   Building2,
   Landmark,
   Shapes,
@@ -54,6 +55,7 @@ const navGroups: { label?: string; items: NavItem[] }[] = [
     label: "Investments",
     items: [
       { href: "/investments", label: "Investments", icon: LineChart },
+      { href: "/investments/analysis", label: "Analysis", icon: Gauge },
       { href: "/fundamentals", label: "Fundamentals", icon: Building2 },
       { href: "/realized-gains", label: "Realized gains", icon: Receipt },
     ],

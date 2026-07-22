@@ -84,6 +84,103 @@ export async function getQuotes(symbols: string[]): Promise<Record<string, Quote
   return out;
 }
 
+// ── Company profile & fundamentals ───────────────────────────────────
+//
+// Finnhub's /quote is all this app used before; profile2 + metric are the same
+// keyed provider and give the fundamental context an analysis desk needs
+// (sector, market cap, valuation, margins, beta, 52-week range). Both change
+// slowly, so they cache for a day. Batched to respect the 60/min free tier.
+
+export type CompanyProfile = {
+  name: string | null;
+  sector: string | null;
+  exchange: string | null;
+  /** Market cap in dollars (Finnhub reports millions). */
+  marketCap: number | null;
+};
+
+export type BasicFinancials = {
+  peTtm: number | null;
+  pbAnnual: number | null;
+  beta: number | null;
+  /** Net profit margin, percent. */
+  netMargin: number | null;
+  /** Return on equity TTM, percent. */
+  roe: number | null;
+  high52: number | null;
+  low52: number | null;
+  /** Dividend yield, percent. */
+  dividendYield: number | null;
+};
+
+async function batched<T>(symbols: string[], fetchOne: (sym: string) => Promise<T | null>): Promise<Record<string, T>> {
+  const unique = normalizeSymbols(symbols);
+  const out: Record<string, T> = {};
+  for (let i = 0; i < unique.length; i += QUOTE_BATCH_SIZE) {
+    const batch = unique.slice(i, i + QUOTE_BATCH_SIZE);
+    await Promise.all(
+      batch.map(async (sym) => {
+        const v = await fetchOne(sym);
+        if (v != null) out[sym] = v;
+      }),
+    );
+    if (i + QUOTE_BATCH_SIZE < unique.length) await sleep(QUOTE_BATCH_PAUSE_MS);
+  }
+  return out;
+}
+
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** Company profiles (sector / market cap / exchange) keyed by symbol. */
+export async function getCompanyProfiles(symbols: string[]): Promise<Record<string, CompanyProfile>> {
+  const token = finnhubToken();
+  if (!token) return {};
+  return batched(symbols, async (sym) => {
+    try {
+      const url = `${BASE}/stock/profile2?symbol=${encodeURIComponent(sym)}&token=${token}`;
+      const res = await fetch(url, { next: { revalidate: 86_400 } });
+      if (!res.ok) return null;
+      const d = (await res.json()) as { name?: string; finnhubIndustry?: string; marketCapitalization?: number; exchange?: string };
+      const mcapM = num(d.marketCapitalization);
+      return {
+        name: d.name ?? null,
+        sector: d.finnhubIndustry ?? null,
+        exchange: d.exchange ?? null,
+        marketCap: mcapM != null ? mcapM * 1_000_000 : null, // Finnhub reports millions
+      };
+    } catch {
+      return null;
+    }
+  });
+}
+
+/** Valuation / quality / range metrics keyed by symbol. */
+export async function getBasicFinancials(symbols: string[]): Promise<Record<string, BasicFinancials>> {
+  const token = finnhubToken();
+  if (!token) return {};
+  return batched(symbols, async (sym) => {
+    try {
+      const url = `${BASE}/stock/metric?symbol=${encodeURIComponent(sym)}&metric=all&token=${token}`;
+      const res = await fetch(url, { next: { revalidate: 86_400 } });
+      if (!res.ok) return null;
+      const j = (await res.json()) as { metric?: Record<string, number | null> };
+      const m = j.metric ?? {};
+      return {
+        peTtm: num(m.peTTM),
+        pbAnnual: num(m.pbAnnual),
+        beta: num(m.beta),
+        netMargin: num(m.netProfitMarginTTM),
+        roe: num(m.roeTTM),
+        high52: num(m["52WeekHigh"]),
+        low52: num(m["52WeekLow"]),
+        dividendYield: num(m.currentDividendYieldTTM),
+      };
+    } catch {
+      return null;
+    }
+  });
+}
+
 // ── Earnings calendar ────────────────────────────────────────────────
 //
 // A single unfiltered /calendar/earnings call returns every US company
