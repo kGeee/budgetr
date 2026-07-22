@@ -53,6 +53,16 @@ export function loadPairing(): PairingMaterial | null {
 
 export function savePairing(m: PairingMaterial): void {
   set(KEYS.pairing, JSON.stringify(m));
+  // A new channel starts empty on the relay, so the per-channel sync state
+  // from any prior pairing is meaningless — and worse, a stale lastPushedHash
+  // makes syncNow()'s "push only when content changed" guard skip the very
+  // first push when the data hasn't changed, leaving the phone stuck on
+  // "waiting for your Mac's first sync". Reset it so the next syncNow()
+  // force-pushes a fresh summary and the outbox cursor restarts at 0.
+  del(KEYS.lastPushedHash);
+  del(KEYS.lastSeq);
+  del(KEYS.appliedOpIds);
+  del(KEYS.lastError);
 }
 
 /** Unpair: drop the material and all per-channel sync state. */

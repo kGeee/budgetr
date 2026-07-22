@@ -159,6 +159,24 @@ describe("pairing store", () => {
     expect(store.getLastSeq()).toBe(0);
     expect(store.getAppliedOpIds()).toEqual([]);
   });
+
+  it("re-pairing resets per-channel push state so the first summary always pushes", () => {
+    // First pairing, then simulate a completed push + applied outbox.
+    store.savePairing({ relayUrl: "https://r.example", channelId: "ch_1", channelToken: "t1", syncKey: "a".repeat(44) });
+    store.setLastPushedHash("deadbeef");
+    store.setLastSeq(9);
+    store.appendAppliedOpIds(["op-1"]);
+
+    // Re-pairing provisions a fresh, empty channel. If the old hash/cursor
+    // carried over, syncNow()'s "push only when changed" guard would skip the
+    // first push for unchanged data and the phone would hang on "waiting for
+    // your Mac's first sync".
+    store.savePairing({ relayUrl: "https://r.example", channelId: "ch_2", channelToken: "t2", syncKey: "b".repeat(44) });
+    expect(store.loadPairing()?.channelId).toBe("ch_2");
+    expect(store.getLastPushedHash()).toBeNull();
+    expect(store.getLastSeq()).toBe(0);
+    expect(store.getAppliedOpIds()).toEqual([]);
+  });
 });
 
 describe("investments read-model", () => {
