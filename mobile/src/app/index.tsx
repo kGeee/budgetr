@@ -152,7 +152,7 @@ export default function Overview() {
             </Animated.View>
 
             {summary.alerts.map((a, i) => (
-              <AlertRow key={a.id} id={a.id} kind={a.kind} text={a.text} index={i} />
+              <AlertRow key={`${a.id}-${a.kind}-${i}`} id={a.id} kind={a.kind} text={a.text} index={i} />
             ))}
 
             <Animated.View
