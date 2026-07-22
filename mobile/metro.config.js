@@ -23,4 +23,25 @@ config.resolver.extraNodeModules = {
 // node_modules — the packages ship no node_modules of their own when linked.
 config.resolver.nodeModulesPaths = [path.resolve(projectRoot, "node_modules")];
 
+// The @budgetr/* packages resolve to their TypeScript source on native (via the
+// "react-native" export condition), but that source uses NodeNext-style imports
+// with explicit ".js" specifiers that actually point at sibling ".ts" files.
+// tsc needs those extensions for the dist build; Metro can't map ".js" -> ".ts"
+// on its own. Rewrite the specifier to extensionless for our source packages so
+// Metro's sourceExts resolve the real ".ts" file.
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (
+    moduleName.startsWith(".") &&
+    moduleName.endsWith(".js") &&
+    /[/\\]packages[/\\](core|sync-crypto)[/\\]/.test(context.originModulePath)
+  ) {
+    return context.resolveRequest(
+      context,
+      moduleName.replace(/\.js$/, ""),
+      platform
+    );
+  }
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 module.exports = config;

@@ -1,6 +1,7 @@
 /** @type {import('@bacons/apple-targets').Config} */
 module.exports = {
   type: "widget",
+  appleTeamId: "B9UFFWUAD8",
   name: "budgetr",
   deploymentTarget: "17.0",
   entitlements: {

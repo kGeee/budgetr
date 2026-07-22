@@ -15,9 +15,11 @@
       },
       "entitlements": {
         "com.apple.security.application-groups": [
+          "group.dev.budgetr.companion",
           "group.dev.budgetr.companion"
         ]
-      }
+      },
+      "appleTeamId": "B9UFFWUAD8"
     },
     "android": {
       "adaptiveIcon": {
@@ -26,7 +28,13 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -55,6 +63,36 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "bundleIdentifier": "dev.budgetr.companion.widget",
+                  "targetName": "budgetr",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.dev.budgetr.companion"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "52b279d8-2c7f-400f-a4e0-3123bf1a4507"
+      }
+    },
+    "owner": "kgeees-team",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/52b279d8-2c7f-400f-a4e0-3123bf1a4507"
     }
   }
 }
