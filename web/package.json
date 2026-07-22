@@ -6,6 +6,8 @@
   "author": "budgetr",
   "main": "desktop/electron/main.js",
   "scripts": {
+    "postinstall": "npm run build:packages",
+    "build:packages": "npm --prefix ../packages/core ci --no-audit --no-fund && npm --prefix ../packages/core run build && npm --prefix ../packages/sync-crypto ci --no-audit --no-fund && npm --prefix ../packages/sync-crypto run build",
     "dev": "node scripts/run-next.mjs dev",
     "build": "node scripts/run-next.mjs build",
     "start": "node scripts/run-next.mjs start",
