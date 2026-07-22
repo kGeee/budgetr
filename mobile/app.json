@@ -15,7 +15,6 @@
       },
       "entitlements": {
         "com.apple.security.application-groups": [
-          "group.dev.budgetr.companion",
           "group.dev.budgetr.companion"
         ]
       },
@@ -30,8 +29,6 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ]
@@ -73,7 +70,7 @@
               "appExtensions": [
                 {
                   "bundleIdentifier": "dev.budgetr.companion.widget",
-                  "targetName": "budgetr",
+                  "targetName": "widget",
                   "entitlements": {
                     "com.apple.security.application-groups": [
                       "group.dev.budgetr.companion"

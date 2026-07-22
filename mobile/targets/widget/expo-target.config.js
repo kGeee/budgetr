@@ -2,7 +2,7 @@
 module.exports = {
   type: "widget",
   appleTeamId: "B9UFFWUAD8",
-  name: "budgetr",
+  name: "widget",
   deploymentTarget: "17.0",
   entitlements: {
     // Shared container: the app writes the encrypted-at-rest summary payload
