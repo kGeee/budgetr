@@ -37,8 +37,12 @@ export function ApiKeysForm({
 
   const test = () =>
     startTransition(async () => {
-      const r = await verifyKeys(input());
-      setStatus(r.ok ? { type: "ok", msg: "Plaid connection verified." } : { type: "error", msg: r.error });
+      try {
+        const r = await verifyKeys(input());
+        setStatus(r.ok ? { type: "ok", msg: "Plaid connection verified." } : { type: "error", msg: r.error });
+      } catch {
+        setStatus({ type: "error", msg: "Couldn't reach the server. Please try again." });
+      }
     });
 
   const save = () =>
@@ -49,18 +53,28 @@ export function ApiKeysForm({
         setStatus({ type: "error", msg: "Enter your Plaid client ID and secret to continue." });
         return;
       }
-      // Never persist a Plaid pair we couldn't verify.
-      if (wantPlaid) {
-        const v = await verifyKeys(input());
-        if (!v.ok) {
-          setStatus({ type: "error", msg: v.error });
+      try {
+        // Never persist a Plaid pair we couldn't verify.
+        if (wantPlaid) {
+          const v = await verifyKeys(input());
+          if (!v.ok) {
+            setStatus({ type: "error", msg: v.error });
+            return;
+          }
+        }
+        const saved = await saveApiKeys(input());
+        if (!saved.ok) {
+          setStatus({ type: "error", msg: saved.error ?? "Couldn't save your keys." });
           return;
         }
+        setStatus({ type: "ok", msg: "Saved." });
+        setSecret("");
+        onSaved?.();
+      } catch {
+        // A thrown Server Action (network drop, server error) must not take down
+        // the whole flow — surface it inline and let the user retry.
+        setStatus({ type: "error", msg: "Something went wrong saving your keys. Please try again." });
       }
-      await saveApiKeys(input());
-      setStatus({ type: "ok", msg: "Saved." });
-      setSecret("");
-      onSaved?.();
     });
 
   return (

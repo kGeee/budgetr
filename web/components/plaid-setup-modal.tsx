@@ -51,10 +51,16 @@ export function PlaidSetupModal({
   const [clearing, startClear] = useTransition();
   const [syncing, startSync] = useTransition();
 
-  // Step 0 → clear demo data (if any) before entering the real-setup flow.
+  // Step 0 → clear demo data (if any) before entering the real-setup flow. A
+  // teardown failure shouldn't trap the user on this step, so advance regardless
+  // (and never let a thrown action crash the modal).
   const begin = () =>
     startClear(async () => {
-      if (initial.demo) await exitDemoMode();
+      try {
+        if (initial.demo) await exitDemoMode();
+      } catch {
+        /* best-effort — proceed to setup even if the wipe hiccuped */
+      }
       setStep(1);
     });
 

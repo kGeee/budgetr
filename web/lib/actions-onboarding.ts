@@ -44,21 +44,28 @@ export async function verifyKeys(input: ApiKeysInput): Promise<{ ok: boolean; er
  * non-empty Finnhub key is saved; blank leaves it unchanged. Revalidates the app
  * so credential-gated server components re-read immediately (no restart).
  */
-export async function saveApiKeys(input: ApiKeysInput): Promise<{ ok: boolean }> {
-  const clientId = input.clientId?.trim();
-  const secret = input.secret?.trim();
+export async function saveApiKeys(input: ApiKeysInput): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const clientId = input.clientId?.trim();
+    const secret = input.secret?.trim();
 
-  const cfg: Parameters<typeof setPlaidConfig>[0] = { env: normalizeEnv(input.env) };
-  if (clientId && secret) {
-    cfg.clientId = clientId;
-    cfg.secret = secret;
+    const cfg: Parameters<typeof setPlaidConfig>[0] = { env: normalizeEnv(input.env) };
+    if (clientId && secret) {
+      cfg.clientId = clientId;
+      cfg.secret = secret;
+    }
+    setPlaidConfig(cfg);
+
+    if (input.finnhubKey?.trim()) setFinnhubKey(input.finnhubKey.trim());
+
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (err) {
+    // Persisting encrypts the secret at rest; if APP_ENCRYPTION_KEY is missing or
+    // the DB write fails, return a message rather than throwing — a thrown Server
+    // Action would otherwise crash the whole keys flow (the form awaits this).
+    return { ok: false, error: err instanceof Error ? err.message : "Couldn't save your keys." };
   }
-  setPlaidConfig(cfg);
-
-  if (input.finnhubKey?.trim()) setFinnhubKey(input.finnhubKey.trim());
-
-  revalidatePath("/", "layout");
-  return { ok: true };
 }
 
 /**
@@ -68,9 +75,13 @@ export async function saveApiKeys(input: ApiKeysInput): Promise<{ ok: boolean }>
  * fresh install that has no real financial data of its own yet. Called at the
  * start of the "set up real accounts" flow, before any real bank is linked.
  */
-export async function exitDemoMode(): Promise<{ ok: boolean }> {
-  wipeFinancialData();
-  setDemoMode(false);
-  revalidatePath("/", "layout");
-  return { ok: true };
+export async function exitDemoMode(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    wipeFinancialData();
+    setDemoMode(false);
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Couldn't clear the demo data." };
+  }
 }
