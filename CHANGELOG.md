@@ -5,6 +5,16 @@ tags that publish the macOS desktop app via the Release workflow.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.1] — 2026-07-24
+
+### Fixed
+
+- **First-run crash on the desktop app** — demo seeding could throw a UNIQUE
+  constraint on `balance_snapshots` (and take down the whole app with "a server
+  error occurred") whenever the seeded date window spanned a daylight-saving
+  spring-forward. The demo date helper now does its day math in UTC to match its
+  UTC formatting, so two adjacent days can no longer collapse onto one date.
+
 ## [0.7.0] — 2026-07-24
 
 ### Added
@@ -38,4 +48,5 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
   cold start (in `instrumentation.register()`) instead of racing parallel page
   renders, so pages no longer render blank on first load.
 
+[0.7.1]: https://github.com/kGeee/budgetr/releases/tag/v0.7.1
 [0.7.0]: https://github.com/kGeee/budgetr/releases/tag/v0.7.0

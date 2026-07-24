@@ -112,7 +112,13 @@ export function seedDemoData(): { transactions: number; budgets: number } {
   const iso = (d: Date): string => d.toISOString().slice(0, 10);
   const daysAgo = (n: number): string => {
     const d = new Date(NOW);
-    d.setDate(d.getDate() - n);
+    // Subtract days in UTC to match `iso` (which formats in UTC). Using the local
+    // setDate/getDate here instead lets a DST offset change between two adjacent
+    // `n` collapse them onto the same UTC date string — which duplicates a
+    // balance_snapshots (account_id, date) row and throws a UNIQUE constraint,
+    // crashing first-run demo seeding for any install whose window spans a
+    // spring-forward transition.
+    d.setUTCDate(d.getUTCDate() - n);
     return iso(d);
   };
 
