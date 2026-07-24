@@ -8,8 +8,11 @@ import { CurrencyInit, CurrencySwitcher } from "@/components/currency-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 import { DemoBanner } from "@/components/demo-banner";
+import { TrialBanner } from "@/components/trial-banner";
+import { LicenseGate } from "@/components/license-gate";
 import { BuyLink } from "@/components/marketing/marketing-shell";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
+import { getEntitlement } from "@/lib/license";
 import { getFinnhubKey, getPlaidConfig, isDemoMode } from "@/lib/app-config";
 import { demoEnabled } from "@/lib/site";
 import { hasPlaidCredentials } from "@/lib/plaid";
@@ -39,6 +42,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // accounts → load the demo dataset so the first screen is a fully populated,
   // explorable dashboard (not an empty shell). No-op once data exists.
   ensureFirstRunDemo();
+
+  // Licensing guard. The read-only web demo is the free showcase, so it's exempt.
+  // The desktop (Electron) app runs this same Next server locally, so this single
+  // gate covers both the self-hosted web app and the desktop app. When the trial
+  // has ended with no valid license, we render a full-screen gate instead of the
+  // app shell; while on trial, a slim countdown banner shows below.
+  const entitlement = webDemo ? null : getEntitlement();
+  if (entitlement && !entitlement.allowed) {
+    return <LicenseGate status={entitlement.status} reason={entitlement.reason} />;
+  }
 
   // Seed privacy mode from the cookie before any server component formats
   // currency this request.
@@ -77,6 +90,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="mx-auto flex min-h-dvh max-w-[1500px]">
         <Sidebar accounts={accounts} webDemo={webDemo} />
         <div className="flex min-w-0 flex-1 flex-col">
+          {entitlement?.status === "trial" && (
+            <TrialBanner daysLeft={entitlement.trialDaysLeft} />
+          )}
           {demoInitial && <DemoBanner initial={demoInitial} webDemo={webDemo} />}
           {/* pt uses the iOS safe-area inset so the notch/status bar never
               covers the controls in standalone (Add to Home Screen) mode. */}

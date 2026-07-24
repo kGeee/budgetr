@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { Coins, KeyRound, Mail, Smartphone, SunMoon } from "lucide-react";
+import { BadgeCheck, Coins, KeyRound, Mail, Smartphone, SunMoon } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { CurrencySwitcher } from "@/components/currency-switcher";
@@ -7,10 +7,12 @@ import { ThemeSegmented } from "@/components/theme-toggle";
 import { ReportScheduleForm } from "@/components/report-schedule-form";
 import { ApiKeysForm } from "@/components/api-keys-form";
 import { CompanionCard } from "@/components/companion-card";
+import { LicensePanel } from "@/components/license-panel";
 import { getSyncStatus } from "@/lib/companion/store";
 import { getDisplayCurrencySetting } from "@/lib/queries";
 import { getReportSchedule } from "@/lib/actions-reports";
 import { getFinnhubKey, getPlaidConfig } from "@/lib/app-config";
+import { getEntitlement } from "@/lib/license";
 import { hasPlaidCredentials } from "@/lib/plaid";
 import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 
@@ -22,10 +24,20 @@ export default async function SettingsPage() {
   const displayCurrency = getDisplayCurrencySetting();
   const plaidCfg = getPlaidConfig();
   const clientIdHint = plaidCfg.clientId ? `••••${plaidCfg.clientId.slice(-4)}` : null;
+  const entitlement = getEntitlement();
 
   return (
     <div className="space-y-7">
       <PageHead title="Settings" />
+
+      {/* License / trial */}
+      <Card>
+        <CardHeader>
+          <CardTitle>License</CardTitle>
+          <BadgeCheck size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <LicensePanel entitlement={entitlement} />
+      </Card>
 
       {/* Connections — Plaid + Finnhub API keys */}
       <Card>
