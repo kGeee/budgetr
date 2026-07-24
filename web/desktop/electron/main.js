@@ -401,6 +401,16 @@ function buildMenu() {
           },
         },
         {
+          // The trial/license guard is enforced by the web app the shell loads;
+          // this just jumps straight to the in-app Settings where a key is entered.
+          label: "Enter License…",
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed() && serverUrl) {
+              mainWindow.loadURL(`${serverUrl}/settings`).catch(() => {});
+            }
+          },
+        },
+        {
           label: "Show Data Folder",
           click: () => shell.showItemInFolder(databasePath()),
         },
