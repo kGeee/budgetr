@@ -5,6 +5,20 @@ tags that publish the macOS desktop app via the Release workflow.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.2] — 2026-07-24
+
+### Fixed
+
+- **Onboarding keys flow could crash.** The keys form and the demo-teardown step
+  awaited Server Actions with no error handling, so a thrown action (e.g. a
+  failed encrypt/DB write, a dropped connection) took down the whole flow. The
+  actions now return errors instead of throwing, and the form/modal surface them
+  inline and keep working.
+- **Overview layout was wiped on the demo→real switch.** Clearing the demo data
+  (`wipeFinancialData`) deleted every dashboard, including the reserved Overview
+  board — throwing away a customized landing layout. The reserved Overview board
+  and its widgets are now preserved; only custom dashboards are cleared.
+
 ## [0.7.1] — 2026-07-24
 
 ### Fixed
@@ -48,5 +62,6 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
   cold start (in `instrumentation.register()`) instead of racing parallel page
   renders, so pages no longer render blank on first load.
 
+[0.7.2]: https://github.com/kGeee/budgetr/releases/tag/v0.7.2
 [0.7.1]: https://github.com/kGeee/budgetr/releases/tag/v0.7.1
 [0.7.0]: https://github.com/kGeee/budgetr/releases/tag/v0.7.0
