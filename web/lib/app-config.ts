@@ -28,6 +28,8 @@ const K_PLAID_ENV = "plaidEnv";
 const K_FINNHUB = "finnhubApiKey";
 const K_DEMO_MODE = "demoMode";
 const K_FIRST_RUN_DONE = "firstRunDone";
+const K_FIRST_RUN_AT = "firstRunAt";
+const K_LICENSE_KEY = "licenseKey";
 
 function readSetting(key: string): string | null {
   const row = db.select().from(appSettings).where(eq(appSettings.key, key)).get();
@@ -172,4 +174,32 @@ export function isFirstRunDone(): boolean {
  * ensureFirstRunDemo transaction so it commits atomically with the seed. */
 export function markFirstRunDone(): void {
   writeSetting(K_FIRST_RUN_DONE, "1");
+}
+
+// ── Trial / licensing ─────────────────────────────────────────────────────────
+
+/**
+ * The install's first-run timestamp (ms since epoch), which anchors the free
+ * trial clock. Set once, the first time it's read, and never overwritten — so the
+ * trial can't be reset by re-reading. (A determined user can still edit the local
+ * DB; that's the accepted limit of fully-offline licensing.)
+ */
+export function ensureFirstRunAt(): number {
+  const existing = readSetting(K_FIRST_RUN_AT);
+  const parsed = existing ? Number(existing) : NaN;
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  const now = Date.now();
+  writeSetting(K_FIRST_RUN_AT, String(now));
+  return now;
+}
+
+/** The license key the user has activated on this device, if any. */
+export function getStoredLicenseKey(): string | null {
+  return readSetting(K_LICENSE_KEY);
+}
+
+/** Store (or clear, with null/empty) the activated license key. Not a secret —
+ * it's the user's own key — so it's kept in plaintext like other settings. */
+export function setStoredLicenseKey(key: string | null): void {
+  writeSetting(K_LICENSE_KEY, key?.trim() || null);
 }
