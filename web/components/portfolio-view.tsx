@@ -85,6 +85,7 @@ export function PortfolioView({
   holdings,
   histories = {},
   portfolioSeries = [],
+  portfolioReturnSeries = [],
   benchmarks = {},
   comparison = [],
   transactions = [],
@@ -101,6 +102,12 @@ export function PortfolioView({
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
   portfolioSeries?: { date: string; value: number }[];
+  /**
+   * Time-weighted return index (base 100) driving the benchmark overlay's
+   * portfolio line — deposits/withdrawals removed so it compares fairly to
+   * SPY/QQQ. The standalone value line still uses `portfolioSeries`.
+   */
+  portfolioReturnSeries?: { date: string; value: number }[];
   /** SPY/QQQ daily closes for the value-chart overlay. */
   benchmarks?: Partial<Record<BenchmarkKey, YahooPricePoint[]>>;
   /** Per-window portfolio-vs-benchmark return comparison. */
@@ -141,6 +148,7 @@ export function PortfolioView({
         holdings={holdings}
         histories={histories}
         portfolioSeries={portfolioSeries}
+        portfolioReturnSeries={portfolioReturnSeries}
         benchmarks={benchmarks}
         comparison={comparison}
         transactions={transactions}
@@ -417,6 +425,7 @@ function PortfolioInner({
   holdings,
   histories,
   portfolioSeries,
+  portfolioReturnSeries,
   benchmarks,
   comparison,
   transactions,
@@ -433,6 +442,7 @@ function PortfolioInner({
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
   portfolioSeries: { date: string; value: number }[];
+  portfolioReturnSeries: { date: string; value: number }[];
   benchmarks: Partial<Record<BenchmarkKey, YahooPricePoint[]>>;
   comparison: ComparisonRow[];
   transactions: InvestmentTxnRow[];
@@ -692,7 +702,12 @@ function PortfolioInner({
           <span className="text-xs text-[var(--faint)]">reconstructed from your trades</span>
         </div>
         <div className="px-3 py-5 sm:px-5">
-          <ValueHistory data={portfolioSeries} kind="portfolio" benchmarks={benchmarks} />
+          <ValueHistory
+            data={portfolioSeries}
+            portfolioReturnSeries={portfolioReturnSeries}
+            kind="portfolio"
+            benchmarks={benchmarks}
+          />
         </div>
       </Card>
 
@@ -1770,7 +1785,12 @@ function BenchmarkComparison({ comparison }: { comparison: ComparisonRow[] }) {
     <Card className="p-0">
       <div className="flex items-center justify-between border-b border-line px-6 py-4">
         <span className="eyebrow">Return vs benchmarks</span>
-        <span className="text-xs text-[var(--faint)]">portfolio return vs SPY &amp; QQQ</span>
+        <span
+          className="text-xs text-[var(--faint)]"
+          title="Time-weighted return: deposits and withdrawals are backed out so the portfolio compares fairly to an index that has no cash flows."
+        >
+          time-weighted return · deposits excluded
+        </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm">

@@ -13,6 +13,8 @@ import type { PricePoint } from "@/lib/yahoo";
  */
 
 export type ValuePoint = { date: string; value: number };
+/** A value point carrying the day's external cash flow (deposit +, withdrawal −). */
+export type FlowPoint = { date: string; value: number; flow: number };
 export type BenchmarkKey = "SPY" | "QQQ";
 
 /** Time windows we compare over. YTD anchors to Jan 1 of the latest year. */
@@ -51,6 +53,42 @@ export function normalizeToBase100(series: ValuePoint[]): ValuePoint[] {
   const base = series[0].value;
   if (!base) return series.map((p) => ({ date: p.date, value: 100 }));
   return series.map((p) => ({ date: p.date, value: (p.value / base) * 100 }));
+}
+
+/**
+ * Time-weighted return index (base 100) from a value+flow series.
+ *
+ * TWR strips the effect of external deposits/withdrawals so the result reflects
+ * only how the *investments* performed — making it apples-to-apples with an
+ * index like SPY that has no cash flows. On a day you buy shares, market value
+ * steps up purely from deposited capital; naively taking value(t)/value(t−1)
+ * would book that deposit as a gain. TWR backs the flow out first:
+ *
+ *   dailyReturn = (value_t − flow_t) / value_{t-1} − 1
+ *   index_t     = index_{t-1} × (1 + dailyReturn)
+ *
+ * Days where the prior value is ≤ 0 (the portfolio was empty — e.g. the first
+ * funding day, or a full liquidation followed by a re-buy) contribute no return
+ * and simply re-anchor the base: there was no capital at risk to earn on, so the
+ * running index carries forward unchanged rather than dividing by zero.
+ */
+export function twrIndexSeries(series: FlowPoint[]): ValuePoint[] {
+  if (series.length === 0) return [];
+  const sorted = [...series].sort((a, b) => a.date.localeCompare(b.date));
+  let index = 100;
+  const out: ValuePoint[] = [{ date: sorted[0].date, value: index }];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1].value;
+    const cur = sorted[i];
+    if (prev > 0) {
+      const dailyReturn = (cur.value - cur.flow) / prev - 1;
+      index *= 1 + dailyReturn;
+    }
+    // prev ≤ 0 → no capital at risk yesterday; today's funding isn't a return,
+    // so the index is unchanged and effectively re-anchors from here.
+    out.push({ date: cur.date, value: index });
+  }
+  return out;
 }
 
 /** Sorted-series forward fill: the last value on/before `date`, or null. */

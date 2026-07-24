@@ -31,6 +31,16 @@ function closeAt(sorted: PricePoint[], date: string): number | null {
   return v;
 }
 
+/** Same forward fill for a {date,value} series (the TWR return index). */
+function valueAt(sorted: ValuePoint[], date: string): number | null {
+  let v: number | null = null;
+  for (const p of sorted) {
+    if (p.date <= date) v = p.value;
+    else break;
+  }
+  return v;
+}
+
 /**
  * Value-over-time tracker with selectable time windows (1M…All). Filters the
  * series client-side and shows the gain/loss over the chosen window. Shared by
@@ -41,11 +51,20 @@ function closeAt(sorted: PricePoint[], date: string): number | null {
  */
 export function ValueHistory({
   data,
+  portfolioReturnSeries,
   kind = "networth",
   height,
   benchmarks,
 }: {
   data: ValuePoint[];
+  /**
+   * Time-weighted return index (base 100) for the benchmark overlay's portfolio
+   * line. When present and the "vs SPY/QQQ" overlay is active, the portfolio is
+   * drawn from this (deposits/withdrawals removed) instead of the raw market
+   * value in `data` — so a deposit doesn't masquerade as outperformance. The
+   * standalone "Value" mode always uses `data`.
+   */
+  portfolioReturnSeries?: ValuePoint[];
   kind?: keyof typeof KIND;
   height?: number;
   /** SPY/QQQ daily closes, enabling the benchmark-overlay toggle (portfolio only). */
@@ -91,23 +110,34 @@ export function ValueHistory({
   // reconstruction). Only built when the overlay is active.
   const rebased = useMemo(() => {
     if (!vs || filtered.length < 2) return [];
-    const pBase = filtered[0].value || 1;
     const startDate = filtered[0].date;
     const spy = [...(benchmarks?.SPY ?? [])].sort((a, b) => a.date.localeCompare(b.date));
     const qqq = [...(benchmarks?.QQQ ?? [])].sort((a, b) => a.date.localeCompare(b.date));
     const spyBase = closeAt(spy, startDate);
     const qqqBase = closeAt(qqq, startDate);
+
+    // Portfolio line: prefer the time-weighted return index (external deposits/
+    // withdrawals already stripped out) so buying shares doesn't read as
+    // appreciation against the cash-flow-free benchmarks. Fall back to raw
+    // market value if the TWR series wasn't supplied.
+    const twr =
+      portfolioReturnSeries && portfolioReturnSeries.length > 1
+        ? [...portfolioReturnSeries].sort((a, b) => a.date.localeCompare(b.date))
+        : null;
+    const pBase = (twr ? valueAt(twr, startDate) : filtered[0].value) || 1;
+
     return filtered.map((p) => {
+      const pNow = twr ? valueAt(twr, p.date) : p.value;
       const spyNow = spyBase ? closeAt(spy, p.date) : null;
       const qqqNow = qqqBase ? closeAt(qqq, p.date) : null;
       return {
         date: p.date,
-        portfolio: (p.value / pBase) * 100,
+        portfolio: pNow != null ? (pNow / pBase) * 100 : 100,
         spy: spyNow != null && spyBase ? (spyNow / spyBase) * 100 : null,
         qqq: qqqNow != null && qqqBase ? (qqqNow / qqqBase) * 100 : null,
       };
     });
-  }, [vs, filtered, benchmarks]);
+  }, [vs, filtered, benchmarks, portfolioReturnSeries]);
 
   const first = filtered[0]?.value ?? 0;
   const last = filtered[filtered.length - 1]?.value ?? 0;
