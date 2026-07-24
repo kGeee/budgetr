@@ -100,7 +100,7 @@ export function Screen({
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.ink },
-  content: { padding: 18, paddingBottom: 108 },
+  content: { padding: 18, paddingBottom: 124 },
   header: { position: "absolute", top: 0, left: 0, right: 0, justifyContent: "center" },
   compactTitle: {
     fontFamily: F.sansSemiBold,

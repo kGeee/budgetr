@@ -5,9 +5,9 @@
 // SyncBanner, and an SVG sparkline.
 
 import React from "react";
-import { PanResponder, StyleSheet, Text, View, type ViewStyle } from "react-native";
+import { PanResponder, Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Circle, Defs, Line, LinearGradient as SvgGradient, Path, RadialGradient, Rect, Stop } from "react-native-svg";
+import Svg, { Circle, Defs, Line, LinearGradient as SvgGradient, Path, Pattern, RadialGradient, Rect, Stop } from "react-native-svg";
 import type { SparkPoint } from "@budgetr/core";
 import { agoLabel, money } from "@/format";
 import * as haptics from "@/haptics";
@@ -25,6 +25,109 @@ export function Card({ children, style }: { children: React.ReactNode; style?: V
 /** Editorial uppercase micro-label — the desktop's .eyebrow. */
 export function Eyebrow({ children, color = T.brass }: { children: string; color?: string }) {
   return <Text style={[s.eyebrow, { color }]}>{children}</Text>;
+}
+
+/**
+ * KPI stat tiles — the reference's two/three-up mini-stat grid, as recessed
+ * wells on a card: a small uppercase caption over a mono value. Tint colors
+ * only the value (functional color, never the whole tile).
+ */
+export function StatRow({ items }: { items: { label: string; value: string; tint?: string }[] }) {
+  return (
+    <View style={s.statRow}>
+      {items.map((it, i) => (
+        <View key={i} style={s.statTile}>
+          <Text style={s.statLabel} numberOfLines={1}>
+            {it.label}
+          </Text>
+          <Text style={[s.statValue, it.tint ? { color: it.tint } : null]} numberOfLines={1} adjustsFontSizeToFit>
+            {it.value}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Segmented control — the reference's pill toggle. A recessed track with a
+ * single raised segment sliding to the selection; the caller owns the value.
+ * A tick fires on change (never on re-selecting the active one).
+ */
+export function Segmented<V extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { label: string; value: V }[];
+  value: V;
+  onChange: (v: V) => void;
+}) {
+  return (
+    <View style={s.segment}>
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            hitSlop={4}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            onPress={() => {
+              if (active) return;
+              haptics.tick();
+              onChange(o.value);
+            }}
+            style={[s.segItem, active && s.segItemActive]}
+          >
+            <Text style={[s.segText, active && s.segTextActive]}>{o.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * Striped meter — the reference's "Card Limits" bar: a solid fill up to `pct`,
+ * a diagonal-hatched remainder in the same hue, and a paper thumb riding the
+ * boundary. Reads as "how much of the allowance is used" at a glance.
+ */
+export function MeterBar({ pct, color, height = 12 }: { pct: number; color: string; height?: number }) {
+  const [width, setWidth] = React.useState(0);
+  const rid = React.useId().replace(/[^a-zA-Z0-9]/g, "");
+  const p = Math.max(0, Math.min(1, pct));
+  const r = height / 2;
+  const fillW = width * p;
+
+  return (
+    <View style={{ height, marginTop: 12 }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {width > 0 && (
+        <Svg width={width} height={height}>
+          <Defs>
+            <Pattern id={`hatch${rid}`} width={7} height={7} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <Line x1={0} y1={0} x2={0} y2={7} stroke={color} strokeWidth={2.4} opacity={0.4} />
+            </Pattern>
+          </Defs>
+          {/* recessed track */}
+          <Rect x={0} y={0} width={width} height={height} rx={r} fill={T.ink} />
+          {/* hatched remainder */}
+          <Rect x={0} y={0} width={width} height={height} rx={r} fill={`url(#hatch${rid})`} />
+          {/* solid fill */}
+          {fillW > 0 && <Rect x={0} y={0} width={Math.max(fillW, r * 2)} height={height} rx={r} fill={color} />}
+          {/* thumb riding the boundary */}
+          <Circle
+            cx={Math.max(r, Math.min(width - r, fillW))}
+            cy={r}
+            r={r - 1.5}
+            fill={T.paper}
+            stroke={color}
+            strokeWidth={2}
+          />
+        </Svg>
+      )}
+    </View>
+  );
 }
 
 /** Desktop PageHead: eyebrow date, Fraunces display title, hairline below. */
@@ -383,6 +486,46 @@ const s = StyleSheet.create({
     letterSpacing: 2,
     textTransform: "uppercase",
   },
+  statRow: { flexDirection: "row", gap: 10, marginTop: 14 },
+  statTile: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.line,
+    backgroundColor: "rgba(8,11,10,0.5)",
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+  },
+  statLabel: {
+    color: T.faint,
+    fontFamily: F.sansSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+  },
+  statValue: { color: T.paper, fontFamily: F.monoSemiBold, fontSize: 17, marginTop: 6 },
+  segment: {
+    flexDirection: "row",
+    backgroundColor: T.ink,
+    borderRadius: 999,
+    padding: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.line,
+  },
+  segItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  segItemActive: {
+    backgroundColor: T.panel2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.lineStrong,
+  },
+  segText: { color: T.muted, fontFamily: F.sansSemiBold, fontSize: 12.5 },
+  segTextActive: { color: T.paper },
   pageHead: {
     flexDirection: "row",
     alignItems: "flex-end",
