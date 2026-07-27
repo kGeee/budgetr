@@ -20,8 +20,8 @@ export type { Entitlement, LicensePayload, LicenseStatus } from "@/lib/license/v
 /** Length of the free trial, in days. */
 export const TRIAL_DAYS = 14;
 
-/** Where to send users to buy a license. */
-export const LICENSE_BUY_URL = "https://budgetr.dev/#pricing";
+/** Where to send users to buy a license (the marketing pricing page). */
+export const LICENSE_BUY_URL = "https://budgetr.dev/pricing";
 
 /** Env escape hatch for self-hosters running their own instance. */
 function licenseDisabled(): boolean {
