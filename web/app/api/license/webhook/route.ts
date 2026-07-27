@@ -41,12 +41,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "webhook not configured" }, { status: 503 });
   }
 
-  const ok = verifyPolarWebhook(raw, {
-    id: req.headers.get("webhook-id"),
-    timestamp: req.headers.get("webhook-timestamp"),
-    signature: req.headers.get("webhook-signature"),
-  }, secret);
-  if (!ok) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+  // Standard Webhooks uses `webhook-*`; fall back to `svix-*` (the underlying
+  // library still emits those) so a header-naming quirk can't cause a 401.
+  const h = (name: string) => req.headers.get(`webhook-${name}`) ?? req.headers.get(`svix-${name}`);
+  const verdict = verifyPolarWebhook(raw, { id: h("id"), timestamp: h("timestamp"), signature: h("signature") }, secret);
+  if (!verdict.ok) {
+    console.error(`[license webhook] rejected: ${verdict.reason}`);
+    return NextResponse.json({ error: verdict.reason }, { status: 401 });
+  }
 
   let event: { type?: string; data?: Record<string, unknown> };
   try {
