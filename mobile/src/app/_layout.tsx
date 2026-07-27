@@ -21,11 +21,10 @@ import {
 import { SplineSansMono_500Medium, SplineSansMono_600SemiBold } from "@expo-google-fonts/spline-sans-mono";
 import { ArrowLeftRight, LayoutDashboard, LineChart, Wallet } from "lucide-react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { BlurView } from "expo-blur";
 import { CompanionProvider, useCompanion } from "@/state/companion";
 import { PairingScreen } from "@/ui/pairing";
 import { Skeleton } from "@/ui/bits";
-import * as haptics from "@/haptics";
+import { FloatingTabBar } from "@/ui/tabbar";
 import { F, T } from "@/theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -72,28 +71,12 @@ export default function RootLayout() {
       <StatusBar style="light" />
       <Gate>
         <Tabs
-          screenListeners={{ tabPress: () => haptics.tick() }}
+          // A custom floating pill bar (content scrolls under it) replaces the
+          // default strip — it owns its own press haptics and active state.
+          tabBar={(props) => <FloatingTabBar {...props} />}
           screenOptions={{
             headerShown: false,
             sceneStyle: { backgroundColor: T.ink },
-            // Translucent chrome: content scrolls UNDER the tab bar, which
-            // reads as a floating material rather than an opaque strip.
-            tabBarStyle: {
-              position: "absolute",
-              backgroundColor: "transparent",
-              borderTopColor: T.line,
-              elevation: 0,
-            },
-            tabBarBackground: () => (
-              <BlurView
-                tint="dark"
-                intensity={36}
-                style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(19,26,24,0.72)" }]}
-              />
-            ),
-            tabBarActiveTintColor: T.jade,
-            tabBarInactiveTintColor: T.faint,
-            tabBarLabelStyle: { fontFamily: F.sansMedium, fontSize: 10 },
           }}
         >
           <Tabs.Screen

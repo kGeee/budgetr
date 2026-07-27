@@ -27,7 +27,7 @@ import {
 } from "@/db/schema";
 import { applySplits, type StockSplit } from "@/lib/import/splits";
 import type { SavingsContribution, Dashboard, DashboardWidget } from "@/db/schema";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 import {
   computeRealizedLots,
@@ -2089,14 +2089,28 @@ export function getMonthlySpendForYear(year: number): { month: string; spent: nu
 // grid, so the widget renderers stay dumb and fully serializable.
 // ---------------------------------------------------------------------------
 
-/** The widget kinds a dashboard can render. Shared by the query dispatcher, the picker, and the renderer. */
+/**
+ * The widget kinds a dashboard can render. Shared by the query dispatcher, the
+ * picker, and the renderer.
+ *
+ * The second group (net-worth-summary … spending-review) was added when the
+ * Overview page became a customizable dashboard: they reproduce what used to be
+ * the hard-coded overview (the net-worth hero, the review inbox, recent activity,
+ * upcoming bills) plus fold the standalone spending Review retrospective in as a
+ * widget, so the whole landing screen is now composable.
+ */
 export type WidgetType =
   | "net-worth"
   | "cashflow"
   | "spend-by-category"
   | "top-vendors"
   | "daily-spend"
-  | "budget-summary";
+  | "budget-summary"
+  | "net-worth-summary"
+  | "review-queue"
+  | "recent-activity"
+  | "upcoming-bills"
+  | "spending-review";
 
 /** Free-form per-widget settings. All optional — each widget falls back to sensible defaults. */
 export type WidgetConfig = {
@@ -2104,8 +2118,17 @@ export type WidgetConfig = {
   days?: number;
   /** Month count (cashflow). */
   months?: number;
-  /** Row cap (top-vendors). */
+  /** Row cap (top-vendors, recent-activity, review-queue). */
   limit?: number;
+};
+
+/** One category's spend this window vs the prior equal window — a "mover". */
+export type SpendShift = {
+  category: string;
+  icon: string | null;
+  current: number;
+  prev: number;
+  delta: number;
 };
 
 export type DashboardListItem = Dashboard & { widgetCount: number };
@@ -2124,6 +2147,8 @@ export function getDashboards(): DashboardListItem[] {
       )`,
     })
     .from(dashboards)
+    // The reserved Overview board is edited from /overview, not listed here.
+    .where(ne(dashboards.id, OVERVIEW_DASHBOARD_ID))
     .orderBy(asc(dashboards.sortOrder), asc(dashboards.createdAt))
     .all();
   return rows.map((r) => ({ ...r, widgetCount: Number(r.widgetCount) }));
@@ -2145,6 +2170,74 @@ export function getDashboardWithWidgets(
 }
 
 /**
+ * The Overview screen is itself a dashboard — a reserved, always-present one the
+ * user edits in place (add/remove/reorder widgets) just like any custom board.
+ * This fixed id lets us treat it as a singleton without a schema/`kind` column.
+ */
+export const OVERVIEW_DASHBOARD_ID = "dash_overview";
+
+/** The stock Overview layout, seeded once — mirrors the old hard-coded overview
+ *  (net-worth hero, cashflow, spend + budget) and folds the Review retrospective
+ *  and inbox in as widgets. `wide` widgets come from WIDGET_META client-side. */
+const OVERVIEW_DEFAULT_WIDGETS: { type: WidgetType; config?: WidgetConfig }[] = [
+  { type: "net-worth-summary" },
+  { type: "spending-review" },
+  { type: "review-queue" },
+  { type: "cashflow", config: { months: 6 } },
+  { type: "spend-by-category", config: { days: 30 } },
+  { type: "budget-summary" },
+  { type: "recent-activity", config: { limit: 6 } },
+  { type: "upcoming-bills", config: { days: 14 } },
+];
+
+/**
+ * Ensure the reserved Overview dashboard exists (seeding its default widgets on
+ * first ever render), then return it with its widgets. Idempotent and race-safe:
+ * the check-and-seed runs in one IMMEDIATE transaction so Next's parallel
+ * layout/page render can't double-seed it (same guard ensureFirstRunDemo uses).
+ */
+export function ensureOverviewDashboard(): {
+  dashboard: Dashboard;
+  widgets: DashboardWidget[];
+} {
+  const existing = getDashboardWithWidgets(OVERVIEW_DASHBOARD_ID);
+  if (existing) return existing;
+
+  db.transaction(
+    () => {
+      // Re-check inside the lock — another render may have just seeded it.
+      if (db.select().from(dashboards).where(eq(dashboards.id, OVERVIEW_DASHBOARD_ID)).get()) {
+        return;
+      }
+      db.insert(dashboards)
+        .values({
+          id: OVERVIEW_DASHBOARD_ID,
+          name: "Overview",
+          // Sorts first on the /dashboards index; the reserved board leads.
+          sortOrder: -1,
+          createdAt: new Date(),
+        })
+        .run();
+      OVERVIEW_DEFAULT_WIDGETS.forEach((w, i) => {
+        db.insert(dashboardWidgets)
+          .values({
+            id: `dw_ov_${i}`,
+            dashboardId: OVERVIEW_DASHBOARD_ID,
+            type: w.type,
+            config: JSON.stringify(w.config ?? {}),
+            sortOrder: i,
+          })
+          .run();
+      });
+    },
+    { behavior: "immediate" },
+  );
+
+  // Guaranteed to exist now.
+  return getDashboardWithWidgets(OVERVIEW_DASHBOARD_ID)!;
+}
+
+/**
  * Resolved data for one widget — a discriminated union keyed by `type` so the
  * client renderer can switch exhaustively. `daily-spend` carries its window so
  * the heatmap can align its week grid.
@@ -2155,7 +2248,25 @@ export type WidgetData =
   | { type: "spend-by-category"; series: CategorySpend[] }
   | { type: "top-vendors"; merchants: TopMerchant[] }
   | { type: "daily-spend"; series: { date: string; spent: number }[]; start: string; end: string }
-  | { type: "budget-summary"; summary: BudgetSummary };
+  | { type: "budget-summary"; summary: BudgetSummary }
+  | {
+      type: "net-worth-summary";
+      nw: NetWorth;
+      series: { date: string; netWorth: number }[];
+      change: number;
+      changePct: number;
+    }
+  | { type: "review-queue"; transactions: TransactionRow[]; total: number }
+  | { type: "recent-activity"; transactions: TransactionRow[] }
+  | { type: "upcoming-bills"; bills: RecurringRow[] }
+  | {
+      type: "spending-review";
+      label: string;
+      prevLabel: string;
+      totals: PeriodTotals;
+      prevTotals: PeriodTotals;
+      shifts: SpendShift[];
+    };
 
 /**
  * Resolve a widget's `type` + `config` to its render-ready data by delegating to
@@ -2193,8 +2304,116 @@ export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetDa
     }
     case "budget-summary":
       return { type: "budget-summary", summary: getMonthlyBudgetSummary() };
+    case "net-worth-summary":
+      return getNetWorthSummaryWidget();
+    case "review-queue": {
+      // Pull a small page for the inbox plus the true backlog size (the header
+      // reads "N entries need a look"). One scan, sliced — cheaper than two.
+      const all = getTransactionsToReview(1000);
+      return { type: "review-queue", transactions: all.slice(0, config.limit ?? 6), total: all.length };
+    }
+    case "recent-activity":
+      return { type: "recent-activity", transactions: getRecentTransactions(config.limit ?? 6) };
+    case "upcoming-bills":
+      return { type: "upcoming-bills", bills: getUpcomingBills(config.days ?? 14) };
+    case "spending-review":
+      return getSpendingReviewWidget();
     case "spend-by-category":
     default:
       return { type: "spend-by-category", series: getSpendingByCategory(config.days ?? 30) };
   }
+}
+
+/**
+ * Net-worth hero: assets/liabilities/net plus the historical series with today's
+ * live figure pinned on the end. Fixed-value manual assets (crypto held as a flat
+ * dollar amount, cash-like holdings) are folded in synchronously; tickered manual
+ * holdings that need a live price fetch are intentionally left out so this stays a
+ * pure, cache-free DB read (the Investments desk carries the full live figure).
+ */
+function getNetWorthSummaryWidget(): Extract<WidgetData, { type: "net-worth-summary" }> {
+  const base = getNetWorth();
+  const manual = getManualHoldings();
+  const fixedValueTotal = manual
+    .filter((m) => !m.symbol)
+    .reduce((s, m) => s + (m.manualValue ?? 0), 0);
+  const nw: NetWorth = {
+    assets: base.assets + fixedValueTotal,
+    liabilities: base.liabilities,
+    net: base.net + fixedValueTotal,
+  };
+
+  const baseSeries = getNetWorthSeries();
+  const series = fixedValueTotal
+    ? baseSeries.map((p) => ({ date: p.date, netWorth: p.netWorth + fixedValueTotal }))
+    : baseSeries;
+  // Pin a live "today" point so the line ends at the headline number.
+  const today = new Date().toISOString().slice(0, 10);
+  if (series.length === 0 || series[series.length - 1].date !== today) {
+    series.push({ date: today, netWorth: nw.net });
+  }
+
+  const first = series[0]?.netWorth ?? nw.net;
+  const change = nw.net - first;
+  const changePct = first !== 0 ? (change / Math.abs(first)) * 100 : 0;
+  return { type: "net-worth-summary", nw, series, change, changePct };
+}
+
+/**
+ * This-month spending vs the prior full month, with the biggest category movers.
+ * A compact form of the standalone /review retrospective, folded onto the
+ * overview so the landing screen answers "how's this month tracking?" at a glance.
+ */
+function getSpendingReviewWidget(): Extract<WidgetData, { type: "spending-review" }> {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const monthStart = (yy: number, mm: number) => `${yy}-${pad(mm + 1)}-01`;
+  const monthEnd = (yy: number, mm: number) =>
+    `${yy}-${pad(mm + 1)}-${pad(new Date(yy, mm + 1, 0).getDate())}`;
+  const monthName = (yy: number, mm: number) =>
+    new Date(yy, mm, 1).toLocaleDateString("en-US", { month: "long" });
+
+  const prev = new Date(y, m - 1, 1);
+  const py = prev.getFullYear();
+  const pm = prev.getMonth();
+
+  const start = monthStart(y, m);
+  const end = monthEnd(y, m);
+  const prevStart = monthStart(py, pm);
+  const prevEnd = monthEnd(py, pm);
+
+  const totals = getPeriodTotals(start, end);
+  const prevTotals = getPeriodTotals(prevStart, prevEnd);
+  const categories = getCategorySpendForPeriod(start, end);
+  const prevCategories = getCategorySpendForPeriod(prevStart, prevEnd);
+
+  // Biggest movers (either direction) vs the prior month, keyed by category id
+  // (or name for uncategorized) — mirrors the /review page's shift computation.
+  const prevByKey = new Map(prevCategories.map((c) => [c.categoryId ?? c.category, c.total]));
+  const seen = new Set<string>();
+  const shifts: SpendShift[] = [
+    ...categories.map((c) => {
+      const key = c.categoryId ?? c.category;
+      seen.add(key);
+      const p = prevByKey.get(key) ?? 0;
+      return { category: c.category, icon: c.icon, current: c.total, prev: p, delta: c.total - p };
+    }),
+    ...prevCategories
+      .filter((c) => !seen.has(c.categoryId ?? c.category))
+      .map((c) => ({ category: c.category, icon: c.icon, current: 0, prev: c.total, delta: -c.total })),
+  ]
+    .filter((s) => s.delta !== 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+    .slice(0, 5);
+
+  return {
+    type: "spending-review",
+    label: monthName(y, m),
+    prevLabel: monthName(py, pm),
+    totals,
+    prevTotals,
+    shifts,
+  };
 }

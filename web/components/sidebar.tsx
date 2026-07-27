@@ -94,8 +94,25 @@ function visibleGroups(webDemo: boolean) {
     .filter((g) => g.items.length > 0);
 }
 
-function isActive(pathname: string, href: string) {
-  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+// Does `pathname` sit at or under `href`? Uses a segment-aware prefix test so
+// "/investments" matches "/investments/analysis" but never "/investments-foo".
+function matchesHref(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(href + "/");
+}
+
+// The single most-specific nav item for the current path: the longest matching
+// href across all items. This makes exactly one row active — on
+// "/investments/analysis" only "Analysis" lights up (not its "/investments"
+// parent), and the mobile header resolves to the deepest match.
+function bestMatchHref(pathname: string, items: NavItem[]): string | null {
+  let best: string | null = null;
+  for (const { href } of items) {
+    if (matchesHref(pathname, href) && (best === null || href.length > best.length)) {
+      best = href;
+    }
+  }
+  return best;
 }
 
 export type SidebarAccount = {
@@ -125,6 +142,9 @@ function fmtBalance(amount: number | null, currency: string | null) {
 export function Sidebar({ accounts, webDemo = false }: { accounts: SidebarAccount[]; webDemo?: boolean }) {
   const pathname = usePathname();
   const groupsNav = visibleGroups(webDemo);
+  // Resolve the single active href once per render; an item is active iff it is
+  // that most-specific match.
+  const activeHref = bestMatchHref(pathname, nav);
 
   // Excluded accounts are hidden from the sidebar entirely — managed on /accounts.
   const visible = accounts.filter((a) => !a.excluded);
@@ -156,7 +176,7 @@ export function Sidebar({ accounts, webDemo = false }: { accounts: SidebarAccoun
               {group.label && <p className="eyebrow mb-2 px-3">{group.label}</p>}
               <div className="flex flex-col gap-1">
                 {group.items.map(({ href, label, icon: Icon }) => {
-                  const active = isActive(pathname, href);
+                  const active = href === activeHref;
                   return (
                     <Link
                       key={href}
@@ -225,7 +245,10 @@ export function Sidebar({ accounts, webDemo = false }: { accounts: SidebarAccoun
 export function MobileNav({ webDemo = false }: { webDemo?: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const current = nav.find(({ href }) => isActive(pathname, href));
+  // Header label + drawer highlight both key off the single most-specific match,
+  // so the analysis page reads "Analysis" rather than its "/investments" parent.
+  const activeHref = bestMatchHref(pathname, nav);
+  const current = nav.find(({ href }) => href === activeHref);
   const groupsNav = visibleGroups(webDemo);
 
   return (
@@ -289,7 +312,7 @@ export function MobileNav({ webDemo = false }: { webDemo?: boolean }) {
             <div key={group.label ?? `group-${i}`}>
               {group.label && <p className="eyebrow mb-1.5 px-4">{group.label}</p>}
               {group.items.map(({ href, label, icon: Icon }) => {
-                const active = isActive(pathname, href);
+                const active = href === activeHref;
                 return (
                   <Link
                     key={href}

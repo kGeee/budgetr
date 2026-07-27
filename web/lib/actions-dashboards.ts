@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { dashboardWidgets, dashboards } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import type { WidgetConfig } from "@/lib/queries";
+import { OVERVIEW_DASHBOARD_ID, type WidgetConfig } from "@/lib/queries";
 
 /**
  * Server Actions for custom dashboards — create/rename/delete a dashboard and
@@ -40,6 +40,8 @@ export async function renameDashboard(id: string, name: string): Promise<void> {
 }
 
 export async function deleteDashboard(id: string): Promise<void> {
+  // The reserved Overview board can't be deleted — it's the landing screen.
+  if (id === OVERVIEW_DASHBOARD_ID) return;
   // Widgets cascade via the FK's onDelete.
   db.delete(dashboards).where(eq(dashboards.id, id)).run();
   revalidatePath("/", "layout");

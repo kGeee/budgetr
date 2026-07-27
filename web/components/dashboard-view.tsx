@@ -36,10 +36,13 @@ export function DashboardView({
   dashboard,
   widgets,
   categories,
+  overview = false,
 }: {
   dashboard: Dashboard;
   widgets: ResolvedWidget[];
   categories: CategoryRow[];
+  /** The reserved Overview board — fixed title, no rename/delete. */
+  overview?: boolean;
 }) {
   const router = useRouter();
   const [edit, setEdit] = useState(false);
@@ -84,6 +87,7 @@ export function DashboardView({
       <DashboardHeader
         dashboard={dashboard}
         edit={edit}
+        overview={overview}
         onToggleEdit={() => setEdit((e) => !e)}
       />
 
@@ -152,10 +156,12 @@ export function DashboardView({
 function DashboardHeader({
   dashboard,
   edit,
+  overview = false,
   onToggleEdit,
 }: {
   dashboard: Dashboard;
   edit: boolean;
+  overview?: boolean;
   onToggleEdit: () => void;
 }) {
   const router = useRouter();
@@ -188,8 +194,12 @@ function DashboardHeader({
   return (
     <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
       <div className="min-w-0">
-        <p className="eyebrow">Dashboard</p>
-        {renaming ? (
+        <p className="eyebrow">{overview ? "Home" : "Dashboard"}</p>
+        {overview ? (
+          <h1 className="mt-1.5 truncate font-display text-3xl leading-none tracking-tight sm:text-4xl">
+            {dashboard.name}
+          </h1>
+        ) : renaming ? (
           <div className="mt-1.5 flex items-center gap-2">
             <input
               autoFocus
@@ -251,7 +261,7 @@ function DashboardHeader({
             </>
           )}
         </Button>
-        {edit && (
+        {edit && !overview && (
           <Button
             variant="ghost"
             size="sm"

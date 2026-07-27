@@ -13,7 +13,7 @@
  * the DB; never import from a client component.
  */
 
-import { sql } from "drizzle-orm";
+import { ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   accounts,
@@ -49,6 +49,7 @@ import {
 } from "@/db/schema";
 import { REIMBURSABLE_CATEGORY_ID, seedCategories } from "@/lib/seed-categories-data";
 import { isFirstRunDone, markFirstRunDone, setDemoMode } from "@/lib/app-config";
+import { OVERVIEW_DASHBOARD_ID } from "@/lib/queries";
 import { hasPlaidCredentials } from "@/lib/plaid";
 
 /**
@@ -72,8 +73,11 @@ export function wipeFinancialData(): void {
   db.delete(vendorGroupMembers).run();
   db.delete(vendorGroups).run();
   db.delete(recurringStreams).run();
-  db.delete(dashboardWidgets).run();
-  db.delete(dashboards).run();
+  // Clear custom dashboards, but PRESERVE the reserved Overview board (the app's
+  // home) and its widgets — wiping demo data on the demo→real switch must not
+  // throw away the user's Overview layout.
+  db.delete(dashboardWidgets).where(ne(dashboardWidgets.dashboardId, OVERVIEW_DASHBOARD_ID)).run();
+  db.delete(dashboards).where(ne(dashboards.id, OVERVIEW_DASHBOARD_ID)).run();
   db.delete(allocationTargets).run();
   db.delete(investmentGeographies).run();
 
@@ -112,7 +116,13 @@ export function seedDemoData(): { transactions: number; budgets: number } {
   const iso = (d: Date): string => d.toISOString().slice(0, 10);
   const daysAgo = (n: number): string => {
     const d = new Date(NOW);
-    d.setDate(d.getDate() - n);
+    // Subtract days in UTC to match `iso` (which formats in UTC). Using the local
+    // setDate/getDate here instead lets a DST offset change between two adjacent
+    // `n` collapse them onto the same UTC date string — which duplicates a
+    // balance_snapshots (account_id, date) row and throws a UNIQUE constraint,
+    // crashing first-run demo seeding for any install whose window spans a
+    // spring-forward transition.
+    d.setUTCDate(d.getUTCDate() - n);
     return iso(d);
   };
 

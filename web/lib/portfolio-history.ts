@@ -6,6 +6,15 @@ export type Position = { ticker: string; quantity: number };
 export type HoldingQty = { ticker: string | null; quantity: number | null };
 export type Trade = { ticker: string | null; date: string; quantity: number | null };
 
+/**
+ * A reconstructed value point carrying the day's *external* cash flow alongside
+ * the market value. `flow` is the net capital moved into the portfolio that day
+ * (buys × mark − sells × mark): positive = deposit, negative = withdrawal. It's
+ * what a time-weighted return must back out so deposited capital isn't mistaken
+ * for appreciation. See buildReconstructedSeriesWithFlows.
+ */
+export type ReconstructedPoint = { date: string; value: number; flow: number };
+
 /** Per-ticker daily close history, keyed by UPPER-cased ticker. */
 export async function getTickerHistories(
   symbols: string[],
@@ -132,6 +141,30 @@ export function buildReconstructedSeries(
   trades: Trade[],
   histories: Record<string, PricePoint[]>,
 ): { date: string; value: number }[] {
+  // Thin wrapper preserving the historical {date,value} shape for callers that
+  // don't care about cash flows (the dashboard net-worth overlay). All the real
+  // work — including the per-day flow it discards — lives in the flows variant.
+  return buildReconstructedSeriesWithFlows(holdings, trades, histories).map((p) => ({
+    date: p.date,
+    value: p.value,
+  }));
+}
+
+/**
+ * Same reconstruction as buildReconstructedSeries, but each point also carries
+ * the day's *external cash flow* — the net capital deposited (buys) or withdrawn
+ * (sells) that day, valued at the day's mark.
+ *
+ * This is the input a time-weighted return needs: TWR backs the flow out of the
+ * day's value so buying shares (which steps market value up by the deposited
+ * capital) isn't counted as investment appreciation. Buys contribute a positive
+ * flow, sells a negative one; a day with no trades has flow 0.
+ */
+export function buildReconstructedSeriesWithFlows(
+  holdings: HoldingQty[],
+  trades: Trade[],
+  histories: Record<string, PricePoint[]>,
+): ReconstructedPoint[] {
   const currentQty = new Map<string, number>();
   for (const h of holdings) {
     if (!h.ticker) continue;
@@ -182,31 +215,39 @@ export function buildReconstructedSeries(
     lastClose[sym] = null;
   }
 
-  const series: { date: string; value: number }[] = [];
+  const series: ReconstructedPoint[] = [];
   for (const date of dates) {
     let value = 0;
+    let flow = 0;
     let any = false;
     for (const sym of tickers) {
+      // Resolve today's mark first so trades executed today are valued at the
+      // same close we mark the resulting position at.
+      const close = priceMaps[sym].get(date);
+      if (close != null) lastClose[sym] = close;
+      const px = lastClose[sym];
+
       const arr = tradesByTicker.get(sym) ?? [];
       let p = ptr.get(sym)!;
       let held = shares.get(sym)!;
       while (p < arr.length && arr[p].date <= date) {
         held += arr[p].quantity;
+        // Capital moved in/out of the portfolio today: shares traded × the
+        // day's mark. Buys (qty > 0) are deposits (+), sells (qty < 0) are
+        // withdrawals (−). Only counts once we have a price to value it at.
+        if (px != null) flow += arr[p].quantity * px;
         p++;
       }
       ptr.set(sym, p);
       shares.set(sym, held);
 
-      const close = priceMaps[sym].get(date);
-      if (close != null) lastClose[sym] = close;
-      const px = lastClose[sym];
       const sh = Math.max(held, 0);
       if (px != null && sh > 0) {
         value += px * sh;
         any = true;
       }
     }
-    if (any) series.push({ date, value });
+    if (any) series.push({ date, value, flow });
   }
   return series;
 }

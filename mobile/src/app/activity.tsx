@@ -12,7 +12,7 @@ import { CategoryIcon, catName, categoryIndex, pickerCategories } from "@/catego
 import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { Bars, Card, Eyebrow, SyncBanner } from "@/ui/bits";
+import { Bars, Card, Eyebrow, Segmented, SyncBanner } from "@/ui/bits";
 import { Screen } from "@/ui/screen";
 import { useEntering } from "@/ui/motion";
 import { Sheet } from "@/ui/sheet";
@@ -37,20 +37,12 @@ function SpendChart({ points }: { points: SparkPoint[] }) {
           <Eyebrow>{`Spending · ${tf.label.toLowerCase()}`}</Eyebrow>
           <Text style={cs.total}>{money(total)}</Text>
         </View>
-        <View style={cs.chips}>
-          {TIMEFRAMES.map((t) => (
-            <Pressable
-              key={t.label}
-              hitSlop={6}
-              onPress={() => {
-                haptics.tick();
-                setTf(t);
-              }}
-              style={[cs.chip, tf.label === t.label && cs.chipActive]}
-            >
-              <Text style={[cs.chipText, tf.label === t.label && cs.chipTextActive]}>{t.label}</Text>
-            </Pressable>
-          ))}
+        <View style={cs.segWrap}>
+          <Segmented
+            options={TIMEFRAMES.map((t) => ({ label: t.label, value: t.label }))}
+            value={tf.label}
+            onChange={(v) => setTf(TIMEFRAMES.find((t) => t.label === v)!)}
+          />
         </View>
       </View>
       {windowed.length > 0 ? (
@@ -254,17 +246,7 @@ export default function Activity() {
 const cs = StyleSheet.create({
   head: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   total: { color: T.paper, fontSize: 24, fontFamily: F.display, marginTop: 6 },
-  chips: { flexDirection: "row", gap: 6 },
-  chip: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.line,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  chipActive: { backgroundColor: T.jade, borderColor: T.jade },
-  chipText: { color: T.muted, fontSize: 11, fontFamily: F.sansSemiBold },
-  chipTextActive: { color: T.onJade },
+  segWrap: { width: 176 },
   empty: { color: T.faint, fontSize: 12, fontFamily: F.sans, marginTop: 12 },
 });
 

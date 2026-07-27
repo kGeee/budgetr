@@ -12,7 +12,7 @@ import { agoLabel, moneyCompact } from "@/format";
 import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
-import { Card, Eyebrow, Spark, SyncBanner } from "@/ui/bits";
+import { Card, Eyebrow, Spark, StatRow, SyncBanner } from "@/ui/bits";
 import { AnimatedMoney, PressableScale, useEntering } from "@/ui/motion";
 import { Screen } from "@/ui/screen";
 import { Sheet } from "@/ui/sheet";
@@ -148,6 +148,18 @@ export default function Overview() {
                 <Eyebrow>Net worth</Eyebrow>
                 <AnimatedMoney cents={summary.netWorth.cents} style={s.heroValue} />
                 <Spark points={summary.netWorth.spark} height={116} />
+                {(() => {
+                  const assets = summary.accounts.reduce((a, x) => a + Math.max(0, x.cents), 0);
+                  const debts = summary.accounts.reduce((a, x) => a + Math.max(0, -x.cents), 0);
+                  return (
+                    <StatRow
+                      items={[
+                        { label: "Assets", value: moneyCompact(assets), tint: T.jade },
+                        { label: "Debts", value: moneyCompact(debts), tint: debts > 0 ? T.coral : undefined },
+                      ]}
+                    />
+                  );
+                })()}
               </Card>
             </Animated.View>
 

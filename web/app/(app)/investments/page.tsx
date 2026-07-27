@@ -16,11 +16,11 @@ import {
   sectorKeyFor,
 } from "@/lib/queries";
 import {
-  buildReconstructedSeries,
+  buildReconstructedSeriesWithFlows,
   getTickerHistories,
   type PricePoint,
 } from "@/lib/portfolio-history";
-import { computeComparison, type BenchmarkKey } from "@/lib/benchmark";
+import { computeComparison, twrIndexSeries, type BenchmarkKey } from "@/lib/benchmark";
 import { parseOccSymbol } from "@/lib/options";
 import { getDividendCalendar, getOptionChain, type OptionQuote } from "@/lib/yahoo";
 import { getCboeOptionChain } from "@/lib/cboe";
@@ -138,7 +138,10 @@ export default async function InvestmentsPage() {
   const trades = transactions
     .filter((t) => t.quantity != null && t.quantity !== 0)
     .map((t) => ({ ticker: t.ticker, date: t.date, quantity: t.quantity }));
-  const rawSeries = buildReconstructedSeries(holdings, trades, histories);
+  // Reconstructed series carries each day's external cash flow (buys/sells) too,
+  // which the time-weighted return below needs. The plain value line ignores it.
+  const reconstructed = buildReconstructedSeriesWithFlows(holdings, trades, histories);
+  const rawSeries = reconstructed.map((p) => ({ date: p.date, value: p.value }));
 
   // Fold fixed-value manual assets (no symbol) into the chart as a constant so
   // the portfolio line matches the headline Market value. Tickered manual
@@ -151,6 +154,15 @@ export default async function InvestmentsPage() {
       ? rawSeries.map((p) => ({ date: p.date, value: p.value + fixedValueTotal }))
       : rawSeries;
 
+  // Time-weighted return index (base 100) for the benchmark comparison. TWR
+  // removes the effect of deposits/withdrawals so the portfolio's return is
+  // measured purely on price appreciation — apples-to-apples with SPY/QQQ, which
+  // carry no cash flows. Basing this on `reconstructed` (the tickered series +
+  // its dated buy/sell flows) deliberately EXCLUDES the constant fixed-value
+  // block: with no dated flow and a flat value, folding it in would only drag
+  // every daily return toward zero without representing any real performance.
+  const portfolioReturnSeries = twrIndexSeries(reconstructed);
+
   // Benchmark comparison: pull SPY/QQQ closes (via the shared 6h Yahoo Data
   // Cache) and measure the portfolio's return against them per window. Skipped
   // when there's no portfolio series to compare (empty holdings).
@@ -162,7 +174,10 @@ export default async function InvestmentsPage() {
     SPY: benchmarkSeries.SPY,
     QQQ: benchmarkSeries.QQQ,
   };
-  const comparison = computeComparison(portfolioSeries, benchmarks);
+  // Compare the deposit-adjusted (time-weighted) portfolio return against the
+  // benchmarks, not the raw market-value line — otherwise a day's deposit would
+  // read as outperformance.
+  const comparison = computeComparison(portfolioReturnSeries, benchmarks);
 
   // Options analytics: for the distinct OCC underlyings we hold, pull Yahoo's
   // option chains (only when option legs exist) for live IV + underlying prices,
@@ -224,6 +239,7 @@ export default async function InvestmentsPage() {
         holdings={holdings}
         histories={histories}
         portfolioSeries={portfolioSeries}
+        portfolioReturnSeries={portfolioReturnSeries}
         benchmarks={benchmarks}
         comparison={comparison}
         transactions={transactions}

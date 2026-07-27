@@ -1,6 +1,11 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { DashboardView, type ResolvedWidget } from "@/components/dashboard-view";
-import { getCategories, getDashboardWithWidgets, getWidgetData } from "@/lib/queries";
+import {
+  getCategories,
+  getDashboardWithWidgets,
+  getWidgetData,
+  OVERVIEW_DASHBOARD_ID,
+} from "@/lib/queries";
 import type { WidgetConfig } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +25,9 @@ export default async function DashboardDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  // The reserved Overview board lives at /overview (edited in overview mode, no
+  // delete). Bounce any direct link to it there.
+  if (id === OVERVIEW_DASHBOARD_ID) redirect("/overview");
   const found = getDashboardWithWidgets(id);
   if (!found) notFound();
 

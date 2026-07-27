@@ -12,7 +12,7 @@ import * as haptics from "@/haptics";
 import { F, stateColor, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
 import Animated, { FadeIn, LinearTransition, useReducedMotion } from "react-native-reanimated";
-import { Card, Eyebrow, SyncBanner } from "@/ui/bits";
+import { Card, Eyebrow, MeterBar, SyncBanner } from "@/ui/bits";
 import { Screen } from "@/ui/screen";
 import { useEntering } from "@/ui/motion";
 
@@ -245,9 +245,7 @@ export default function Budgets() {
                     <Text style={s.limit}> / {money(b.limitCents)}</Text>
                   </Text>
                 </View>
-                <View style={s.track}>
-                  <View style={[s.fill, { width: `${pct * 100}%`, backgroundColor: color }]} />
-                </View>
+                <MeterBar pct={pct} color={color} />
                 {b.state !== "ok" && (
                   <Text style={[s.stateNote, { color }]}>
                     {b.state === "over" ? "Over budget" : "Approaching limit"}
@@ -286,8 +284,6 @@ const s = StyleSheet.create({
   amounts: { fontSize: 13 },
   spent: { fontFamily: F.monoSemiBold },
   limit: { color: T.faint, fontFamily: F.mono },
-  track: { height: 7, borderRadius: 4, backgroundColor: T.ink, marginTop: 12, overflow: "hidden" },
-  fill: { height: "100%", borderRadius: 4 },
   stateNote: {
     fontSize: 10.5,
     marginTop: 8,
