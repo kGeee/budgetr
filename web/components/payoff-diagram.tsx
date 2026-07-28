@@ -19,18 +19,33 @@ export function PayoffDiagram({
   legs,
   currentPrice,
   breakevens,
+  theoFn,
   className = "",
 }: {
   legs: PayoffLeg[];
   currentPrice?: number | null;
   breakevens?: number[];
+  /** Optional P&L-vs-price function for a date before expiry — drawn as the
+   *  dashed "value now" curve over the solid expiry payoff (OptionStrat-style).
+   *  Sampled on the diagram's own x-domain so it aligns exactly. */
+  theoFn?: ((price: number) => number) | null;
   className?: string;
 }) {
   const geo = useMemo(() => {
     const { points, min, max } = payoffCurve(legs, { center: currentPrice ?? null });
     if (points.length < 2 || max <= min) return null;
 
-    const pnls = points.map((p) => p.pnl);
+    // Sample the "value now" curve across the same domain when provided.
+    const theo: { price: number; pnl: number }[] = [];
+    if (theoFn) {
+      const N = 88;
+      for (let i = 0; i < N; i++) {
+        const price = min + (i / (N - 1)) * (max - min);
+        theo.push({ price, pnl: theoFn(price) });
+      }
+    }
+
+    const pnls = [...points.map((p) => p.pnl), ...theo.map((p) => p.pnl)];
     let loY = Math.min(0, ...pnls);
     let hiY = Math.max(0, ...pnls);
     if (hiY === loY) hiY = loY + 1;
@@ -50,12 +65,15 @@ export function PayoffDiagram({
       .map((p) => `L ${sx(p.price)},${sy(p.pnl)}`)
       .join(" ")} L ${sx(points[points.length - 1].price)},${zeroY} Z`;
 
+    const theoLine =
+      theo.length > 1 ? theo.map((p) => `${sx(p.price)},${sy(p.pnl)}`).join(" ") : null;
+
     const bes = (breakevens ?? []).filter((b) => b >= min && b <= max);
-    return { points, min, max, sx, sy, zeroY, line, area, bes };
-  }, [legs, currentPrice, breakevens]);
+    return { points, min, max, sx, sy, zeroY, line, area, bes, theoLine };
+  }, [legs, currentPrice, breakevens, theoFn]);
 
   if (!geo) return null;
-  const { sx, sy, zeroY, line, area, bes, min, max } = geo;
+  const { sx, sy, zeroY, line, area, bes, min, max, theoLine } = geo;
   const clampX = (x: number) => Math.max(M.left, Math.min(W - M.right, x));
 
   return (
@@ -92,6 +110,18 @@ export function PayoffDiagram({
       {/* The payoff curve, coloured by side of zero */}
       <polyline points={line} fill="none" stroke="var(--jade)" strokeWidth={2} clipPath="url(#pf-profit)" />
       <polyline points={line} fill="none" stroke="var(--coral)" strokeWidth={2} clipPath="url(#pf-loss)" />
+
+      {/* "Value now" (pre-expiry) curve — dashed brass over the solid expiry line */}
+      {theoLine && (
+        <polyline
+          points={theoLine}
+          fill="none"
+          stroke="var(--brass)"
+          strokeWidth={1.5}
+          strokeDasharray="4 3"
+          opacity={0.85}
+        />
+      )}
 
       {/* Breakeven markers */}
       {bes.map((be, i) => (

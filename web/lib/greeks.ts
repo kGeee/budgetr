@@ -97,3 +97,32 @@ export function computeGreeks(
 
   return { delta, gamma, theta, vega, rho };
 }
+
+/**
+ * Black-Scholes price per share for a European option at an EXPLICIT
+ * time-to-expiry `T` (in years) — the piece computeGreeks can't give, since it
+ * pins T to the calendar expiry. This is what lets us value a position "now" or
+ * on any future date (for the value-over-time curve + P/L heatmap): at expiry
+ * (T ≤ 0) or zero vol it collapses to intrinsic, so the curves join the expiry
+ * payoff cleanly.
+ */
+export function bsPrice(
+  right: "call" | "put",
+  S: number,
+  K: number,
+  T: number,
+  sigma: number,
+  rate: number = RISK_FREE_RATE,
+): number {
+  if (!(S > 0) || !(K > 0)) return 0;
+  if (!(T > 0) || !(sigma > 0)) {
+    return right === "call" ? Math.max(S - K, 0) : Math.max(K - S, 0);
+  }
+  const sqrtT = Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (rate + (sigma * sigma) / 2) * T) / (sigma * sqrtT);
+  const d2 = d1 - sigma * sqrtT;
+  const disc = Math.exp(-rate * T);
+  return right === "call"
+    ? S * normCdf(d1) - K * disc * normCdf(d2)
+    : K * disc * normCdf(-d2) - S * normCdf(-d1);
+}
