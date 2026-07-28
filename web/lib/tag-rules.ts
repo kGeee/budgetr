@@ -99,8 +99,8 @@ function applyAdvancedRule(
       VALUES (${row.id}, ${rule.tagId})`);
     created += (res as { changes: number }).changes;
 
-    // Assign the rule's category only to still-uncategorised rows, so a manual
-    // user categorisation is never clobbered and re-runs stay idempotent.
+    // Assign the rule's category only to still-uncategorized rows, so a manual
+    // user categorization is never clobbered and re-runs stay idempotent.
     if (rule.categoryId != null) {
       db.run(sql`
         UPDATE transactions SET user_category_id = ${rule.categoryId}
