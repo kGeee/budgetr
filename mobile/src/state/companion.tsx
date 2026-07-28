@@ -11,7 +11,7 @@ import * as haptics from "@/haptics";
 import { clearCache, loadCachedSummary, loadPendingOps, savePendingOps } from "@/sync/cache";
 import { clearMaterial, loadMaterial, saveMaterial } from "@/sync/material";
 import { syncOnce, type SyncStatus } from "@/sync/client";
-import { publishWidgetData } from "@/widget";
+import { publishWidgetData, type WidgetStatus } from "@/widget";
 import { uuid4 } from "@/sync/uuid";
 
 export type Phase = "loading" | "unpaired" | "ready" | "update-required";
@@ -23,6 +23,7 @@ interface CompanionState {
   lastSyncAt: number | null;
   syncError: string | null; // human string when the last sync failed; null = healthy
   refreshing: boolean;
+  widget: WidgetStatus; // whether the Home/Lock Screen payload is actually landing
   pair(qrPayload: string): Promise<string | null>; // returns error message or null
   refresh(): Promise<void>;
   recategorize(txnId: string, toCategory: string): void;
@@ -56,28 +57,43 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [widget, setWidget] = useState<WidgetStatus>({ state: "unknown" });
   const material = useRef<PairingMaterial | null>(null);
   const etag = useRef<string | null>(null);
   const syncing = useRef(false);
+  const latest = useRef<Summary | null>(null); // newest summary, for republishing on 304
 
-  const absorb = useCallback((status: SyncStatus, fresh: Summary | null, ops: Op[], detail?: string) => {
-    setPendingOps(ops);
-    if (status === "ok" && fresh) {
-      setSummary(fresh);
-      setLastSyncAt(Math.floor(Date.now() / 1000));
-      setSyncError(null);
-      publishWidgetData(fresh); // keep the Home/Lock Screen in lockstep
-    } else if (status === "not-modified") {
-      setLastSyncAt(Math.floor(Date.now() / 1000));
-      setSyncError(null);
-    } else if (status === "update-required") {
-      setPhase("update-required");
-    } else if (status === "offline") {
-      setSyncError("offline — showing saved data");
-    } else {
-      setSyncError(detail ?? "sync error — showing saved data");
-    }
+  // Keep the Home/Lock Screen in lockstep. Republished on every successful
+  // sync — including 304s — so a widget that lost its payload (reinstall, new
+  // build, App Group reset) heals on the next foreground refresh instead of
+  // waiting for the desktop to change something.
+  const publish = useCallback((s: Summary | null) => {
+    latest.current = s;
+    if (s) setWidget(publishWidgetData(s));
   }, []);
+
+  const absorb = useCallback(
+    (status: SyncStatus, fresh: Summary | null, ops: Op[], detail?: string) => {
+      setPendingOps(ops);
+      if (status === "ok" && fresh) {
+        setSummary(fresh);
+        setLastSyncAt(Math.floor(Date.now() / 1000));
+        setSyncError(null);
+        publish(fresh);
+      } else if (status === "not-modified") {
+        setLastSyncAt(Math.floor(Date.now() / 1000));
+        setSyncError(null);
+        publish(latest.current);
+      } else if (status === "update-required") {
+        setPhase("update-required");
+      } else if (status === "offline") {
+        setSyncError("offline — showing saved data");
+      } else {
+        setSyncError(detail ?? "sync error — showing saved data");
+      }
+    },
+    [publish],
+  );
 
   const refresh = useCallback(async () => {
     const m = material.current;
@@ -110,13 +126,13 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         setSummary(cached.summary);
         etag.current = cached.etag;
         setLastSyncAt(cached.lastSyncAt);
-        publishWidgetData(cached.summary);
+        publish(cached.summary);
       }
       setPendingOps(await loadPendingOps());
       setPhase("ready");
       void refresh();
     })();
-  }, [refresh]);
+  }, [publish, refresh]);
 
   // refresh whenever the app comes to the foreground
   useEffect(() => {
@@ -186,11 +202,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setLastSyncAt(null);
     setSyncError(null);
     setPhase("unpaired");
+    latest.current = null;
   }, []);
 
   return (
     <Ctx.Provider
-      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, pair, refresh, recategorize, dismissAlert, unpair }}
+      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, widget, pair, refresh, recategorize, dismissAlert, unpair }}
     >
       {children}
     </Ctx.Provider>

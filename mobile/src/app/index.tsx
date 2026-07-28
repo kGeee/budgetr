@@ -12,14 +12,30 @@ import { agoLabel, moneyCompact } from "@/format";
 import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
+import type { WidgetStatus } from "@/widget";
 import { Card, Eyebrow, Spark, StatRow, SyncBanner } from "@/ui/bits";
 import { AnimatedMoney, PressableScale, useEntering } from "@/ui/motion";
 import { Screen } from "@/ui/screen";
 import { Sheet } from "@/ui/sheet";
 
+/** Home/Lock Screen widget health — the widget itself can only say "open the app". */
+function widgetLabel(w: WidgetStatus): { text: string; ok: boolean } {
+  switch (w.state) {
+    case "published":
+      return { text: `updated ${agoLabel(w.at)}`, ok: true };
+    case "unavailable":
+      return { text: "unavailable in this build", ok: false };
+    case "failed":
+      return { text: w.detail, ok: false };
+    default:
+      return { text: "waiting for a sync", ok: true };
+  }
+}
+
 function SettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const { lastSyncAt, refresh, unpair, syncError } = useCompanion();
+  const { lastSyncAt, refresh, unpair, syncError, widget } = useCompanion();
   const [confirming, setConfirming] = useState(false);
+  const w = widgetLabel(widget);
 
   return (
     <Sheet visible={visible} onClose={onClose}>
@@ -33,6 +49,10 @@ function SettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => 
       <View style={st.row}>
         <Text style={st.rowLabel}>Status</Text>
         <Text style={[st.rowValue, { color: syncError ? T.brass : T.jade }]}>{syncError ?? "healthy"}</Text>
+      </View>
+      <View style={st.row}>
+        <Text style={st.rowLabel}>Widget</Text>
+        <Text style={[st.rowValue, { color: w.ok ? T.jade : T.brass }]}>{w.text}</Text>
       </View>
       <View style={st.row}>
         <Text style={st.rowLabel}>Version</Text>

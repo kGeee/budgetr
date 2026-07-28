@@ -1,28 +1,44 @@
 // Publishes the widget payload into the shared App Group and reloads the
 // WidgetKit timelines. Keep the shape in sync with targets/widget/index.swift.
 //
-// The native module only exists in a dev/release build (@bacons/apple-targets
-// links it at prebuild). In Expo Go the require fails and every call becomes
-// a silent no-op — widgets are simply a real-build feature.
+// We talk to the ExtensionStorage native module directly instead of going
+// through @bacons/apple-targets' JS wrapper: that wrapper swaps in no-op stubs
+// whenever the native module is missing (Expo Go, or a binary built before the
+// widget target was linked), so every write silently succeeds while nothing
+// reaches the App Group — the widget just keeps saying "Open the app to sync"
+// with no way to tell why. Here the module is either present or it isn't, and
+// every publish is verified by reading the value back.
 
 import type { Summary } from "@budgetr/core";
 
 const APP_GROUP = "group.dev.budgetr.companion";
+const KEY = "widgetPayload";
 
-type StorageLike = { set(key: string, value: string): void };
-let storage: StorageLike | null = null;
-let reload: (() => void) | null = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { ExtensionStorage } = require("@bacons/apple-targets");
-  storage = new ExtensionStorage(APP_GROUP);
-  reload = () => ExtensionStorage.reloadWidget();
-} catch {
-  // Expo Go — no widget host, nothing to publish to.
+/** What the last publish attempt did — surfaced in Settings so this is debuggable. */
+export type WidgetStatus =
+  | { state: "unknown" } // nothing published yet this launch
+  | { state: "published"; at: number } // wrote and read it back; unix seconds
+  | { state: "unavailable" } // no ExtensionStorage module — Expo Go, or needs a rebuild
+  | { state: "failed"; detail: string };
+
+// Expo registers native modules on the `expo` global; ExtensionStorage ships
+// with @bacons/apple-targets and is linked at prebuild.
+interface ExtensionStorageModule {
+  setString(key: string, value: string, group?: string): void;
+  get(key: string, group?: string): string | null;
+  reloadWidget(name?: string): void;
 }
 
-export function publishWidgetData(summary: Summary): void {
-  if (!storage) return;
+function nativeStorage(): ExtensionStorageModule | null {
+  const g = globalThis as unknown as { expo?: { modules?: Record<string, unknown> } };
+  const mod = g.expo?.modules?.ExtensionStorage as ExtensionStorageModule | undefined;
+  return mod && typeof mod.setString === "function" && typeof mod.get === "function" ? mod : null;
+}
+
+export function publishWidgetData(summary: Summary): WidgetStatus {
+  const storage = nativeStorage();
+  if (!storage) return { state: "unavailable" };
+
   try {
     const payload = {
       asOf: summary.asOf,
@@ -32,10 +48,21 @@ export function publishWidgetData(summary: Summary): void {
       budgetCents: summary.budgets.reduce((a, b) => a + b.limitCents, 0),
       ...budgetPace(summary),
     };
-    storage.set("widgetPayload", JSON.stringify(payload));
-    reload?.();
-  } catch {
+    const json = JSON.stringify(payload);
+    storage.setString(KEY, json, APP_GROUP);
+
+    // Read it back: if the App Group isn't actually shared (entitlement or
+    // provisioning profile missing the group) writes go nowhere, and this is
+    // the only signal we get on the app side.
+    if (!storage.get(KEY, APP_GROUP)) {
+      return { state: "failed", detail: "App Group write did not land" };
+    }
+
+    storage.reloadWidget();
+    return { state: "published", at: Math.floor(Date.now() / 1000) };
+  } catch (err) {
     // Never let widget publishing break sync.
+    return { state: "failed", detail: err instanceof Error ? err.message : "publish failed" };
   }
 }
 
