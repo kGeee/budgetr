@@ -70,6 +70,13 @@ describe("mintLicenseKey", () => {
     }
   });
 
+  it("recovers a mangled single-line PEM (env UIs collapse newlines)", () => {
+    // Simulate a key pasted into an env UI that stripped the line breaks.
+    process.env.LICENSE_SIGNING_KEY = priv.replace(/\n/g, " ");
+    const res = verifyLicense(mintLicenseKey({ email: "b@x.com", orderId: "o1" }), pub);
+    expect(res.valid).toBe(true);
+  });
+
   it("re-mints the identical key for the same order id (idempotent delivery)", () => {
     process.env.LICENSE_SIGNING_KEY = priv;
     // iat differs by clock, but a fixed order → fixed id; keys with the same
