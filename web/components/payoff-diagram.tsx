@@ -4,10 +4,12 @@
  * Expiry payoff diagram — the signature "profit/loss vs. underlying price" curve
  * (OptionStrat-style). Fully derived from the payoff engine: profit is shaded
  * jade, loss coral, with markers for each breakeven and the live underlying
- * price. Pure SVG (no chart lib), theme-aware via CSS variables.
+ * price. An optional `theoFn` overlays the dashed "value now" (pre-expiry) curve.
+ * Hovering shows a crosshair + a readout of the P&L at that price. Pure SVG (no
+ * chart lib), theme-aware via CSS variables.
  */
 
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { formatStrike } from "@/lib/options";
 import { payoffCurve, type PayoffLeg } from "@/lib/payoff";
 
@@ -15,11 +17,20 @@ const W = 560;
 const H = 208;
 const M = { top: 14, right: 16, bottom: 26, left: 16 };
 
+function money(n: number, currency: string): string {
+  const s = n < 0 ? "−" : "";
+  const abs = Math.abs(n);
+  const sym = currency === "USD" ? "$" : "";
+  if (abs >= 1000) return `${s}${sym}${(abs / 1000).toFixed(abs >= 10000 ? 0 : 1)}k`;
+  return `${s}${sym}${abs.toFixed(0)}`;
+}
+
 export function PayoffDiagram({
   legs,
   currentPrice,
   breakevens,
   theoFn,
+  currency = "USD",
   className = "",
 }: {
   legs: PayoffLeg[];
@@ -29,13 +40,16 @@ export function PayoffDiagram({
    *  dashed "value now" curve over the solid expiry payoff (OptionStrat-style).
    *  Sampled on the diagram's own x-domain so it aligns exactly. */
   theoFn?: ((price: number) => number) | null;
+  currency?: string;
   className?: string;
 }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hoverPrice, setHoverPrice] = useState<number | null>(null);
+
   const geo = useMemo(() => {
     const { points, min, max } = payoffCurve(legs, { center: currentPrice ?? null });
     if (points.length < 2 || max <= min) return null;
 
-    // Sample the "value now" curve across the same domain when provided.
     const theo: { price: number; pnl: number }[] = [];
     if (theoFn) {
       const N = 88;
@@ -60,7 +74,6 @@ export function PayoffDiagram({
 
     const zeroY = sy(0);
     const line = points.map((p) => `${sx(p.price)},${sy(p.pnl)}`).join(" ");
-    // Area between the curve and the zero baseline; clipped halves colour it.
     const area = `M ${sx(points[0].price)},${zeroY} ${points
       .map((p) => `L ${sx(p.price)},${sy(p.pnl)}`)
       .join(" ")} L ${sx(points[points.length - 1].price)},${zeroY} Z`;
@@ -73,16 +86,39 @@ export function PayoffDiagram({
   }, [legs, currentPrice, breakevens, theoFn]);
 
   if (!geo) return null;
-  const { sx, sy, zeroY, line, area, bes, min, max, theoLine } = geo;
+  const { sx, sy, zeroY, line, area, bes, min, max, theoLine, points } = geo;
   const clampX = (x: number) => Math.max(M.left, Math.min(W - M.right, x));
+
+  function onMove(e: React.MouseEvent<SVGSVGElement>) {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const xView = ((e.clientX - rect.left) / rect.width) * W;
+    const price = min + ((xView - M.left) / (W - M.left - M.right)) * (max - min);
+    setHoverPrice(Math.max(min, Math.min(max, price)));
+  }
+
+  // Hover readout geometry.
+  const hover =
+    hoverPrice != null
+      ? (() => {
+          const expPnl = payoffAt(points, hoverPrice);
+          const nowPnl = theoFn ? theoFn(hoverPrice) : null;
+          const x = sx(hoverPrice);
+          return { x, expPnl, nowPnl, expY: sy(expPnl), nowY: nowPnl != null ? sy(nowPnl) : null };
+        })()
+      : null;
 
   return (
     <svg
+      ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
       className={`w-full ${className}`}
       style={{ height: "auto" }}
       role="img"
       aria-label="Option payoff at expiry"
+      onMouseMove={onMove}
+      onMouseLeave={() => setHoverPrice(null)}
     >
       <defs>
         <clipPath id="pf-profit">
@@ -93,88 +129,91 @@ export function PayoffDiagram({
         </clipPath>
       </defs>
 
-      {/* Profit / loss fills */}
       <path d={area} fill="var(--jade)" opacity={0.16} clipPath="url(#pf-profit)" />
       <path d={area} fill="var(--coral)" opacity={0.16} clipPath="url(#pf-loss)" />
 
-      {/* Zero P&L baseline */}
-      <line
-        x1={M.left}
-        x2={W - M.right}
-        y1={zeroY}
-        y2={zeroY}
-        stroke="var(--line-strong)"
-        strokeWidth={1}
-      />
+      <line x1={M.left} x2={W - M.right} y1={zeroY} y2={zeroY} stroke="var(--line-strong)" strokeWidth={1} />
 
-      {/* The payoff curve, coloured by side of zero */}
       <polyline points={line} fill="none" stroke="var(--jade)" strokeWidth={2} clipPath="url(#pf-profit)" />
       <polyline points={line} fill="none" stroke="var(--coral)" strokeWidth={2} clipPath="url(#pf-loss)" />
 
-      {/* "Value now" (pre-expiry) curve — dashed brass over the solid expiry line */}
       {theoLine && (
-        <polyline
-          points={theoLine}
-          fill="none"
-          stroke="var(--brass)"
-          strokeWidth={1.5}
-          strokeDasharray="4 3"
-          opacity={0.85}
-        />
+        <polyline points={theoLine} fill="none" stroke="var(--brass)" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.85} />
       )}
 
       {/* Breakeven markers */}
       {bes.map((be, i) => (
         <g key={`be-${i}`}>
-          <line
-            x1={sx(be)}
-            x2={sx(be)}
-            y1={M.top}
-            y2={H - M.bottom}
-            stroke="var(--brass)"
-            strokeWidth={1}
-            strokeDasharray="3 3"
-            opacity={0.7}
-          />
-          <text
-            x={clampX(sx(be))}
-            y={H - 8}
-            textAnchor="middle"
-            fontSize={10}
-            fill="var(--brass)"
-            className="mono"
-          >
+          <line x1={sx(be)} x2={sx(be)} y1={M.top} y2={H - M.bottom} stroke="var(--brass)" strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
+          <text x={clampX(sx(be))} y={H - 8} textAnchor="middle" fontSize={10} fill="var(--brass)" className="mono">
             {formatStrike(Number(be.toFixed(2)))}
           </text>
         </g>
       ))}
 
-      {/* Current underlying price marker */}
-      {currentPrice != null && currentPrice >= min && currentPrice <= max && (
+      {/* Current underlying price marker (hidden while hovering to reduce clutter) */}
+      {currentPrice != null && currentPrice >= min && currentPrice <= max && hover == null && (
         <g>
-          <line
-            x1={sx(currentPrice)}
-            x2={sx(currentPrice)}
-            y1={M.top}
-            y2={H - M.bottom}
-            stroke="var(--paper)"
-            strokeWidth={1}
-            opacity={0.5}
-          />
-          <circle cx={sx(currentPrice)} cy={sy(payoffAt(geo.points, currentPrice))} r={3} fill="var(--paper)" />
-          <text
-            x={clampX(sx(currentPrice))}
-            y={M.top + 2}
-            textAnchor="middle"
-            fontSize={10}
-            fill="var(--paper)"
-            className="mono"
-          >
+          <line x1={sx(currentPrice)} x2={sx(currentPrice)} y1={M.top} y2={H - M.bottom} stroke="var(--paper)" strokeWidth={1} opacity={0.5} />
+          <circle cx={sx(currentPrice)} cy={sy(payoffAt(points, currentPrice))} r={3} fill="var(--paper)" />
+          <text x={clampX(sx(currentPrice))} y={M.top + 2} textAnchor="middle" fontSize={10} fill="var(--paper)" className="mono">
             {formatStrike(Number(currentPrice.toFixed(2)))}
           </text>
         </g>
       )}
+
+      {/* Hover crosshair + readout */}
+      {hover && (
+        <g>
+          <line x1={hover.x} x2={hover.x} y1={M.top} y2={H - M.bottom} stroke="var(--paper)" strokeWidth={1} opacity={0.55} />
+          {hover.nowY != null && <circle cx={hover.x} cy={hover.nowY} r={3} fill="var(--brass)" />}
+          <circle cx={hover.x} cy={hover.expY} r={3} fill={hover.expPnl >= 0 ? "var(--jade)" : "var(--coral)"} />
+          <HoverLabel
+            x={hover.x}
+            price={hoverPrice!}
+            expPnl={hover.expPnl}
+            nowPnl={hover.nowPnl}
+            currency={currency}
+          />
+        </g>
+      )}
     </svg>
+  );
+}
+
+/** Floating readout box near the crosshair, clamped inside the plot. */
+function HoverLabel({
+  x,
+  price,
+  expPnl,
+  nowPnl,
+  currency,
+}: {
+  x: number;
+  price: number;
+  expPnl: number;
+  nowPnl: number | null;
+  currency: string;
+}) {
+  const boxW = nowPnl != null ? 122 : 96;
+  const boxH = nowPnl != null ? 44 : 30;
+  const bx = Math.max(M.left, Math.min(W - M.right - boxW, x + 8));
+  const by = M.top + 2;
+  return (
+    <g pointerEvents="none">
+      <rect x={bx} y={by} width={boxW} height={boxH} rx={5} fill="var(--panel-2)" stroke="var(--line-strong)" opacity={0.97} />
+      <text x={bx + 8} y={by + 13} fontSize={10} fill="var(--muted)" className="mono">
+        {formatStrike(Number(price.toFixed(2)))}
+      </text>
+      <text x={bx + 8} y={by + 26} fontSize={11} fill={expPnl >= 0 ? "var(--jade)" : "var(--coral)"} className="mono">
+        Exp {money(expPnl, currency)}
+      </text>
+      {nowPnl != null && (
+        <text x={bx + 8} y={by + 39} fontSize={11} fill="var(--brass)" className="mono">
+          Now {money(nowPnl, currency)}
+        </text>
+      )}
+    </g>
   );
 }
 

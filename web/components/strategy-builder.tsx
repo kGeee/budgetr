@@ -23,10 +23,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Compass, Plus, Shield, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ChevronDown, Compass, Plus, Shield, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { PayoffDiagram } from "@/components/payoff-diagram";
-import { PnlMatrix } from "@/components/pnl-matrix";
+import { PnlMatrix, type MatrixMode } from "@/components/pnl-matrix";
 import { formatCurrency } from "@/lib/utils";
 import { daysToExpiry, formatOptionExpiry, formatStrike } from "@/lib/options";
 import { computeGreeks } from "@/lib/greeks";
@@ -426,6 +426,8 @@ function SafetyPanel({
   const dte = Math.max(0, Math.round(T * 365));
   const [daysFromNow, setDaysFromNow] = useState(0);
   const dNow = Math.min(daysFromNow, dte);
+  const [matrixOpen, setMatrixOpen] = useState(false);
+  const [matrixMode, setMatrixMode] = useState<MatrixMode>("pnl");
 
   // Per-leg implied vol (own IV, ATM fallback) — stable for the memos below.
   const sigmaFor: SigmaFor = useMemo(() => {
@@ -470,6 +472,7 @@ function SafetyPanel({
             currentPrice={spot}
             breakevens={analysis.breakevens}
             theoFn={dte > 0 ? theoFn : null}
+            currency={currency}
           />
           {dte > 0 && (
             <div className="mt-2">
@@ -556,27 +559,55 @@ function SafetyPanel({
         </div>
       </div>
 
-      {/* P/L heatmap — price × date, the OptionStrat matrix */}
+      {/* P/L heatmap — price × date, the OptionStrat matrix. Tucked behind a
+          toggle so the panel stays compact; a selector switches $ ↔ %. */}
       {dte > 0 && matrix.maxAbs > 0 && (
-        <div className="border-t border-line px-6 pb-6 pt-5">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="eyebrow">P&amp;L over time · price × date</span>
-            <span className="inline-flex items-center gap-3 text-[10px] text-[var(--muted)]">
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--jade) 55%, transparent)" }} /> profit
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--coral) 55%, transparent)" }} /> loss
-              </span>
-            </span>
+        <div className="border-t border-line px-6 pb-6 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setMatrixOpen((o) => !o)}
+              aria-expanded={matrixOpen}
+              className="eyebrow inline-flex items-center gap-2 transition-colors hover:text-[var(--paper)]"
+            >
+              <ChevronDown size={13} className={`transition-transform ${matrixOpen ? "" : "-rotate-90"}`} />
+              P&amp;L over time · price × date
+            </button>
+            {matrixOpen && (
+              <div className="flex items-center gap-3">
+                <span className="hidden items-center gap-3 text-[10px] text-[var(--muted)] sm:inline-flex">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--jade) 55%, transparent)" }} /> profit
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--coral) 55%, transparent)" }} /> loss
+                  </span>
+                </span>
+                <select
+                  value={matrixMode}
+                  onChange={(e) => setMatrixMode(e.target.value as MatrixMode)}
+                  aria-label="Heatmap data"
+                  className="rounded-lg border border-line bg-[var(--panel)] px-2 py-1 text-xs text-[var(--paper)] outline-none focus:border-[var(--brass-dim)]"
+                >
+                  <option value="pnl">P/L ($)</option>
+                  <option value="pct">P/L (%)</option>
+                </select>
+              </div>
+            )}
           </div>
-          <PnlMatrix
-            matrix={matrix}
-            dte={dte}
-            spot={spot}
-            breakevens={analysis.breakevens}
-            currency={currency}
-          />
+          {matrixOpen && (
+            <div className="mt-3">
+              <PnlMatrix
+                matrix={matrix}
+                dte={dte}
+                spot={spot}
+                breakevens={analysis.breakevens}
+                currency={currency}
+                mode={matrixMode}
+                capital={capital}
+              />
+            </div>
+          )}
         </div>
       )}
     </Card>
