@@ -16,11 +16,30 @@ export function isMintingConfigured(): boolean {
   return Boolean(process.env.LICENSE_SIGNING_KEY?.trim());
 }
 
-/** Normalize a PEM stored in an env var (newlines may arrive escaped as \n). */
+/**
+ * Read + normalize the signing key from the env var. PEMs are brittle to store
+ * in env UIs: newlines get escaped as `\n`, or collapsed entirely so the whole
+ * key lands on one line with spaces — either of which makes OpenSSL throw
+ * "DECODER routines::unsupported". Repair both: un-escape `\n`, and if there are
+ * no real line breaks, rebuild the PEM from the base64 body between the markers.
+ */
 function readPrivateKey(): string {
   const raw = process.env.LICENSE_SIGNING_KEY?.trim();
   if (!raw) throw new Error("LICENSE_SIGNING_KEY is not set.");
-  return raw.includes("\\n") ? raw.replace(/\\n/g, "\n") : raw;
+
+  let s = raw;
+  if (s.includes("\\n")) s = s.replace(/\\r/g, "").replace(/\\n/g, "\n");
+  if (s.includes("\n")) return s; // already multi-line — trust it
+
+  // Single-line PEM (newlines lost): reconstruct proper 64-char-wrapped lines.
+  const m = s.match(/-----BEGIN ([A-Z0-9 ]+?)-----(.*?)-----END \1-----/);
+  if (m) {
+    const label = m[1].trim();
+    const body = (m[2].match(/[A-Za-z0-9+/=]+/g) ?? []).join("");
+    const wrapped = body.match(/.{1,64}/g)?.join("\n") ?? body;
+    return `-----BEGIN ${label}-----\n${wrapped}\n-----END ${label}-----\n`;
+  }
+  return s;
 }
 
 /**
