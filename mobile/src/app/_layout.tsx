@@ -19,7 +19,7 @@ import {
   HankenGrotesk_700Bold,
 } from "@expo-google-fonts/hanken-grotesk";
 import { SplineSansMono_500Medium, SplineSansMono_600SemiBold } from "@expo-google-fonts/spline-sans-mono";
-import { ArrowLeftRight, LayoutDashboard, LineChart, Wallet } from "lucide-react-native";
+import { ArrowLeftRight, LineChart, PieChart, Wallet } from "lucide-react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { CompanionProvider, useCompanion } from "@/state/companion";
 import { PairingScreen } from "@/ui/pairing";
@@ -81,7 +81,7 @@ export default function RootLayout() {
         >
           <Tabs.Screen
             name="index"
-            options={{ title: "Overview", tabBarIcon: ({ color }) => <LayoutDashboard size={20} color={color} /> }}
+            options={{ title: "Spending", tabBarIcon: ({ color }) => <PieChart size={20} color={color} /> }}
           />
           <Tabs.Screen
             name="budgets"

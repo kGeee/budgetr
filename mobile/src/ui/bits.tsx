@@ -466,6 +466,116 @@ export function Donut({ slices, size = 132 }: { slices: { cents: number; color: 
   );
 }
 
+/**
+ * Compact, non-interactive bars for tiles and sheets, where there's no room for
+ * Bars' scrub readout. Days with no spend still take a slot so the rhythm of a
+ * month reads correctly — gaps are the signal.
+ */
+export function MiniBars({
+  points,
+  height = 40,
+  color = T.brass,
+}: {
+  points: SparkPoint[];
+  height?: number;
+  color?: string;
+}) {
+  const [width, setWidth] = React.useState(0);
+  if (points.length === 0) return null;
+  const max = Math.max(1, ...points.map((p) => p.cents));
+  const slot = width / points.length;
+  const barW = Math.max(1.5, slot * 0.58);
+
+  return (
+    <View style={{ height }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {width > 0 && (
+        <Svg width={width} height={height}>
+          {points.map((p, i) => {
+            const h = Math.max(1.5, (p.cents / max) * (height - 2));
+            return (
+              <Rect
+                key={p.d}
+                x={i * slot + (slot - barW) / 2}
+                y={height - h}
+                width={barW}
+                height={h}
+                rx={Math.min(1.5, barW / 2)}
+                fill={color}
+                opacity={0.85}
+              />
+            );
+          })}
+        </Svg>
+      )}
+    </View>
+  );
+}
+
+/**
+ * Cumulative spend against the even-pace line — the same reading as the Home
+ * Screen widget, so the two never disagree. Jade while under pace, coral once
+ * the solid line crosses above the dashes.
+ */
+export function PaceLine({
+  cumulative,
+  limitCents,
+  daysInMonth,
+  dayOfMonth,
+  height = 96,
+}: {
+  cumulative: number[];
+  limitCents: number;
+  daysInMonth: number;
+  dayOfMonth: number;
+  height?: number;
+}) {
+  const [width, setWidth] = React.useState(0);
+  const rid = React.useId().replace(/[^a-zA-Z0-9]/g, "");
+  if (cumulative.length < 2) return null;
+
+  const spent = cumulative[cumulative.length - 1];
+  // No budget set? Pace against the month's own run rate instead, so the chart
+  // still has a reference line rather than silently dropping it.
+  const target = limitCents > 0 ? limitCents : Math.round((spent / Math.max(1, dayOfMonth)) * daysInMonth);
+  const paceToDate = Math.round((target * dayOfMonth) / daysInMonth);
+  const ahead = spent > paceToDate;
+  const color = ahead ? T.coral : T.jade;
+  const yMax = Math.max(target, spent, 1);
+
+  const x = (i: number) => (i / Math.max(1, daysInMonth - 1)) * width;
+  const y = (v: number) => 3 + (1 - v / yMax) * (height - 6);
+  const line = cumulative.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(cumulative.length - 1).toFixed(1)},${height} L0,${height} Z`;
+
+  return (
+    <View style={{ height, marginTop: 12 }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {width > 0 && (
+        <Svg width={width} height={height}>
+          <Defs>
+            <SvgGradient id={`pace${rid}`} x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={color} stopOpacity="0.24" />
+              <Stop offset="1" stopColor={color} stopOpacity="0" />
+            </SvgGradient>
+          </Defs>
+          {/* even-pace guide: 0 → the month's target across every day */}
+          <Line
+            x1={0}
+            y1={y(0)}
+            x2={width}
+            y2={y(target)}
+            stroke={T.faint}
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
+          <Path d={area} fill={`url(#pace${rid})`} />
+          <Path d={line} stroke={color} strokeWidth={2} fill="none" strokeLinejoin="round" strokeLinecap="round" />
+          <Circle cx={x(cumulative.length - 1)} cy={y(spent)} r={3.5} fill={color} stroke={T.ink} strokeWidth={1.5} />
+        </Svg>
+      )}
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   card: {
     borderRadius: T.radius,
