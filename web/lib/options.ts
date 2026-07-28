@@ -155,7 +155,8 @@ export function optionRiskFlag(
  * Group legs sharing an expiry+right and recognize common structures:
  *  - two opposite-sign legs → a vertical spread (bull/bear call/put)
  *  - one leg → a long/short single
- *  - anything else → a generic N-leg combo
+ *  - two+ legs all pointing the same way → independent singles (a strike ladder)
+ *  - a mix of long and short legs that isn't a vertical → a generic N-leg combo
  *
  * Legs across different expiries or rights stay as separate structures (we don't
  * attempt to name calendars / iron condors — they render as their parts).
@@ -170,6 +171,18 @@ export function classifyOptionLegs(legs: OptionLegInput[]): OptionStructure[] {
   });
 
   const out: OptionStructure[] = [];
+  const pushSingle = (i: number) => {
+    const l = legs[i];
+    const dir = (l.quantity ?? 0) >= 0 ? "Long" : "Short";
+    out.push({
+      kind: "single",
+      label: `${dir} ${l.parsed.right}`,
+      detail: `${formatStrike(l.parsed.strike)} · ${formatOptionExpiry(l.parsed.expiry)}`,
+      legIndexes: [i],
+      ...economicsFor([l]),
+    });
+  };
+
   for (const idxs of groups.values()) {
     const structLegs = idxs.map((i) => legs[i]);
 
@@ -204,15 +217,19 @@ export function classifyOptionLegs(legs: OptionLegInput[]): OptionStructure[] {
     }
 
     if (idxs.length === 1) {
-      const l = legs[idxs[0]];
-      const dir = (l.quantity ?? 0) >= 0 ? "Long" : "Short";
-      out.push({
-        kind: "single",
-        label: `${dir} ${l.parsed.right}`,
-        detail: `${formatStrike(l.parsed.strike)} · ${formatOptionExpiry(l.parsed.expiry)}`,
-        legIndexes: idxs,
-        ...economicsFor(structLegs),
-      });
+      pushSingle(idxs[0]);
+      continue;
+    }
+
+    // Two+ legs that didn't pair into a vertical. Only a group that holds BOTH
+    // directions (a long and a short) is a genuine combined structure. A group
+    // that's all one direction is a strike ladder of independent positions —
+    // e.g. two cash-secured puts at different strikes — so emit each as its own
+    // single. Folding those into a "combo" hid them from every per-leg risk
+    // consumer (wheel collateral, uncovered-call counts) and zeroed the totals.
+    const dirs = new Set(structLegs.map((l) => Math.sign(l.quantity ?? 0)).filter((s) => s !== 0));
+    if (dirs.size <= 1) {
+      for (const i of idxs) pushSingle(i);
     } else {
       const l0 = legs[idxs[0]];
       out.push({
