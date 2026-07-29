@@ -56,9 +56,9 @@ app is a file you own.
 
 **0:38–0:42 — CTA**
 
-> [VISUAL: Overview, clean. Text overlay: **"budgetr · $29 once"**]
+> [VISUAL: Overview, clean. Text overlay: **"budgetr · runs on your Mac"**]
 
-It's called budgetr. Twenty-nine dollars, once. Link in bio.
+It's called budgetr. Buy it once, no subscription. Link in bio.
 
 ---
 

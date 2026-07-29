@@ -1,6 +1,6 @@
 # budgetr — video series
 
-Content aimed at one outcome: **turning a stranger into a $29 license.** Short form
+Content aimed at one outcome: **turning a stranger into a paying customer.** Short form
 buys reach, long form converts and doubles as in-app help.
 
 Scripts live in [`scripts/`](scripts/). Capture tooling lives in [`video/`](video/).
@@ -20,13 +20,41 @@ serving real money — never point a capture script at it.
 **3. The eye icon is the safety net.** The header's privacy/obfuscation toggle masks
 every dollar figure across server *and* client render. Belt and braces.
 
-**4. Every claim traces to code.** Not to `pitchdeck.html` — that describes "budgetr
-Cloud" with $6/mo sync, an unshipped investor narrative that contradicts the actual
-$29-one-time-no-server product. It must never appear in content.
+**4. Never say a price on camera.** Pricing changes and promos happen; a number baked
+into a permanent video dates it and can contradict the live page. Say "one-time purchase,
+not a subscription" and let `/pricing` carry the figure.
 
-**5. Say the honest thing about features that need time.** Fixed-strike vol and IV rank
+**5. Every claim traces to code.** Not to `pitchdeck.html` — that describes "budgetr
+Cloud" with paid monthly sync, an unshipped investor narrative that contradicts the
+actual one-time-purchase, no-server product. It must never appear in content.
+
+**6. Say the honest thing about features that need time.** Fixed-strike vol and IV rank
 only fill in as you visit option desks. The portfolio value curve gets more accurate the
 more trade history you import. Framing these honestly builds more trust than hiding them.
+
+---
+
+## The options desk is hand-recorded
+
+Everything else is captured from seeded demo data. **The options desk is not.** Its
+screens read a live CBOE chain — the smile, term structure, dealer gamma, the 3D IV
+surface, the scanner and the strategy builder all price off real quotes, and the demo
+seeder has no chain to give them. The fixed-strike vol grid is worse: it accumulates one
+column per day you visit a desk, so it has nothing to show on a fresh database at all.
+
+So those shots are recorded by hand against a live market, during market hours, on a
+ticker with a liquid chain (SPY, AAPL, NVDA). Consequences worth planning around:
+
+- **Not reproducible.** A reshoot won't match the original — the numbers move. Get the
+  take you want in one session.
+- **Market hours.** Without a Finnhub key the underlying snapshot is stale when the
+  market is closed, which reads as broken on camera.
+- **Nothing on screen is a recommendation.** The builder shows probability of profit and
+  expected value; keep the on-screen disclosure visible and don't narrate a trade idea.
+
+The strategy builder — templates, the "value now" curve, the price × date P/L heatmap —
+is on the shipping line as of the `feat/options-strat-builder` merge, so it's safe to
+film. Before you shoot, confirm the build a viewer can download actually has it.
 
 ---
 
@@ -55,7 +83,7 @@ purchase, no subscription.
 | Reach | Shorts (TikTok / Reels / Shorts / X) | One problem, one screen, 45 seconds |
 | Consideration | Flagship long-form | Earn the price by showing depth |
 | Trial | The **live web demo** (`DEMO_DB=1`) | Let a non-Mac visitor click around in a browser before committing |
-| Purchase | `/pricing` | $29, one-time |
+| Purchase | `/pricing` | One-time, not a subscription |
 | Retention | Setup walkthrough, embedded in-app and on `/thanks` | Get them to a populated dashboard |
 
 The live demo is the cheapest conversion step we have — for a Mac-only app it removes
@@ -77,7 +105,7 @@ anywhere."* An argument, not a feature tour. Chapters double as the shorts list.
 | 3 | "Your budgeting app knows where you bank. Mine doesn't." | The local DB file | Carries the core claim |
 | 4 | "Where does Apple's money actually go?" | Fundamentals Sankey | **No keys, no account, no setup** — pure reach |
 | 5 | "'SQ \*BLUE BOTTLE' and 'BLUEBOTTLE.COM' are the same coffee shop" | Vendors → merge | Instantly legible, satisfying |
-| 6 | "A trading desk, in a budgeting app" | 3D IV surface | Narrow, but options traders convert hard at $29 |
+| 6 | "A trading desk, in a budgeting app" | 3D IV surface | Narrow, but options traders convert hard. **Hand-recorded** — see below |
 
 Held for later — great material, needs more than 45 seconds: the Shared
 split → Venmo → repayment-inbox loop, and auto-tag rules.

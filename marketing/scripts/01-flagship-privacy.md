@@ -4,12 +4,13 @@
 | --- | --- |
 | Platform | YouTube (primary), chaptered |
 | Length | 12–15 min |
-| Goal | Earn $29. Convert people who already distrust finance SaaS. |
+| Goal | Convert people who already distrust finance SaaS. |
 | CTA | Live web demo first, `/pricing` second |
 | Footage | Demo persona, video worktree |
 
-**Before recording:** confirm the live pricing page actually shows `$29` and not "Free
-while in preview" — the CTA degrades silently when `NEXT_PUBLIC_CHECKOUT_URL` is unset.
+**Don't quote a price on camera.** Pricing changes, promos happen, and a number
+baked into a permanent video dates it. Say "one-time purchase, not a subscription" and
+let the page carry the figure.
 
 **Note on chapters:** each one is cut as a standalone short. Frame every demo inside a
 centered 9:16 safe area.
@@ -28,8 +29,8 @@ charges you fifteen dollars a month for the privilege.
 > [VISUAL: cut to budgetr's Overview, fully populated.]
 
 I wanted the opposite. So this is budgetr. It runs on your Mac, it stores everything in
-a file you own, it is physically incapable of moving your money, and it costs
-twenty-nine dollars once.
+a file you own, it is physically incapable of moving your money, and you buy it once
+instead of renting it forever.
 
 > [VISUAL: Finder, `~/Library/Application Support/budgetr/`, `budgetr.db` highlighted.]
 
@@ -256,8 +257,8 @@ interface, fake data, nothing to install.
 
 > [VISUAL: pricing page.]
 
-And if you want it, it's twenty-nine dollars, once. Fourteen-day trial, free updates, no
-subscription, and if it's not for you there's a fourteen-day refund.
+And if you want it: there's a free trial, then a one-time purchase. Not a subscription,
+and updates are included. The price is on the page.
 
 Link's below. Thanks for watching.
 
