@@ -23,14 +23,23 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Compass, Plus, Shield, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ChevronDown, Compass, Plus, Shield, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { PayoffDiagram } from "@/components/payoff-diagram";
+import { PnlMatrix, type MatrixMode } from "@/components/pnl-matrix";
 import { formatCurrency } from "@/lib/utils";
 import { daysToExpiry, formatOptionExpiry, formatStrike } from "@/lib/options";
 import { computeGreeks } from "@/lib/greeks";
 import { probabilityOfProfit } from "@/lib/option-analytics";
-import { analyzePayoff, CONTRACT_SIZE, type PayoffAnalysis, type PayoffLeg } from "@/lib/payoff";
+import {
+  analyzePayoff,
+  CONTRACT_SIZE,
+  payoffCurve,
+  type PayoffAnalysis,
+  type PayoffLeg,
+} from "@/lib/payoff";
+import { positionPnl, pnlMatrix, type SigmaFor } from "@/lib/strategy-value";
+import { STRATEGY_TEMPLATES, buildTemplate, type TemplateKey } from "@/lib/strategy-templates";
 import { useChartTheme } from "@/lib/chart-theme";
 import { atmIv, contractsForExpiry } from "@/lib/option-chain-analytics";
 import {
@@ -413,6 +422,32 @@ function SafetyPanel({
     [legs, expiryContracts, spot, sigma],
   );
 
+  // ── OptionStrat-style time dimension: value the position before expiry ──
+  const dte = Math.max(0, Math.round(T * 365));
+  const [daysFromNow, setDaysFromNow] = useState(0);
+  const dNow = Math.min(daysFromNow, dte);
+  const [matrixOpen, setMatrixOpen] = useState(false);
+  const [matrixMode, setMatrixMode] = useState<MatrixMode>("pnl");
+
+  // Per-leg implied vol (own IV, ATM fallback) — stable for the memos below.
+  const sigmaFor: SigmaFor = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of expiryContracts) {
+      if (c.iv != null && c.iv > 0) m.set(`${c.right}:${c.strike}`, c.iv);
+    }
+    return (leg) => m.get(`${leg.parsed.right}:${leg.parsed.strike}`) ?? sigma;
+  }, [expiryContracts, sigma]);
+
+  const domain = useMemo(() => payoffCurve(legs, { center: spot }), [legs, spot]);
+  const theoFn = useMemo(() => {
+    const Tnow = Math.max(0, dte - dNow) / 365;
+    return (S: number) => positionPnl(legs, S, Tnow, sigmaFor);
+  }, [legs, dte, dNow, sigmaFor]);
+  const matrix = useMemo(
+    () => pnlMatrix(legs, { min: domain.min, max: domain.max, dte, sigmaFor }),
+    [legs, domain.min, domain.max, dte, sigmaFor],
+  );
+
   // Probability of the worst case (finishing at/under the lowest breakeven for a
   // long-debit shape, i.e. the max-loss zone). Derived from the win probability.
   const pMaxLoss = dist ? Math.max(0, 1 - dist.pWin) : null;
@@ -432,8 +467,34 @@ function SafetyPanel({
       </div>
       <div className="grid gap-6 p-6 lg:grid-cols-2">
         <div>
-          <PayoffDiagram legs={legs} currentPrice={spot} breakevens={analysis.breakevens} />
-          <p className="mt-2 eyebrow">P&amp;L distribution at expiry</p>
+          <PayoffDiagram
+            legs={legs}
+            currentPrice={spot}
+            breakevens={analysis.breakevens}
+            theoFn={dte > 0 ? theoFn : null}
+            currency={currency}
+          />
+          {dte > 0 && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="inline-flex items-center gap-1.5 text-[var(--muted)]">
+                  <span className="inline-block w-4 border-t-2 border-dashed border-[var(--brass)]" />
+                  Value {dNow <= 0 ? "now" : dNow >= dte ? "at expiry" : `in ${dNow}d`}
+                </span>
+                <span className="text-[var(--faint)]">solid = expiry</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={dte}
+                value={dNow}
+                onChange={(e) => setDaysFromNow(Number(e.target.value))}
+                aria-label="Days from now"
+                className="mt-1.5 w-full accent-[var(--brass)]"
+              />
+            </div>
+          )}
+          <p className="mt-3 eyebrow">P&amp;L distribution at expiry</p>
           {dist && dist.bins.length ? (
             <ResponsiveContainer width="100%" height={170}>
               <BarChart data={dist.bins} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
@@ -489,13 +550,66 @@ function SafetyPanel({
           <SafetyRow label="Breakeven cushion">
             {cushion != null ? `${(cushion * 100).toFixed(1)}% from spot` : "—"}
           </SafetyRow>
-          <div className="!mt-3 grid grid-cols-3 gap-2 border-t border-line/60 pt-3">
+          <div className="!mt-3 grid grid-cols-4 gap-2 border-t border-line/60 pt-3">
             <GreekStat label="Net Δ" value={greeks.delta} digits={0} />
+            <GreekStat label="Γ" value={greeks.gamma} digits={1} />
             <GreekStat label="Θ / day" value={greeks.theta} digits={0} money currency={currency} />
             <GreekStat label="Vega" value={greeks.vega} digits={0} money currency={currency} />
           </div>
         </div>
       </div>
+
+      {/* P/L heatmap — price × date, the OptionStrat matrix. Tucked behind a
+          toggle so the panel stays compact; a selector switches $ ↔ %. */}
+      {dte > 0 && matrix.maxAbs > 0 && (
+        <div className="border-t border-line px-6 pb-6 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setMatrixOpen((o) => !o)}
+              aria-expanded={matrixOpen}
+              className="eyebrow inline-flex items-center gap-2 transition-colors hover:text-[var(--paper)]"
+            >
+              <ChevronDown size={13} className={`transition-transform ${matrixOpen ? "" : "-rotate-90"}`} />
+              P&amp;L over time · price × date
+            </button>
+            {matrixOpen && (
+              <div className="flex items-center gap-3">
+                <span className="hidden items-center gap-3 text-[10px] text-[var(--muted)] sm:inline-flex">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--jade) 55%, transparent)" }} /> profit
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--coral) 55%, transparent)" }} /> loss
+                  </span>
+                </span>
+                <select
+                  value={matrixMode}
+                  onChange={(e) => setMatrixMode(e.target.value as MatrixMode)}
+                  aria-label="Heatmap data"
+                  className="rounded-lg border border-line bg-[var(--panel)] px-2 py-1 text-xs text-[var(--paper)] outline-none focus:border-[var(--brass-dim)]"
+                >
+                  <option value="pnl">P/L ($)</option>
+                  <option value="pct">P/L (%)</option>
+                </select>
+              </div>
+            )}
+          </div>
+          {matrixOpen && (
+            <div className="mt-3">
+              <PnlMatrix
+                matrix={matrix}
+                dte={dte}
+                spot={spot}
+                breakevens={analysis.breakevens}
+                currency={currency}
+                mode={matrixMode}
+                capital={capital}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </Card>
   );
 }
@@ -536,6 +650,15 @@ function ManualBuilder({
   function addLeg() {
     setLegs((l) => [...l, { id: nextId, right: "call", strike: atmStrike, contracts: 1 }]);
     setNextId((n) => n + 1);
+  }
+  // Drop in a named strategy (bull-call, iron condor, …), replacing the legs with
+  // strikes chosen off the live grid relative to spot.
+  function applyTemplate(key: TemplateKey) {
+    const specs = buildTemplate(key, strikes, spot);
+    if (!specs) return;
+    let id = nextId;
+    setLegs(specs.map((s) => ({ id: id++, right: s.right, strike: s.strike, contracts: s.contracts })));
+    setNextId(id);
   }
   function update(id: number, patch: Partial<ManualLeg>) {
     setLegs((l) => l.map((leg) => (leg.id === id ? { ...leg, ...patch } : leg)));
@@ -593,6 +716,29 @@ function ManualBuilder({
           Add leg
         </button>
       </div>
+
+      {/* One-click strategy templates — build a structure off the live grid */}
+      <div className="border-b border-line px-4 py-3 sm:px-6">
+        <p className="eyebrow mb-2">Start from a strategy</p>
+        <div className="flex flex-wrap gap-1.5">
+          {STRATEGY_TEMPLATES.map((t) => {
+            const buildable = buildTemplate(t.key, strikes, spot) != null;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                disabled={!buildable}
+                onClick={() => applyTemplate(t.key)}
+                title={t.note}
+                className="rounded-full border border-line bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--paper)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="space-y-2 p-4 sm:p-6">
         {legs.length === 0 ? (
           <p className="py-4 text-center text-sm text-[var(--muted)]">
@@ -674,6 +820,7 @@ function ManualBuilder({
 /** Net position greeks summed across legs (per-share greeks × signed shares). */
 function netGreeks(legs: PayoffLeg[], expiryContracts: OptionQuote[], spot: number, sigma: number) {
   let delta = 0;
+  let gamma = 0;
   let theta = 0;
   let vega = 0;
   for (const l of legs) {
@@ -684,10 +831,11 @@ function netGreeks(legs: PayoffLeg[], expiryContracts: OptionQuote[], spot: numb
     const g = q?.greeks?.delta != null ? q.greeks : computeGreeks(l.parsed, spot, iv);
     const shares = l.quantity ?? 0;
     if (g.delta != null) delta += g.delta * shares;
+    if (g.gamma != null) gamma += g.gamma * shares;
     if (g.theta != null) theta += g.theta * shares;
     if (g.vega != null) vega += g.vega * shares;
   }
-  return { delta, theta, vega };
+  return { delta, gamma, theta, vega };
 }
 
 function Segmented<T extends string>({
