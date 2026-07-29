@@ -210,7 +210,7 @@ export default function Budgets() {
   const catIndex = categoryIndex(summary);
 
   return (
-    <Screen title="Budgets" refreshing={refreshing} onRefresh={() => void refresh()}>
+    <Screen title="Budgets" refreshing={refreshing} onRefresh={() => void refresh({ manual: true })}>
         <SyncBanner />
         <Animated.View entering={entering(0)}>
           <PaceChart spendByDay={summary?.spendByDay ?? []} budgets={budgets} />

@@ -118,7 +118,7 @@ export default function Holdings() {
 
   return (
     <>
-    <Screen title="Holdings" refreshing={refreshing} onRefresh={() => void refresh()}>
+    <Screen title="Holdings" refreshing={refreshing} onRefresh={() => void refresh({ manual: true })}>
         <SyncBanner />
 
         {positions.length === 0 ? (

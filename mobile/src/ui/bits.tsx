@@ -164,20 +164,47 @@ export function Aurora() {
   );
 }
 
+/** How long a "synced just now" confirmation stays up after a pull. */
+const SYNC_CONFIRM_MS = 4000;
+
 /**
- * "Synced Xm ago" + error/pending state — errors are states, not crashes.
- * Past 24h the banner turns brass and says so plainly: a glance app must
- * never let stale numbers pass as fresh (spec T6 stale-cache warning).
+ * Sync status — but only when it's worth saying.
+ *
+ * Errors, stale data and queued edits are STATES the user needs to know about,
+ * so they show unconditionally: a glance app must never let stale numbers pass
+ * as fresh (spec T6 stale-cache warning). The plain "synced Xm ago"
+ * confirmation is different — it answers a question only someone who just
+ * pulled to refresh is asking, so it appears for a few seconds after a manual
+ * pull and stays out of the way otherwise.
  */
 export function SyncBanner() {
-  const { lastSyncAt, syncError, pendingOps } = useCompanion();
+  const { lastSyncAt, syncError, pendingOps, refreshing, manualSyncAt } = useCompanion();
+  const [confirming, setConfirming] = React.useState(false);
+
+  React.useEffect(() => {
+    if (manualSyncAt === null) return;
+    setConfirming(true);
+    const id = setTimeout(() => setConfirming(false), SYNC_CONFIRM_MS);
+    return () => clearTimeout(id);
+  }, [manualSyncAt]);
+
   const stale = lastSyncAt !== null && Date.now() / 1000 - lastSyncAt > 24 * 3600;
   const warn = Boolean(syncError) || stale;
+  const pending = pendingOps.length > 0;
+  // Nothing to report and nobody asked — render nothing rather than an empty row,
+  // so the layout above doesn't reserve space for a message that isn't coming.
+  if (!warn && !pending && !confirming && !refreshing) return null;
+
+  const lead = syncError ? `${syncError} · ` : stale ? "⚠ showing old data · " : "";
+  const synced = refreshing ? "syncing…" : confirming || warn ? `synced ${agoLabel(lastSyncAt)}` : "";
+  const edits = pending ? `${synced ? " · " : ""}${pendingOps.length} edit${pendingOps.length > 1 ? "s" : ""} pending` : "";
+
   return (
     <View style={s.bannerRow}>
       <Text style={[s.bannerText, warn ? { color: T.brass } : null]} numberOfLines={1}>
-        {syncError ? `${syncError} · ` : stale ? "⚠ showing old data · " : ""}synced {agoLabel(lastSyncAt)}
-        {pendingOps.length > 0 ? ` · ${pendingOps.length} edit${pendingOps.length > 1 ? "s" : ""} pending` : ""}
+        {lead}
+        {synced}
+        {edits}
       </Text>
     </View>
   );

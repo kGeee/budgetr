@@ -23,9 +23,10 @@ interface CompanionState {
   lastSyncAt: number | null;
   syncError: string | null; // human string when the last sync failed; null = healthy
   refreshing: boolean;
+  manualSyncAt: number | null; // unix seconds of the last user-initiated pull-to-refresh
   widget: WidgetStatus; // whether the Home/Lock Screen payload is actually landing
   pair(qrPayload: string): Promise<string | null>; // returns error message or null
-  refresh(): Promise<void>;
+  refresh(opts?: { manual?: boolean }): Promise<void>;
   recategorize(txnId: string, toCategory: string): void;
   dismissAlert(alertId: string): void;
   unpair(): Promise<void>;
@@ -57,6 +58,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [manualSyncAt, setManualSyncAt] = useState<number | null>(null);
   const [widget, setWidget] = useState<WidgetStatus>({ state: "unknown" });
   const material = useRef<PairingMaterial | null>(null);
   const etag = useRef<string | null>(null);
@@ -95,23 +97,31 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [publish],
   );
 
-  const refresh = useCallback(async () => {
-    const m = material.current;
-    if (!m || syncing.current) return;
-    syncing.current = true;
-    setRefreshing(true);
-    try {
-      const r = await syncOnce(m, etag.current);
-      if (r.status === "ok") {
-        const cached = await loadCachedSummary();
-        etag.current = cached?.etag ?? null;
+  // `manual` marks a refresh the user asked for by pulling down. Only those get
+  // a "synced Xm ago" confirmation — a background sync reporting itself is noise
+  // on a screen you didn't ask to update. Warnings (offline, stale, errors) are
+  // unconditional either way; they're states the user needs regardless.
+  const refresh = useCallback(
+    async ({ manual = false }: { manual?: boolean } = {}) => {
+      const m = material.current;
+      if (!m || syncing.current) return;
+      syncing.current = true;
+      setRefreshing(true);
+      try {
+        const r = await syncOnce(m, etag.current);
+        if (r.status === "ok") {
+          const cached = await loadCachedSummary();
+          etag.current = cached?.etag ?? null;
+        }
+        absorb(r.status, r.summary, r.pendingOps, r.detail);
+        if (manual) setManualSyncAt(Math.floor(Date.now() / 1000));
+      } finally {
+        syncing.current = false;
+        setRefreshing(false);
       }
-      absorb(r.status, r.summary, r.pendingOps, r.detail);
-    } finally {
-      syncing.current = false;
-      setRefreshing(false);
-    }
-  }, [absorb]);
+    },
+    [absorb],
+  );
 
   // boot: load material + cache, then refresh in the background
   useEffect(() => {
@@ -207,7 +217,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <Ctx.Provider
-      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, widget, pair, refresh, recategorize, dismissAlert, unpair }}
+      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, manualSyncAt, widget, pair, refresh, recategorize, dismissAlert, unpair }}
     >
       {children}
     </Ctx.Provider>

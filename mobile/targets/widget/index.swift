@@ -551,8 +551,8 @@ struct BudgetEntryView: View {
 // ── Category widgets ─────────────────────────────────────────────────
 
 /// One "name ————— $amount" row. The bar is share-of-largest, not share-of-
-/// budget: at a glance the question is "what dominated the month", and a
-/// budgeted category still gets its overspend dot.
+/// budget: at a glance the question is "what dominated the month", and the
+/// amount beside it already answers "how much".
 struct CategoryRow: View {
     let slice: CategorySlice
     let color: Color
@@ -560,11 +560,9 @@ struct CategoryRow: View {
     let nameSize: CGFloat
 
     private var fraction: CGFloat { CGFloat(slice.cents) / CGFloat(max(1, largestCents)) }
-    private var isOver: Bool { slice.limitCents > 0 && slice.cents > slice.limitCents }
     private var amount: String { formatDollars(slice.cents) }
 
     var body: some View {
-        let over = isOver
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text(slice.name)
@@ -585,12 +583,6 @@ struct CategoryRow: View {
                     Capsule()
                         .fill(color)
                         .frame(width: filled)
-                    if over {
-                        Circle()
-                            .fill(Color.coral)
-                            .frame(width: 5, height: 5)
-                            .offset(x: geo.size.width - 5)
-                    }
                 }
             }
             .frame(height: 4)

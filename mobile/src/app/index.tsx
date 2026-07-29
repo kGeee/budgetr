@@ -316,7 +316,7 @@ function SettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => 
         style={st.action}
         onPress={() => {
           haptics.thud();
-          void refresh();
+          void refresh({ manual: true }); // explicitly asked for → worth confirming
         }}
       >
         <Text style={st.actionText}>Sync now</Text>
@@ -390,7 +390,7 @@ export default function Spending() {
 
   if (!summary) {
     return (
-      <FixedScreen refreshing={refreshing} onRefresh={() => void refresh()}>
+      <FixedScreen refreshing={refreshing} onRefresh={() => void refresh({ manual: true })}>
         <View style={s.empty}>
           <Text style={s.emptyText}>Waiting for your Mac&apos;s first sync…</Text>
           <Text style={s.emptySub}>Pull to retry. budgetr must be running on your Mac.</Text>
@@ -401,7 +401,7 @@ export default function Spending() {
 
   return (
     <>
-      <FixedScreen refreshing={refreshing} onRefresh={() => void refresh()}>
+      <FixedScreen refreshing={refreshing} onRefresh={() => void refresh({ manual: true })}>
         {/* head — title, wallet chip, settings */}
         <View style={s.head}>
           <View style={{ flex: 1 }}>
