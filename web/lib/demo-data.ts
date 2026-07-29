@@ -101,6 +101,13 @@ export function wipeFinancialData(): void {
  * ensures categories exist (budgets attach to them), then reinserts. Uses a
  * deterministic PRNG so successive runs produce identical data.
  */
+/**
+ * How far back the generated history runs. Just over 13 months, so a full
+ * trailing year is populated with a margin on either side — see the balance
+ * snapshot block for why a year is the floor.
+ */
+const HISTORY_DAYS = 400;
+
 export function seedDemoData(): { transactions: number; budgets: number } {
   // ── Deterministic PRNG (reset per call so runs are identical) ──────────────
   let _seed = 1337;
@@ -225,7 +232,7 @@ export function seedDemoData(): { transactions: number; budgets: number } {
   buy("sec_vti", daysAgo(480), 90, 222, "Buy VTI");
   buy("sec_amzn", daysAgo(410), 40, 150, "Buy AMZN");
   buy("sec_vxus", daysAgo(450), 150, 53.33, "Buy VXUS");
-  for (const q of [270, 180, 90]) {
+  for (const q of [450, 360, 270, 180, 90]) {
     div("sec_aapl", daysAgo(q), 76.8, "AAPL Dividend");
     div("sec_voo", daysAgo(q), 84.0, "VOO Dividend");
     div("sec_msft", daysAgo(q), 67.5, "MSFT Dividend");
@@ -239,9 +246,13 @@ export function seedDemoData(): { transactions: number; budgets: number } {
     ])
     .run();
 
-  // ── Daily balance snapshots (180d, trending up) ─────────────────────────────
+  // ── Daily balance snapshots (trending up) ──────────────────────────────────
+  // HISTORY_DAYS is the one knob for how far back the generated history runs.
+  // It has to clear a full year: Review's "this year"/"last year" tabs, the
+  // report's trailing-year spend heatmap, and the 12-month category charts all
+  // read a year or more, and they look broken against a shorter window.
   const snaps: (typeof balanceSnapshots.$inferInsert)[] = [];
-  const N = 180;
+  const N = HISTORY_DAYS;
   for (let i = N; i >= 0; i--) {
     const t = (N - i) / N;
     const date = daysAgo(i);
@@ -273,10 +284,13 @@ export function seedDemoData(): { transactions: number; budgets: number } {
     { name: "STEAM GAMES", merchant: "Steam", cat: "ENTERTAINMENT", lo: 10, hi: 60, acct: CREDIT },
     { name: "CVS PHARMACY", merchant: "CVS Pharmacy", cat: "MEDICAL", lo: 8, hi: 46, acct: CREDIT },
   ];
-  const RECURRING: (M & { day: number })[] = [
-    { name: "NETFLIX", merchant: "Netflix", cat: "ENTERTAINMENT", lo: 15.99, hi: 15.99, acct: CREDIT, day: 4 },
+  // `raisedTo` + `raisedMonthsAgo`: the stream was billed at lo/hi for most of
+  // the window, then went up for the last N months. Netflix and Equinox carry a
+  // rise so the Insights price-creep detector has something real to find.
+  const RECURRING: (M & { day: number; raisedTo?: number; raisedMonthsAgo?: number })[] = [
+    { name: "NETFLIX", merchant: "Netflix", cat: "ENTERTAINMENT", lo: 15.99, hi: 15.99, acct: CREDIT, day: 4, raisedTo: 22.99, raisedMonthsAgo: 2 },
     { name: "SPOTIFY", merchant: "Spotify", cat: "ENTERTAINMENT", lo: 11.99, hi: 11.99, acct: CREDIT, day: 9 },
-    { name: "EQUINOX", merchant: "Equinox", cat: "PERSONAL_CARE", lo: 185, hi: 185, acct: CREDIT, day: 1 },
+    { name: "EQUINOX", merchant: "Equinox", cat: "PERSONAL_CARE", lo: 185, hi: 185, acct: CREDIT, day: 1, raisedTo: 225, raisedMonthsAgo: 1 },
     { name: "PG&E", merchant: "PG&E", cat: "RENT_AND_UTILITIES", lo: 92, hi: 180, acct: CHECKING, day: 12 },
     { name: "COMCAST", merchant: "Comcast", cat: "RENT_AND_UTILITIES", lo: 79.99, hi: 79.99, acct: CHECKING, day: 15 },
     { name: "SUNSET APTS RENT", merchant: "Sunset Apartments", cat: "RENT_AND_UTILITIES", lo: 2400, hi: 2400, acct: CHECKING, day: 1 },
@@ -287,25 +301,54 @@ export function seedDemoData(): { transactions: number; budgets: number } {
   const add = (date: string, amount: number, m: { name: string; merchant: string; cat: string; acct: string }) =>
     txRows.push({ id: `tx_${txId++}`, accountId: m.acct, amount, isoCurrencyCode: "USD", date, name: m.name, merchantName: m.merchant, category: m.cat, categoryDetailed: null, pending: false, paymentChannel: "in store", reviewed: true });
 
-  for (let d = 90; d >= 0; d--) {
+  // Discretionary spend drifts up over the window (0.82× at the far end → 1.0×
+  // today). Without it a year-scale chart is flat noise and Review's "biggest
+  // movers" has nothing to move; with it the trend is legible but the CURRENT
+  // month still lands near the budgets set below, which is what matters.
+  const drift = (d: number) => 0.82 + 0.18 * (1 - d / HISTORY_DAYS);
+  for (let d = HISTORY_DAYS; d >= 0; d--) {
     const n = Math.floor(rand() * 3);
     for (let j = 0; j < n; j++) {
       const m = pick(MERCHANTS);
-      add(daysAgo(d), money(m.lo, m.hi), m);
+      add(daysAgo(d), Math.round(money(m.lo, m.hi) * drift(d) * 100) / 100, m);
     }
   }
-  for (let mo = 0; mo < 3; mo++) {
+  // Charges actually written per stream, so the recurring_streams rows below can
+  // be derived from them rather than restated. They used to be hardcoded to
+  // averageAmount === lastAmount, which made the price-creep detector
+  // (last >= avg * 1.15) structurally unable to fire on demo data.
+  const billed = new Map<string, { amounts: number[]; lastAmount: number; lastDate: string }>();
+  const MONTHS = Math.floor(HISTORY_DAYS / 30);
+  for (let mo = 0; mo < MONTHS; mo++) {
     for (const r of RECURRING) {
       const d = new Date(NOW);
       d.setMonth(d.getMonth() - mo, r.day);
-      if (d <= NOW) add(iso(d), r.lo === r.hi ? r.lo : money(r.lo, r.hi), r);
+      if (d > NOW) continue;
+      // A subscription that quietly raised its price partway through the window
+      // is what makes the Insights "price creep" detector demonstrable at all —
+      // a stream billed at a constant amount can never trip it.
+      const raised = r.raisedTo !== undefined && mo < (r.raisedMonthsAgo ?? 0);
+      const amount = raised ? r.raisedTo! : r.lo === r.hi ? r.lo : money(r.lo, r.hi);
+      const date = iso(d);
+      add(date, amount, r);
+      const seen = billed.get(r.merchant) ?? { amounts: [], lastAmount: amount, lastDate: date };
+      seen.amounts.push(amount);
+      if (date >= seen.lastDate) {
+        seen.lastDate = date;
+        seen.lastAmount = amount;
+      }
+      billed.set(r.merchant, seen);
     }
   }
-  for (let d = 90; d >= 0; d -= 14) {
+  for (let d = HISTORY_DAYS; d >= 0; d -= 14) {
     add(daysAgo(d), -3200, { name: "ACME CORP PAYROLL", merchant: "Acme Corp", cat: "INCOME", acct: CHECKING });
   }
+  // Two trips, far enough apart that Travel has a shape across the year rather
+  // than a single spike in the last quarter.
   add(daysAgo(38), 612.4, { name: "DELTA AIR LINES", merchant: "Delta Air Lines", cat: "TRAVEL", acct: CREDIT });
   add(daysAgo(35), 388.0, { name: "MARRIOTT", merchant: "Marriott", cat: "TRAVEL", acct: CREDIT });
+  add(daysAgo(247), 458.2, { name: "UNITED AIRLINES", merchant: "United Airlines", cat: "TRAVEL", acct: CREDIT });
+  add(daysAgo(244), 305.0, { name: "HYATT PLACE", merchant: "Hyatt", cat: "TRAVEL", acct: CREDIT });
   db.insert(transactions).values(txRows).run();
 
   // ── Budgets (need category ids) ─────────────────────────────────────────────
@@ -385,6 +428,13 @@ export function seedDemoData(): { transactions: number; budgets: number } {
     X({ id: "txg_xfer_in", accountId: SAVINGS, amount: -1500.0, date: daysAgo(10), name: "TRANSFER FROM CHECKING", category: "TRANSFER_IN" }),
     // A plain category split (not a bill split) — demonstrates the split badge.
     X({ id: "txg_target", accountId: CREDIT, amount: 142.0, date: daysAgo(20), name: "TARGET", merchantName: "Target", category: "GENERAL_MERCHANDISE" }),
+    // Two identical charges at one vendor inside 3 days → the Insights duplicate
+    // detector (same vendor + same amount + ≤3d apart, over $15).
+    X({ id: "txg_dup_a", accountId: CREDIT, amount: 42.6, date: daysAgo(16), name: "CVS PHARMACY", merchantName: "CVS Pharmacy", category: "MEDICAL" }),
+    X({ id: "txg_dup_b", accountId: CREDIT, amount: 42.6, date: daysAgo(14), name: "CVS PHARMACY", merchantName: "CVS Pharmacy", category: "MEDICAL" }),
+    // A one-off big-ticket purchase, so one vendor's last 30 days runs several
+    // times its own trailing baseline → the spending-spike detector.
+    X({ id: "txg_spike", accountId: CREDIT, amount: 1240.0, date: daysAgo(11), name: "AMAZON.COM*9KD22", merchantName: "Amazon", category: "GENERAL_MERCHANDISE" }),
   ];
   db.insert(transactions).values(extraTx).run();
 
@@ -478,16 +528,26 @@ export function seedDemoData(): { transactions: number; budgets: number } {
 
   // ── Recurring streams (subscriptions + payroll) ─────────────────────────────
   const recurRows: (typeof recurringStreams.$inferInsert)[] = RECURRING.map((r, i) => {
-    const last = new Date(NOW);
-    last.setDate(r.day);
-    if (last > NOW) last.setMonth(last.getMonth() - 1);
+    // Derived from the charges actually written above, so a stream that was
+    // raised partway through carries a genuine average-vs-latest gap.
+    const seen = billed.get(r.merchant);
+    const fallback = r.lo === r.hi ? r.lo : Math.round(((r.lo + r.hi) / 2) * 100) / 100;
+    const avg = seen?.amounts.length
+      ? Math.round((seen.amounts.reduce((a, b) => a + b, 0) / seen.amounts.length) * 100) / 100
+      : fallback;
+    const lastAmount = seen?.lastAmount ?? fallback;
+
+    const last = seen ? new Date(`${seen.lastDate}T00:00:00Z`) : new Date(NOW);
+    if (!seen) {
+      last.setDate(r.day);
+      if (last > NOW) last.setMonth(last.getMonth() - 1);
+    }
     const next = new Date(last);
     next.setMonth(next.getMonth() + 1);
-    const amt = r.lo === r.hi ? r.lo : Math.round(((r.lo + r.hi) / 2) * 100) / 100;
     return {
       id: `rs_${i}`, accountId: r.acct, direction: "outflow",
       description: r.merchant, merchantName: r.merchant, category: r.cat,
-      frequency: "MONTHLY", averageAmount: amt, lastAmount: amt,
+      frequency: "MONTHLY", averageAmount: avg, lastAmount,
       lastDate: iso(last), predictedNextDate: iso(next), isoCurrencyCode: "USD",
       isActive: true, status: "MATURE", updatedAt: NOW,
     };
