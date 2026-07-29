@@ -34,6 +34,12 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
   toggle — changing a window is exploring your data, not rearranging your board
   — and each choice persists per widget, merged over the stored config so one
   control can't clobber another's key.
+- **The companion app can be explored without a Mac.** "Look around with sample
+  data" on the pairing screen fills every screen and both widget families with a
+  fabricated but contract-valid summary, so the app can be evaluated by someone
+  who has nothing to pair with — an App Review tester, or you, before setting up
+  a desktop. Nothing is persisted and nothing can reach the relay; a permanent
+  brass ribbon marks the data as invented, and tapping it leaves.
 - Marketing has a video series bible and four scripts (flagship long-form, two
   shorts, and a download-to-first-dashboard walkthrough), written against the
   existing onboarding copy so the video and the product can't disagree.
