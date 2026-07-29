@@ -5,6 +5,81 @@ tags that publish the macOS desktop app via the Release workflow.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.0] — 2026-07-28
+
+### Added
+
+- **The options module builds strategies like OptionStrat.** One-click templates
+  — long call/put, vertical debit/credit spreads, straddle, strangle, iron
+  condor, iron butterfly, call butterfly — pick their strikes off the live chain
+  relative to spot, and a structure with no room for its wings is disabled in
+  the picker rather than offered and then failing. The payoff diagram overlays a
+  dashed "value now" curve over the solid expiry line, Black-Scholes-priced at
+  any date with a slider to scrub from today to expiry, and a price × date P/L
+  heatmap colours jade→coral with spot and breakeven marked. Net Γ joins the
+  position greeks. The engine is pure and unit-tested against put-call parity,
+  and every analytic runs through the shared safety panel, so the ranked
+  suggestions get the same treatment as a hand-built position.
+- **Readouts follow the cursor.** Hovering the payoff diagram raises a crosshair
+  with the underlying price, P&L at expiry and — when the curve is shown — P&L
+  at today's value. The heatmap highlights the cell under the cursor and prints
+  its exact price · date · P&L above the grid, switchable between P/L in dollars
+  and P/L as a percentage of capital. The grid itself is behind a toggle so the
+  safety panel stays compact.
+- **Dashboard widgets have range and order controls.** Widgets already stored a
+  config that nothing could change, so the defaults were effectively hardcoded.
+  Cashflow now takes 3/6/12/24 months; spend-by-category and top-vendors take
+  7d/30d/90d/1y, with ordering by amount, count or name, and top-vendors also
+  takes 5/8/12 rows. The pills sit in read mode rather than behind the Edit
+  toggle — changing a window is exploring your data, not rearranging your board
+  — and each choice persists per widget, merged over the stored config so one
+  control can't clobber another's key.
+- Marketing has a video series bible and four scripts (flagship long-form, two
+  shorts, and a download-to-first-dashboard walkthrough), written against the
+  existing onboarding copy so the video and the product can't disagree.
+
+### Changed
+
+- **One brand mark everywhere.** The marks had drifted: the browser tab on the
+  marketing site still showed the stock Next triangle, mobile shipped a green
+  line-chart glyph, and the Android adaptive layers were untouched scaffold art.
+  A single script now derives every icon from the canonical serif "b." —
+  flattening alpha for iOS, which rejects it, and insetting the bare glyph for
+  Android, which composites foreground over background before masking.
+- **The sync banner only speaks when spoken to.** It announced "synced Xm ago"
+  permanently, including after background syncs nobody asked for. The
+  confirmation now shows for four seconds after a pull-to-refresh or an explicit
+  Sync now. Errors, stale data and queued edits still show unconditionally —
+  those are states you need, not confirmations.
+- Ordering on a widget re-sorts the rows the query already returned rather than
+  pushing the sort into SQL: the query picks the top N by amount, and re-sorting
+  that slice is what the control means. Sorting inside the query would silently
+  swap which rows appear.
+- The volatility surface drew its axis labels in a hardcoded system mono — the
+  one chart not set in Spline Sans Mono. It now resolves the font off the
+  element, rejecting an unresolved var, since an invalid canvas font assignment
+  keeps the previous font instead of erroring.
+- Widget category bars drop the overspend dot; the amount beside the row already
+  answers the question.
+- README no longer documents the unverified-developer `xattr` workaround — the
+  DMG has been signed and notarized since v0.8.0 and opens on a double-click.
+
+### Fixed
+
+- **Every new install's Insights page was empty.** Seeded `recurring_streams`
+  rows were written with their average and latest amounts set to the same
+  hardcoded value, and the price-creep detector fires on `last >= avg * 1.15` —
+  so with the two always equal it was structurally unable to fire. Streams are
+  now derived from the charges actually written, so a subscription raised
+  partway through the window carries a genuine gap and the two can't drift apart
+  again. Real syncs were never affected.
+- **Demo history was too short for the views that read a year.** Transactions
+  spanned 90 days and balance snapshots 180, so Review's this-year/last-year
+  tabs, the trailing-year spend heatmap and the 12-month category charts all
+  rendered against a quarter of a year. One knob now covers 400 days, with
+  discretionary spend drifting across the window so the year-scale charts have a
+  trend to show.
+
 ## [0.8.0] — 2026-07-27
 
 ### Added
@@ -110,6 +185,8 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
   cold start (in `instrumentation.register()`) instead of racing parallel page
   renders, so pages no longer render blank on first load.
 
+[0.9.0]: https://github.com/kGeee/budgetr/releases/tag/v0.9.0
+[0.8.0]: https://github.com/kGeee/budgetr/releases/tag/v0.8.0
 [0.7.2]: https://github.com/kGeee/budgetr/releases/tag/v0.7.2
 [0.7.1]: https://github.com/kGeee/budgetr/releases/tag/v0.7.1
 [0.7.0]: https://github.com/kGeee/budgetr/releases/tag/v0.7.0
