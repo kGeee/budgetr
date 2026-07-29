@@ -8,6 +8,7 @@ import { AppState } from "react-native";
 import type { Op, Summary } from "@budgetr/core";
 import { decodePairing, type PairingMaterial } from "@budgetr/sync-crypto";
 import * as haptics from "@/haptics";
+import { buildDemoSummary } from "@/demo";
 import { clearCache, loadCachedSummary, loadPendingOps, savePendingOps } from "@/sync/cache";
 import { clearMaterial, loadMaterial, saveMaterial } from "@/sync/material";
 import { syncOnce, type SyncStatus } from "@/sync/client";
@@ -25,7 +26,9 @@ interface CompanionState {
   refreshing: boolean;
   manualSyncAt: number | null; // unix seconds of the last user-initiated pull-to-refresh
   widget: WidgetStatus; // whether the Home/Lock Screen payload is actually landing
+  demo: boolean; // showing fabricated data; no material, no relay, nothing persisted
   pair(qrPayload: string): Promise<string | null>; // returns error message or null
+  enterDemo(): void;
   refresh(opts?: { manual?: boolean }): Promise<void>;
   recategorize(txnId: string, toCategory: string): void;
   dismissAlert(alertId: string): void;
@@ -60,6 +63,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [refreshing, setRefreshing] = useState(false);
   const [manualSyncAt, setManualSyncAt] = useState<number | null>(null);
   const [widget, setWidget] = useState<WidgetStatus>({ state: "unknown" });
+  const [demo, setDemo] = useState(false);
   const material = useRef<PairingMaterial | null>(null);
   const etag = useRef<string | null>(null);
   const syncing = useRef(false);
@@ -177,17 +181,39 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [refresh],
   );
 
+  // Sample data, for someone who has no Mac to pair with — an App Review tester,
+  // or you wanting to look at a screen without waiting on a sync. Deliberately
+  // writes no material and no cache: `refresh` already no-ops without material,
+  // so nothing here can reach the relay, and quitting the app forgets it ever
+  // happened. The widget payload IS published, so the Home Screen widgets can be
+  // reviewed too; the next real sync overwrites it.
+  const enterDemo = useCallback(() => {
+    const fixture = buildDemoSummary();
+    material.current = null;
+    etag.current = null;
+    setDemo(true);
+    setSummary(fixture);
+    setPendingOps([]);
+    setLastSyncAt(Math.floor(Date.now() / 1000));
+    setSyncError(null);
+    publish(fixture);
+    setPhase("ready");
+    haptics.success();
+  }, [publish]);
+
   const enqueue = useCallback(
     (op: Op) => {
       setSummary((s) => (s ? applyLocally(s, op) : s));
       setPendingOps((prev) => {
         const next = [...prev, op];
-        void savePendingOps(next);
+        // In demo there is no desktop to flush to and nothing worth surviving a
+        // relaunch — keep the optimistic edit on screen, but off the disk.
+        if (!demo) void savePendingOps(next);
         return next;
       });
       void refresh(); // opportunistic flush; retries on next foreground if offline
     },
-    [refresh],
+    [demo, refresh],
   );
 
   const recategorize = useCallback(
@@ -202,6 +228,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [enqueue],
   );
 
+  // Also the way out of demo — the state it tears down is the state demo built,
+  // so leaving sample data and unpairing a real device are the same operation.
   const unpair = useCallback(async () => {
     await clearMaterial();
     await clearCache();
@@ -211,13 +239,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setPendingOps([]);
     setLastSyncAt(null);
     setSyncError(null);
+    setDemo(false);
     setPhase("unpaired");
     latest.current = null;
   }, []);
 
   return (
     <Ctx.Provider
-      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, manualSyncAt, widget, pair, refresh, recategorize, dismissAlert, unpair }}
+      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, manualSyncAt, widget, demo, pair, enterDemo, refresh, recategorize, dismissAlert, unpair }}
     >
       {children}
     </Ctx.Provider>

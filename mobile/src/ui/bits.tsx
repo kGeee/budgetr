@@ -210,6 +210,32 @@ export function SyncBanner() {
   );
 }
 
+/**
+ * Sample-data ribbon. Sits above every tab whenever the app is showing the
+ * fixture rather than a real desktop's summary.
+ *
+ * It is permanent and unmissable on purpose: a finance app quietly displaying
+ * invented balances is the one failure mode worth spending vertical space to
+ * prevent. Tapping it leaves — the same call that unpairs a real device, since
+ * demo state and paired state are torn down identically.
+ */
+export function DemoRibbon() {
+  const { demo, unpair } = useCompanion();
+  if (!demo) return null;
+  return (
+    <Pressable
+      style={s.ribbon}
+      onPress={() => {
+        haptics.tap();
+        void unpair();
+      }}
+    >
+      <Text style={s.ribbonText}>SAMPLE DATA — NOT YOUR ACCOUNTS</Text>
+      <Text style={s.ribbonExit}>Exit</Text>
+    </Pressable>
+  );
+}
+
 /** Loading placeholder: breathing panel blocks instead of a blank screen. */
 export function Skeleton() {
   const [pulse, setPulse] = React.useState(false);
@@ -681,6 +707,26 @@ const s = StyleSheet.create({
   },
   bannerRow: { paddingVertical: 8, alignItems: "center" },
   bannerText: { color: T.faint, fontSize: 12, fontFamily: F.sans },
+  ribbon: {
+    // Overlaid rather than stacked, the same way the floating tab bar is: every
+    // screen already reserves ~92-110px of top padding, so the ribbon lands in
+    // space that was empty instead of pushing each layout down by its height.
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    backgroundColor: T.brassDim,
+    paddingTop: 62, // clears the notch
+    paddingBottom: 7,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  ribbonText: { color: T.ink, fontSize: 10.5, fontFamily: F.sansSemiBold, letterSpacing: 1.1 },
+  ribbonExit: { color: T.ink, fontSize: 11, fontFamily: F.sansSemiBold, textDecorationLine: "underline" },
   scrubLabel: { position: "absolute", top: 0, width: 96, alignItems: "center" },
   scrubValue: { color: T.paper, fontSize: 13, fontFamily: F.monoSemiBold },
   scrubDate: { color: T.faint, fontSize: 10, fontFamily: F.sans, marginTop: 1 },

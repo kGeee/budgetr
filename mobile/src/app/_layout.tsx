@@ -23,7 +23,7 @@ import { ArrowLeftRight, LineChart, PieChart, Wallet } from "lucide-react-native
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { CompanionProvider, useCompanion } from "@/state/companion";
 import { PairingScreen } from "@/ui/pairing";
-import { Skeleton } from "@/ui/bits";
+import { DemoRibbon, Skeleton } from "@/ui/bits";
 import { FloatingTabBar } from "@/ui/tabbar";
 import { F, T } from "@/theme";
 
@@ -44,7 +44,14 @@ function Gate({ children }: { children: React.ReactNode }) {
       </View>
     );
   }
-  return <>{children}</>;
+  // The ribbon renders after the tabs so it overlays them, and inside the gate
+  // so it can't outlive the state that put it there.
+  return (
+    <View style={{ flex: 1 }}>
+      {children}
+      <DemoRibbon />
+    </View>
+  );
 }
 
 export default function RootLayout() {
