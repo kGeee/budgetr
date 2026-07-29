@@ -22,9 +22,15 @@ import { ReviewInbox } from "@/components/review-inbox";
 import { UpcomingBills } from "@/components/upcoming-bills";
 import { CategoryIcon } from "@/components/category-pill";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  WidgetControls,
+  type ControlOption,
+  type WidgetControlSpec,
+} from "@/components/widget-controls";
 import { formatCurrency } from "@/lib/utils";
 import type {
   CategoryRow,
+  WidgetConfig,
   NetWorth,
   PeriodTotals,
   SpendShift,
@@ -39,9 +45,70 @@ import type {
  * (what you can add) and the renderer (the card header). Column span lets wide
  * charts (net-worth, cashflow) claim the full grid width.
  */
+/** Reusable option sets, so every range pill in the app reads the same. */
+const DAY_RANGES: ControlOption[] = [
+  { label: "7d", value: 7 },
+  { label: "30d", value: 30 },
+  { label: "90d", value: 90 },
+  { label: "1y", value: 365 },
+];
+const MONTH_RANGES: ControlOption[] = [
+  { label: "3m", value: 3 },
+  { label: "6m", value: 6 },
+  { label: "12m", value: 12 },
+  { label: "24m", value: 24 },
+];
+const ROW_LIMITS: ControlOption[] = [
+  { label: "5", value: 5 },
+  { label: "8", value: 8 },
+  { label: "12", value: 12 },
+];
+
+const range = (options: ControlOption[], fallback: number): WidgetControlSpec => ({
+  key: "days",
+  title: "Range",
+  options,
+  fallback,
+});
+const months = (fallback: number): WidgetControlSpec => ({
+  key: "months",
+  title: "Range",
+  options: MONTH_RANGES,
+  fallback,
+});
+const rows = (fallback: number): WidgetControlSpec => ({
+  key: "limit",
+  title: "Rows",
+  options: ROW_LIMITS,
+  fallback,
+});
+const order = (withCount: boolean): WidgetControlSpec => ({
+  key: "sort",
+  title: "Order by",
+  options: withCount
+    ? [
+        { label: "$", value: "amount" },
+        { label: "#", value: "count" },
+        { label: "A–Z", value: "name" },
+      ]
+    : [
+        { label: "$", value: "amount" },
+        { label: "A–Z", value: "name" },
+      ],
+  fallback: "amount",
+});
+
 export const WIDGET_META: Record<
   WidgetType,
-  { label: string; blurb: string; icon: LucideIcon; wide: boolean; defaultConfig: Record<string, number> }
+  {
+    label: string;
+    blurb: string;
+    icon: LucideIcon;
+    wide: boolean;
+    defaultConfig: Record<string, number>;
+    /** Range/order pills shown in this widget's header. */
+    controls?: WidgetControlSpec[];
+  }
 > = {
   "net-worth": {
     label: "Net worth",
@@ -56,6 +123,7 @@ export const WIDGET_META: Record<
     icon: BarChart3,
     wide: true,
     defaultConfig: { months: 6 },
+    controls: [months(6)],
   },
   "spend-by-category": {
     label: "Spend by category",
@@ -63,6 +131,7 @@ export const WIDGET_META: Record<
     icon: PieChart,
     wide: false,
     defaultConfig: { days: 30 },
+    controls: [range(DAY_RANGES, 30), order(false)],
   },
   "top-vendors": {
     label: "Top vendors",
@@ -70,6 +139,7 @@ export const WIDGET_META: Record<
     icon: Store,
     wide: false,
     defaultConfig: { days: 90, limit: 8 },
+    controls: [range(DAY_RANGES, 90), order(true), rows(8)],
   },
   "daily-spend": {
     label: "Daily spend",
@@ -140,9 +210,14 @@ const SELF_CONTAINED = new Set<WidgetType>([
 /** Renders one resolved widget, dispatching on its data `type`. Chart widgets
  *  get a standard titled Card; self-contained widgets render their own shell. */
 export function DashboardWidget({
+  id,
+  config = {},
   data,
   categories,
 }: {
+  /** Row id — the range/order controls persist against it. */
+  id?: string;
+  config?: WidgetConfig;
   data: WidgetData;
   categories: CategoryRow[];
 }) {
@@ -151,13 +226,15 @@ export function DashboardWidget({
   }
   const meta = WIDGET_META[data.type];
   const Icon = meta.icon;
+  const controls = id && meta.controls?.length ? meta.controls : null;
   return (
     <Card className="h-full">
-      <CardHeader>
+      <CardHeader className={controls ? "flex flex-wrap items-center justify-between gap-2" : undefined}>
         <CardTitle className="flex items-center gap-2">
           <Icon size={13} className="text-[var(--brass)]" />
           {meta.label}
         </CardTitle>
+        {controls && <WidgetControls widgetId={id!} config={config} specs={controls} />}
       </CardHeader>
       <WidgetBody data={data} categories={categories} />
     </Card>

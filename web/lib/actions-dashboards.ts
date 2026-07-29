@@ -76,6 +76,33 @@ export async function removeWidget(id: string): Promise<void> {
 }
 
 /**
+ * Change one widget's range/sort. Merged over the stored config rather than
+ * replacing it, so a range control can't drop the sort a different control set
+ * (and vice versa) — each control only owns its own key.
+ */
+export async function updateWidgetConfig(id: string, patch: WidgetConfig): Promise<void> {
+  const row = db
+    .select({ config: dashboardWidgets.config })
+    .from(dashboardWidgets)
+    .where(eq(dashboardWidgets.id, id))
+    .get();
+  if (!row) return;
+
+  let current: WidgetConfig = {};
+  try {
+    current = row.config ? (JSON.parse(row.config) as WidgetConfig) : {};
+  } catch {
+    current = {}; // a corrupt blob shouldn't wedge the control
+  }
+
+  db.update(dashboardWidgets)
+    .set({ config: JSON.stringify({ ...current, ...patch }) })
+    .where(eq(dashboardWidgets.id, id))
+    .run();
+  revalidatePath("/", "layout");
+}
+
+/**
  * Persist a new widget order for one dashboard. `ids` is the full ordered list
  * of that dashboard's widget ids; each row's sort_order is set to its index.
  */

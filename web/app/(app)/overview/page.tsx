@@ -42,6 +42,7 @@ export default async function Overview() {
   // serializable renderer (same contract as /dashboards/[id]).
   const resolved: ResolvedWidget[] = widgets.map((w) => ({
     id: w.id,
+    config: parseConfig(w.config),
     data: getWidgetData(w.type, parseConfig(w.config)),
   }));
 

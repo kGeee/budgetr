@@ -35,6 +35,7 @@ export default async function DashboardDetailPage({
   // serializable renderer.
   const widgets: ResolvedWidget[] = found.widgets.map((w) => ({
     id: w.id,
+    config: parseConfig(w.config),
     data: getWidgetData(w.type, parseConfig(w.config)),
   }));
 

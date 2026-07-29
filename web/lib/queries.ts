@@ -2113,14 +2113,37 @@ export type WidgetType =
   | "spending-review";
 
 /** Free-form per-widget settings. All optional — each widget falls back to sensible defaults. */
+/** How a ranked widget orders its rows. */
+export type WidgetSort = "amount" | "count" | "name";
+
 export type WidgetConfig = {
-  /** Trailing-day window (spend-by-category, top-vendors). */
+  /** Trailing-day window (spend-by-category, top-vendors, upcoming-bills). */
   days?: number;
   /** Month count (cashflow). */
   months?: number;
   /** Row cap (top-vendors, recent-activity, review-queue). */
   limit?: number;
+  /** Row order for the ranked widgets. Defaults to "amount". */
+  sort?: WidgetSort;
 };
+
+/**
+ * Order ranked rows. Applied after the query rather than inside it: the SQL
+ * already returns the top N by amount, and re-sorting that same slice is what
+ * the control means — "show me these, ordered differently" — not "pick a
+ * different N". Sorting inside the query would silently change which rows
+ * appear when the sort changes.
+ */
+function sortRanked<T>(
+  rows: T[],
+  sort: WidgetSort | undefined,
+  by: { amount: (r: T) => number; count?: (r: T) => number; name: (r: T) => string },
+): T[] {
+  const out = [...rows];
+  if (sort === "name") return out.sort((a, b) => by.name(a).localeCompare(by.name(b)));
+  if (sort === "count" && by.count) return out.sort((a, b) => by.count!(b) - by.count!(a));
+  return out.sort((a, b) => by.amount(b) - by.amount(a));
+}
 
 /** One category's spend this window vs the prior equal window — a "mover". */
 export type SpendShift = {
@@ -2282,7 +2305,11 @@ export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetDa
     case "top-vendors":
       return {
         type: "top-vendors",
-        merchants: getTopMerchants(config.days ?? 90, config.limit ?? 8),
+        merchants: sortRanked(getTopMerchants(config.days ?? 90, config.limit ?? 8), config.sort, {
+          amount: (m) => m.total,
+          count: (m) => m.count,
+          name: (m) => m.vendor,
+        }),
       };
     case "daily-spend": {
       // Trailing ~53 weeks, snapped back to a Sunday so the heatmap grid is
@@ -2320,7 +2347,13 @@ export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetDa
       return getSpendingReviewWidget();
     case "spend-by-category":
     default:
-      return { type: "spend-by-category", series: getSpendingByCategory(config.days ?? 30) };
+      return {
+        type: "spend-by-category",
+        series: sortRanked(getSpendingByCategory(config.days ?? 30), config.sort, {
+          amount: (c) => c.total,
+          name: (c) => c.category,
+        }),
+      };
   }
 }
 

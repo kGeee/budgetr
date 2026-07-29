@@ -107,6 +107,10 @@ export function IvSurface({
     const muted = readVar(canvas, "--muted", "#8b948c");
     const line = readVar(canvas, "--line", "#212a27");
     const brass = readVar(canvas, "--brass", "#cbb07c");
+    // Canvas can't take a CSS var, so resolve the app's mono stack and use it
+    // directly — otherwise this surface is the one chart labelled in the system
+    // font instead of Spline Sans Mono like every other axis.
+    const monoFamily = readFontVar(canvas, "--font-mono", MONO_FALLBACK);
     const jade = parseColor(readVar(canvas, "--jade", "#6fe3a6"));
     const coral = parseColor(readVar(canvas, "--coral", "#f0897b"));
     const brassRgb = parseColor(brass);
@@ -308,7 +312,7 @@ export function IvSurface({
     }
 
     // ── Axis ticks / labels (sparse, muted) ──────────────────────────────────
-    ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.font = `10px ${monoFamily}`;
     ctx.fillStyle = muted;
 
     // Strike ticks along the first-expiry (j=0) base edge.
@@ -432,6 +436,22 @@ export function IvSurface({
 function readVar(el: Element, name: string, fallback: string): string {
   const v = getComputedStyle(el).getPropertyValue(name).trim();
   return v || fallback;
+}
+
+const MONO_FALLBACK = "ui-monospace, SFMono-Regular, Menlo, monospace";
+
+/**
+ * Same, but for a font-family custom property destined for `ctx.font`.
+ *
+ * The font tokens are self-shadowing (`--font-mono: var(--font-mono), …`, so the
+ * next/font variable on <html> feeds the themed one). Browsers normally
+ * substitute that before returning a computed value, but if one hands back an
+ * unresolved `var(…)` the whole `ctx.font` assignment is invalid and silently
+ * keeps whatever was set before — a wrong font with no error. So reject it.
+ */
+function readFontVar(el: Element, name: string, fallback: string): string {
+  const v = readVar(el, name, "");
+  return v && !v.includes("var(") ? v : fallback;
 }
 
 /** Parse `#rgb` / `#rrggbb` (or fall back to a mid grey). */
