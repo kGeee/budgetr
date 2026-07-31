@@ -36,19 +36,20 @@ async function setZoom(page, z) {
   }, z);
 }
 
-export async function shoot({ page, rec, base }) {
+export async function shoot({ page, rec, base, fmt }) {
   // ── 0:00–0:03 · HOOK ──────────────────────────────────────────────────
   // "The first frame is already the app." No logo, no intro — open on the
   // card itself, pushed in, and let the number do the work. The overlay is
   // the before/after pair the production notes call the most important frame.
   // Zoom first, then frame: `zoom` reflows, so a position chosen at 1.0 is
-  // wrong by the time it's applied at 1.45.
-  await setZoom(page, 1.45);
+  // wrong by the time it's applied. Magnification comes from the format —
+  // the phone layout needs almost none, the desktop one needs a lot.
+  await setZoom(page, fmt.zoom.hero);
   const hookY = await frameOn(page, "Netflix went up 35%", 0.3);
   await setOverlay(page, { title: "$17.07 → $22.99", sub: "Netflix went up 35%" });
   await overlayOpacity(page, 0);
   await rec.animate(0.9, easeOut, (t) => overlayOpacity(page, t));
-  await rec.pushIn(1.45, 1.56, 2.1, easeInOut, hookY);
+  await rec.pushIn(fmt.zoom.hero, fmt.zoom.heroTo, 2.1, easeInOut, hookY);
 
   // ── 0:03–0:12 · THE PAIN ──────────────────────────────────────────────
   // "Four hundred lines." The transaction ledger, scrolled slowly enough to
@@ -77,7 +78,7 @@ export async function shoot({ page, rec, base }) {
     { needle: "Two $42.60 charges", title: "Duplicate charges", sub: "Two days apart, same pharmacy", hold: 4.8 },
   ];
 
-  await setZoom(page, 1.25);
+  await setZoom(page, fmt.zoom.beat);
   let y = 0;
   for (const [i, beat] of beats.entries()) {
     // Measure by moving there and reading back, then return so the glide has a

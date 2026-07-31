@@ -18,6 +18,44 @@ import path from "node:path";
 export const FPS = 30;
 
 /**
+ * The two deliverables, shot natively rather than cropped from one another.
+ *
+ * ../../README.md says shoot 16:9 and crop to 9:16 rather than re-record —
+ * a rule written for a human holding a camera, where a second take costs an
+ * afternoon and won't match. Here a second take costs 25 seconds and matches
+ * exactly, and cropping is genuinely worse: the centre 607px of a 1920 frame is
+ * half sidebar and half content column, and it magnifies an already-zoomed page
+ * by another 1.8x, so cards arrive clipped and enormous. The app has a real
+ * mobile layout — nav collapsed, content full-bleed, type already large — so
+ * `tall` shoots at phone size and gets a phone-shaped result.
+ *
+ * Deliberately no `isMobile`/`hasTouch`: the CSS breakpoints are width-based, so
+ * a narrow viewport is enough to get the mobile layout, and touch emulation puts
+ * wheel scrolling (see scrollSet) on shaky ground for no benefit.
+ */
+export const FORMATS = {
+  wide: {
+    name: "wide",
+    viewport: { width: 1920, height: 1080 },
+    dsf: 1,
+    out: "1920×1080",
+    // The page is small in a big frame, so it can take real magnification.
+    zoom: { hero: 1.45, heroTo: 1.56, beat: 1.25 },
+    type: { title: 76, sub: 30, padX: 72, padBottom: 88, slateTitle: 64, slateSub: 24, slatePad: 140 },
+  },
+  tall: {
+    name: "tall",
+    viewport: { width: 432, height: 768 },
+    dsf: 2.5, // 432×2.5 = 1080, 768×2.5 = 1920
+    out: "1080×1920",
+    // Barely any: the mobile layout is already at "one card fills the width".
+    // This is what looked wrong before — desktop zoom plus a crop's worth again.
+    zoom: { hero: 1, heroTo: 1.05, beat: 1 },
+    type: { title: 34, sub: 16, padX: 26, padBottom: 46, slateTitle: 30, slateSub: 15, slatePad: 34 },
+  },
+};
+
+/**
  * Find the Chromium that Playwright already downloaded, rather than pulling a
  * second copy. CHROME_PATH overrides for anyone whose cache lives elsewhere.
  */
@@ -144,9 +182,16 @@ export class Recorder {
  * typography — `font-display` here is the same Fraunces the product ships, so
  * the titles can't drift from the brand.
  */
-export async function setOverlay(page, { title = "", sub = "", align = "center" } = {}) {
+/**
+ * `anchor` puts the title band at the top instead of the bottom. Needed when
+ * the subject occupies the lower frame — the Sankey's tail ribbons are the
+ * thing being narrated, and a bottom scrim buries exactly the part the script
+ * says not to cut away from.
+ */
+export async function setOverlay(page, { title = "", sub = "", align = "center", anchor = "bottom" } = {}) {
+  const t = page._rigFormat?.type ?? FORMATS.wide.type;
   await page.evaluate(
-    ({ title, sub, align }) => {
+    ({ title, sub, align, anchor, t }) => {
       let el = document.getElementById("__rig_overlay");
       if (!el) {
         el = document.createElement("div");
@@ -157,22 +202,25 @@ export async function setOverlay(page, { title = "", sub = "", align = "center" 
       // chrome whose brightness we don't control shot to shot; a shadow is a
       // gamble, a scrim is a guarantee. It occupies the bottom third, which is
       // also why shots place their subject in the upper half.
+      const top = anchor === "top";
       el.style.cssText = `
         position: fixed; inset: 0; z-index: 2147483647; pointer-events: none;
-        display: flex; flex-direction: column; gap: 14px;
+        display: flex; flex-direction: column; gap: ${Math.round(t.title * 0.18)}px;
         align-items: ${align === "center" ? "center" : "flex-start"};
-        justify-content: flex-end; padding: 0 72px 88px;
+        justify-content: ${top ? "flex-start" : "flex-end"};
+        padding: ${top ? `${t.padBottom}px ${t.padX}px 0` : `0 ${t.padX}px ${t.padBottom}px`};
+        text-align: ${align === "center" ? "center" : "left"};
         opacity: 0; transition: none;
-        background: linear-gradient(to top,
+        background: linear-gradient(to ${top ? "bottom" : "top"},
           rgba(8,11,10,.97) 0%, rgba(8,11,10,.93) 26%,
           rgba(8,11,10,.72) 42%, rgba(8,11,10,0) 62%);
       `;
       el.innerHTML = `
-        ${title ? `<div class="font-display" style="font-size:76px;line-height:1.03;letter-spacing:-.025em;color:#ece7da">${title}</div>` : ""}
-        ${sub ? `<div style="font-size:30px;line-height:1.3;color:#cbb07c;font-weight:600">${sub}</div>` : ""}
+        ${title ? `<div class="font-display" style="font-size:${t.title}px;line-height:1.03;letter-spacing:-.025em;color:#ece7da">${title}</div>` : ""}
+        ${sub ? `<div style="font-size:${t.sub}px;line-height:1.3;color:#cbb07c;font-weight:600">${sub}</div>` : ""}
       `;
     },
-    { title, sub, align },
+    { title, sub, align, anchor, t },
   );
 }
 
@@ -184,8 +232,8 @@ export async function overlayOpacity(page, o) {
 }
 
 /** Fade the overlay in, hold it, fade it out — the standard title beat. */
-export async function titleBeat(rec, page, { title, sub, inSec = 0.4, holdSec = 2, outSec = 0.4 }) {
-  await setOverlay(page, { title, sub });
+export async function titleBeat(rec, page, { title, sub, anchor = "bottom", inSec = 0.4, holdSec = 2, outSec = 0.4 }) {
+  await setOverlay(page, { title, sub, anchor });
   await rec.animate(inSec, easeOut, (t) => overlayOpacity(page, t));
   await rec.hold(holdSec);
   await rec.animate(outSec, easeOut, (t) => overlayOpacity(page, 1 - t));
@@ -197,8 +245,9 @@ export async function titleBeat(rec, page, { title, sub, inSec = 0.4, holdSec = 
  * editor is told exactly what to drop in.
  */
 export async function showSlate(page, { kicker = "MISSING SHOT", title = "", sub = "" }) {
+  const t = page._rigFormat?.type ?? FORMATS.wide.type;
   await page.evaluate(
-    ({ kicker, title, sub }) => {
+    ({ kicker, title, sub, t }) => {
       let el = document.getElementById("__rig_slate");
       if (!el) {
         el = document.createElement("div");
@@ -208,15 +257,15 @@ export async function showSlate(page, { kicker = "MISSING SHOT", title = "", sub
       el.style.cssText = `
         position: fixed; inset: 0; z-index: 2147483646; background: #080b0a;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 22px; padding: 0 140px; text-align: center;
+        gap: ${Math.round(t.slateTitle * 0.34)}px; padding: 0 ${t.slatePad}px; text-align: center;
       `;
       el.innerHTML = `
-        <div style="font-size:15px;letter-spacing:3.5px;color:#cbb07c;font-weight:700">${kicker}</div>
-        <div class="font-display" style="font-size:64px;line-height:1.1;color:#ece7da">${title}</div>
-        <div style="font-size:24px;line-height:1.45;color:#8b948c;max-width:900px">${sub}</div>
+        <div style="font-size:${Math.round(t.slateSub * 0.62)}px;letter-spacing:3.5px;color:#cbb07c;font-weight:700">${kicker}</div>
+        <div class="font-display" style="font-size:${t.slateTitle}px;line-height:1.1;color:#ece7da">${title}</div>
+        <div style="font-size:${t.slateSub}px;line-height:1.45;color:#8b948c;max-width:900px">${sub}</div>
       `;
     },
-    { kicker, title, sub },
+    { kicker, title, sub, t },
   );
 }
 
@@ -339,8 +388,12 @@ export async function frameOn(page, needle, place = 0.34) {
     ({ t, place }) => {
       const sc = document.querySelector("[data-rig-scroller]") ?? document.scrollingElement;
       const root = sc === document.documentElement;
+      // Case-insensitive: plenty of these labels are uppercased by CSS
+      // (`text-transform`), so what you read on screen as "GROSS MARGIN" is
+      // "Gross margin" in the DOM. Matching what you see is the useful contract.
+      const needle = t.toLowerCase();
       const hits = [...document.querySelectorAll("div,li,article")].filter((e) =>
-        (e.textContent || "").includes(t),
+        (e.textContent || "").toLowerCase().includes(needle),
       );
       if (!hits.length) throw new Error(`No element containing ${JSON.stringify(t)}`);
       const el = hits.reduce((best, e) => {
@@ -370,6 +423,18 @@ export async function quiet(page) {
     content: `
       ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
       * { caret-color: transparent !important; }
+      /* The sticky header is frosted glass — .material is 82% ink plus
+         blur(20px) saturate(180%). The blur doesn't survive capture: computed
+         backdrop-filter comes back "none" even though the browser reports
+         support for it, so scrolled content shows through the bar sharp and
+         doubled, which reads as a rendering bug on camera rather than as
+         material. Flatten it to the colour a 20px blur over this dark UI
+         resolves to — closer to what the app looks like on a real Mac than
+         the artifact is. */
+      .material, .material-thick {
+        background: var(--ink) !important;
+        backdrop-filter: none !important;
+      }
     `,
   });
   await page.evaluate(() => {
@@ -406,14 +471,17 @@ export async function quiet(page) {
  * something a viewer should be reading, and animations that never settle would
  * make two capture runs differ.
  */
-export async function openStage({ url, width = 1920, height = 1080, outDir }) {
+export async function openStage({ url, format = "wide", outDir }) {
+  const fmt = FORMATS[format];
+  if (!fmt) throw new Error(`Unknown format ${format} — expected one of ${Object.keys(FORMATS).join(", ")}`);
+
   await fsp.mkdir(outDir, { recursive: true });
   for (const f of await fsp.readdir(outDir)) await fsp.rm(path.join(outDir, f), { force: true });
 
   const browser = await chromium.launch({ executablePath: resolveChromium() });
   const page = await browser.newPage({
-    viewport: { width, height },
-    deviceScaleFactor: 1,
+    viewport: fmt.viewport,
+    deviceScaleFactor: fmt.dsf,
     colorScheme: "dark",
     // NOT reducedMotion: "reduce". It looks like the obvious way to keep
     // entrance animations from varying between takes, but in this Chromium it
@@ -422,9 +490,13 @@ export async function openStage({ url, width = 1920, height = 1080, outDir }) {
     // from settling after navigation instead (see quiet()).
   });
 
+  // Carried on the page so setOverlay/showSlate can size type to the frame
+  // without every caller having to thread the format through.
+  page._rigFormat = fmt;
+
   await page.goto(url, { waitUntil: "networkidle" });
   await assertDemoTarget(page, url); // proof first — then hide the banner
   await quiet(page);
 
-  return { browser, page, rec: new Recorder(page, outDir) };
+  return { browser, page, fmt, rec: new Recorder(page, outDir) };
 }
