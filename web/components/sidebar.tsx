@@ -18,6 +18,7 @@ import {
   PiggyBank,
   Repeat,
   Receipt,
+  Sigma,
   Sparkles,
   Store,
   TrendingUp,
@@ -54,7 +55,8 @@ const navGroups: { label?: string; items: NavItem[] }[] = [
   {
     label: "Investments",
     items: [
-      { href: "/investments", label: "Investments", icon: LineChart },
+      { href: "/investments", label: "Portfolio", icon: LineChart },
+      { href: "/investments/options", label: "Options", icon: Sigma },
       { href: "/investments/analysis", label: "Analysis", icon: Gauge },
       { href: "/fundamentals", label: "Fundamentals", icon: Building2 },
       { href: "/realized-gains", label: "Realized gains", icon: Receipt },

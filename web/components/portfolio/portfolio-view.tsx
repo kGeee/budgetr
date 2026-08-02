@@ -652,7 +652,12 @@ function PortfolioInner({
 
   return (
     <div className="space-y-7">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <SectionJump
+        hasOptions={optionLegs.length > 0}
+        hasDividends={Boolean(dividendSummary && dividendSummary.payments.length > 0)}
+      />
+
+      <div id="value" className="grid scroll-mt-28 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Market value" value={total} big />
         <Stat
           label="Day change"
@@ -713,23 +718,25 @@ function PortfolioInner({
 
       <BenchmarkComparison comparison={comparison} />
 
-      <AssetAllocation
-        rows={allocRows}
-        total={total}
-        targets={allocationTargets}
-        assetClassOverrides={assetClassOverrides}
-        geographyOverrides={geographyOverrides}
-        knownSectors={sectorOptions}
-      />
+      <div id="allocation" className="scroll-mt-28 space-y-7">
+        <AssetAllocation
+          rows={allocRows}
+          total={total}
+          targets={allocationTargets}
+          assetClassOverrides={assetClassOverrides}
+          geographyOverrides={geographyOverrides}
+          knownSectors={sectorOptions}
+        />
 
-      <SectorAllocation
-        allocation={allocation}
-        total={allocationTotal}
-        activeSector={sectorFilter}
-        onSelect={setSectorFilter}
-      />
+        <SectorAllocation
+          allocation={allocation}
+          total={allocationTotal}
+          activeSector={sectorFilter}
+          onSelect={setSectorFilter}
+        />
+      </div>
 
-      <Card className="overflow-hidden p-0">
+      <Card id="holdings" className="scroll-mt-28 overflow-hidden p-0">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <span className="eyebrow">Holdings</span>
@@ -853,20 +860,86 @@ function PortfolioInner({
       </Card>
 
       {optionLegs.length > 0 && (
-        <OptionsAnalytics
-          legs={optionLegs}
-          quotes={quotes}
-          ivByOcc={ivByOcc}
-          underlyingPrices={underlyingPrices}
-          chainByUnderlying={chainByUnderlying}
-          currency={optionLegs[0]?.currency ?? "USD"}
-        />
+        <div id="options" className="scroll-mt-28">
+          <OptionsAnalytics
+            legs={optionLegs}
+            quotes={quotes}
+            ivByOcc={ivByOcc}
+            underlyingPrices={underlyingPrices}
+            chainByUnderlying={chainByUnderlying}
+            currency={optionLegs[0]?.currency ?? "USD"}
+          />
+        </div>
       )}
 
       {dividendSummary && dividendSummary.payments.length > 0 && (
-        <DividendPanel summary={dividendSummary} calendar={dividendCalendar} />
+        <div id="dividends" className="scroll-mt-28">
+          <DividendPanel summary={dividendSummary} calendar={dividendCalendar} />
+        </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Jump strip for the desk's five sections. The Portfolio desk is a long scroll —
+ * value, allocation, holdings, options, dividends — and "show me my option
+ * positions" used to mean scrolling past everything above it. Anchors only: no
+ * data moves and nothing re-fetches, and sections that aren't rendered (no
+ * option legs, no dividends) are simply absent from the strip.
+ */
+function SectionJump({ hasOptions, hasDividends }: { hasOptions: boolean; hasDividends: boolean }) {
+  const sections = [
+    { id: "value", label: "Value" },
+    { id: "allocation", label: "Allocation" },
+    { id: "holdings", label: "Holdings" },
+    ...(hasOptions ? [{ id: "options", label: "Options" }] : []),
+    ...(hasDividends ? [{ id: "dividends", label: "Dividends" }] : []),
+  ];
+  const key = sections.map((s) => s.id).join(",");
+  const [active, setActive] = useState("value");
+
+  useEffect(() => {
+    const els = key
+      .split(",")
+      .map((id) => document.getElementById(id))
+      .filter((el): el is HTMLElement => el != null);
+    if (els.length === 0) return;
+    // The band runs from just under the sticky header to 55% down the viewport,
+    // so the section you're reading wins rather than whatever is at the bottom.
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const seen = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (seen[0]) setActive(seen[0].target.id);
+      },
+      { rootMargin: "-96px 0px -55% 0px" },
+    );
+    els.forEach((el) => obs.observe(el));
+    return () => obs.disconnect();
+  }, [key]);
+
+  return (
+    <nav
+      aria-label="Sections of this desk"
+      className="material sticky top-14 z-10 -mx-1 flex gap-1.5 overflow-x-auto rounded-full px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
+      {sections.map((s) => (
+        <a
+          key={s.id}
+          href={`#${s.id}`}
+          aria-current={active === s.id ? "true" : undefined}
+          className={`shrink-0 rounded-full border px-3 py-1 text-xs transition-colors ${
+            active === s.id
+              ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
+              : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+          }`}
+        >
+          {s.label}
+        </a>
+      ))}
+    </nav>
   );
 }
 
@@ -927,14 +1000,24 @@ function HoldingRowView({
               {/* Quiet row actions — revealed on hover so 45 rows don't shout. */}
               <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 md:inline-flex">
                 {isOptionable(h) && (
-                  <Link
-                    href={`/investments/options/${encodeURIComponent(h.ticker as string)}`}
-                    title={`Options desk for ${h.ticker}`}
-                    className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                  >
-                    Options
-                    <ArrowUpRight size={10} />
-                  </Link>
+                  <>
+                    <Link
+                      href={`/investments/options/chain?ticker=${encodeURIComponent(h.ticker as string)}`}
+                      title={`Option chain for ${h.ticker}`}
+                      className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+                    >
+                      Chain
+                      <ArrowUpRight size={10} />
+                    </Link>
+                    <Link
+                      href={`/investments/options/vol?ticker=${encodeURIComponent(h.ticker as string)}`}
+                      title={`Fixed-strike vol for ${h.ticker}`}
+                      className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+                    >
+                      Vol
+                      <ArrowUpRight size={10} />
+                    </Link>
+                  </>
                 )}
                 {h.ticker && !parseOccSymbol(h.ticker) && (
                   <Link
@@ -1026,8 +1109,8 @@ function HoldingRowView({
 function OptionsChip({ ticker }: { ticker: string }) {
   return (
     <Link
-      href={`/investments/options/${encodeURIComponent(ticker)}`}
-      title={`Options desk for ${ticker}`}
+      href={`/investments/options/chain?ticker=${encodeURIComponent(ticker)}`}
+      title={`Option chain for ${ticker}`}
       className="inline-flex items-center gap-0.5 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
     >
       options
@@ -1272,12 +1355,12 @@ function OptionGroupRow({
             <span className="mono font-semibold tracking-tight text-[var(--brass)]">{underlying}</span>
             <span className="text-[var(--muted)]">{summary}</span>
             <Link
-              href={`/investments/options/${encodeURIComponent(underlying)}`}
+              href={`/investments/options/chain?ticker=${encodeURIComponent(underlying)}`}
               onClick={(e) => e.stopPropagation()}
-              title={`Options desk for ${underlying}`}
+              title={`Option chain for ${underlying}`}
               className="hidden items-center gap-0.5 text-[11px] text-[var(--faint)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-[var(--brass)] md:inline-flex"
             >
-              Options
+              Chain
               <ArrowUpRight size={10} />
             </Link>
             {Number.isFinite(soonestDte) && (
