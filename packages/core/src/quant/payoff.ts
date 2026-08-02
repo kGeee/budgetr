@@ -18,7 +18,7 @@
  * Pure module (no DB / network) so client components can use it directly.
  */
 
-import type { ParsedOption } from "@/lib/options";
+import type { ParsedOption } from "./contract.js";
 
 /** Contracts × 100 — the share multiplier one option contract controls. */
 export const CONTRACT_SIZE = 100;
@@ -115,20 +115,23 @@ export function analyzePayoff(legs: PayoffLeg[]): PayoffAnalysis {
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i];
     const b = pts[i + 1];
+    // Both are in range by construction; the guard is for noUncheckedIndexedAccess.
+    if (!a || !b) continue;
     if ((a.y <= 0 && b.y > 0) || (a.y >= 0 && b.y < 0)) {
       breakevens.push(a.x + ((b.x - a.x) * (0 - a.y)) / (b.y - a.y));
     }
   }
   // Right tail beyond the last strike: extend with the tail slope and solve for 0.
-  if (Math.abs(slopeRight) > EPS) {
-    const last = pts[pts.length - 1];
+  const last = pts[pts.length - 1];
+  if (last && Math.abs(slopeRight) > EPS) {
     const be = last.x - last.y / slopeRight;
     if (be > last.x + EPS) breakevens.push(be);
   }
   // Dedup near-identical crossings (a breakeven landing exactly on a strike).
   const deduped: number[] = [];
   for (const be of breakevens.sort((a, b) => a - b)) {
-    if (!deduped.length || Math.abs(be - deduped[deduped.length - 1]) > 1e-6) deduped.push(be);
+    const prev = deduped[deduped.length - 1];
+    if (prev === undefined || Math.abs(be - prev) > 1e-6) deduped.push(be);
   }
 
   return {

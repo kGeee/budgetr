@@ -9,7 +9,7 @@
  * degenerate (no IV, expired, zero price), so the UI can show an em dash.
  */
 
-import { daysToExpiry, type ParsedOption } from "@/lib/options";
+import { daysToExpiry, type ParsedOption } from "./contract.js";
 
 /** Constant short-rate assumption — good enough for display-grade Greeks. */
 export const RISK_FREE_RATE = 0.045;
