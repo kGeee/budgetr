@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { BadgeCheck, Coins, KeyRound, Mail, Smartphone, SunMoon } from "lucide-react";
+import { BadgeCheck, Clock, Coins, KeyRound, Mail, Smartphone, SunMoon } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { CurrencySwitcher } from "@/components/currency-switcher";
@@ -9,7 +9,9 @@ import { ApiKeysForm } from "@/components/api-keys-form";
 import { CompanionCard } from "@/components/companion-card";
 import { LicensePanel } from "@/components/license-panel";
 import { getSyncStatus } from "@/lib/companion/store";
-import { getDisplayCurrencySetting } from "@/lib/queries";
+import { PendingSwitch } from "@/components/pending-toggle";
+import { getDisplayCurrencySetting, getPendingSummary } from "@/lib/queries";
+import { getIncludePending } from "@/lib/pending";
 import { getReportSchedule } from "@/lib/actions-reports";
 import { getFinnhubKey, getPlaidConfig } from "@/lib/app-config";
 import { getEntitlement } from "@/lib/license";
@@ -25,6 +27,8 @@ export default async function SettingsPage() {
   const plaidCfg = getPlaidConfig();
   const clientIdHint = plaidCfg.clientId ? `••••${plaidCfg.clientId.slice(-4)}` : null;
   const entitlement = getEntitlement();
+  const countPending = getIncludePending();
+  const pendingSummary = getPendingSummary();
 
   return (
     <div className="space-y-7">
@@ -77,6 +81,27 @@ export default async function SettingsPage() {
             amounts are shown.
           </p>
           <CurrencySwitcher current={displayCurrency} />
+        </div>
+      </Card>
+
+      {/* Pending transactions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Pending transactions</CardTitle>
+          <Clock size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <p className="max-w-md text-sm text-[var(--muted)]">
+            Off (the default), a charge only counts toward spending once it settles, so
+            totals never move under you. On, pending charges count immediately — usually
+            the truer picture, at the cost of the odd figure changing when a gas-station
+            hold or a restaurant tip posts at its final amount.
+          </p>
+          <PendingSwitch
+            on={countPending}
+            count={pendingSummary.count}
+            amount={pendingSummary.amount}
+          />
         </div>
       </Card>
 

@@ -22,8 +22,8 @@ import {
 } from "@/lib/portfolio-history";
 import { computeComparison, twrIndexSeries, type BenchmarkKey } from "@/lib/benchmark";
 import { parseOccSymbol } from "@/lib/options";
-import { getDividendCalendar, getOptionChain, type OptionQuote } from "@/lib/yahoo";
-import { getCboeOptionChain } from "@/lib/cboe";
+import { getDividendCalendar } from "@/lib/yahoo";
+import { loadOptionChainContext } from "@/lib/options-desk";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (always fresh), but the Yahoo history fetches should
@@ -179,40 +179,12 @@ export default async function InvestmentsPage() {
   // read as outperformance.
   const comparison = computeComparison(portfolioReturnSeries, benchmarks);
 
-  // Options analytics: for the distinct OCC underlyings we hold, pull Yahoo's
-  // option chains (only when option legs exist) for live IV + underlying prices,
-  // fetching just the expiries we actually own. Everything downstream is derived.
-  const occLegs = holdings
-    .map((h) => parseOccSymbol(h.ticker))
-    .filter((p): p is NonNullable<typeof p> => p != null);
-  const expiriesByUnderlying = new Map<string, Set<string>>();
-  for (const p of occLegs) {
-    const set = expiriesByUnderlying.get(p.underlying) ?? new Set<string>();
-    set.add(p.expiry);
-    expiriesByUnderlying.set(p.underlying, set);
-  }
-  const ivByOcc: Record<string, number> = {};
-  const underlyingPrices: Record<string, number> = {};
-  const chainByUnderlying: Record<string, OptionQuote[]> = {};
-  if (expiriesByUnderlying.size > 0) {
-    // CBOE is the primary source — free, no auth, and it ships real Greeks. Yahoo
-    // now requires an auth crumb (401 headless), so it's only a best-effort
-    // fallback for IV + underlying price if CBOE is unavailable for a symbol.
-    const chains = await Promise.all(
-      [...expiriesByUnderlying.entries()].map(async ([underlying, expiries]) => {
-        const list = [...expiries];
-        const chain =
-          (await getCboeOptionChain(underlying, list)) ?? (await getOptionChain(underlying, list));
-        return [underlying, chain] as const;
-      }),
-    );
-    for (const [underlying, chain] of chains) {
-      if (!chain) continue;
-      Object.assign(ivByOcc, chain.ivByOcc);
-      if (chain.underlyingPrice != null) underlyingPrices[underlying] = chain.underlyingPrice;
-      if (chain.contracts.length) chainByUnderlying[underlying] = chain.contracts;
-    }
-  }
+  // Options analytics: for the distinct OCC underlyings we hold, pull the option
+  // chains (only the expiries we actually own) for live IV + underlying prices.
+  // Shared with the Options desk — see lib/options-desk.ts.
+  const { ivByOcc, underlyingPrices, chainByUnderlying } = await loadOptionChainContext(
+    holdings.map((h) => h.ticker),
+  );
 
   // Ex-dividend calendar: pull Yahoo's upcoming ex-div/pay dates for the held
   // tickers, but only once we know some dividend income exists (the panel is

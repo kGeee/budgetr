@@ -1,4 +1,5 @@
 import { PageHead } from "@/components/page-head";
+import { InvestmentsTabs } from "@/components/investments-tabs";
 import { RealizedGainsView } from "@/components/realized-gains-view";
 import {
   getCostBasisMethods,
@@ -19,6 +20,8 @@ export default async function RealizedGainsPage() {
 
   return (
     <div className="space-y-7">
+      {/* Lives outside investments/layout.tsx, so it renders the section bar itself. */}
+      <InvestmentsTabs />
       <PageHead title="Realized gains" />
       <RealizedGainsView
         lots={lots}
