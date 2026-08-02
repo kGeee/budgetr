@@ -395,13 +395,17 @@ export type BudgetRow = {
  * Returns 'YYYY-MM'.
  */
 export function getBudgetMonth(): string {
+  // Deliberately settled-only, even when the "count pending" preference is on:
+  // this picks WHICH month the budget page shows, and on the 1st or 2nd of a
+  // month a couple of pending charges would otherwise flip the page from last
+  // month's finished budget to a near-empty new one the moment the toggle moved.
   const row = db.get<{ m: string | null }>(sql`
     SELECT CASE
       WHEN EXISTS(
         SELECT 1 FROM transactions
-        WHERE ${settledOnly("")} AND substr(date, 1, 7) = strftime('%Y-%m', 'now')
+        WHERE pending = 0 AND substr(date, 1, 7) = strftime('%Y-%m', 'now')
       ) THEN strftime('%Y-%m', 'now')
-      ELSE (SELECT MAX(substr(date, 1, 7)) FROM transactions WHERE ${settledOnly("")})
+      ELSE (SELECT MAX(substr(date, 1, 7)) FROM transactions WHERE pending = 0)
     END AS m`);
   return row?.m ?? new Date().toISOString().slice(0, 7);
 }
@@ -990,18 +994,20 @@ export function getTransactionsToReview(limit = 100): TransactionRow[] {
 }
 
 /**
- * What is currently in flight: how many pending transactions there are and how
- * much outflow they carry (transfers excluded, like every other spend figure).
- * Feeds the "count pending" toggle so the choice shows what it's worth. Never
- * honours the preference itself — it's describing the pending rows.
+ * What is currently in flight: how many pending charges there are and how much
+ * spending they carry. Feeds the "count pending" toggle so the choice shows what
+ * it's worth, so it filters exactly like {@link getDailySpend} — outflows whose
+ * *effective* category (override first, Plaid primary second) is in the spending
+ * group. Never honours the preference itself; it's describing the pending rows.
  */
 export function getPendingSummary(): { count: number; amount: number } {
   const row = db.get<{ count: number; amount: number }>(sql`
-    SELECT COUNT(*) AS count,
-           COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS amount
+    SELECT COUNT(*) AS count, COALESCE(SUM(t.amount), 0) AS amount
       FROM transactions t
+      JOIN categories cat ON cat.id = ${effectiveCatId("t")}
      WHERE t.pending = 1
-       AND (t.category IS NULL OR t.category NOT IN (${transferPrimaries}))`);
+       AND t.amount > 0
+       AND cat."group" = 'spending'`);
   return { count: Number(row?.count ?? 0), amount: Number(row?.amount ?? 0) };
 }
 

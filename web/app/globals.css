@@ -29,6 +29,12 @@
   --chart-tooltip-bg: #101413;
   --chart-dot-stroke: #090c0b;
 
+  /* Per-identity tint. A hue is derived per person (see components/shared-view)
+     and rendered through these theme-owned saturation/lightness stops, so the
+     same face colour stays legible on the dark canvas and the light paper one. */
+  --tint-s: 42%;
+  --tint-l: 66%;
+
   --radius: 18px;
   color-scheme: dark; /* native controls + scrollbars follow the theme */
 
@@ -92,6 +98,8 @@
   --elev-3:
     0 1px 0 0 rgba(255, 255, 255, 0.9) inset,
     0 34px 64px -24px rgba(60, 50, 20, 0.26);
+  --tint-s: 58%;
+  --tint-l: 32%;
   color-scheme: light;
 }
 
@@ -126,6 +134,8 @@
     --elev-3:
       0 1px 0 0 rgba(255, 255, 255, 0.9) inset,
       0 34px 64px -24px rgba(60, 50, 20, 0.26);
+    --tint-s: 58%;
+    --tint-l: 32%;
     color-scheme: light;
   }
 }
@@ -265,6 +275,15 @@ body::after {
 }
 .lift:active {
   transform: translateY(0);
+}
+
+/*
+  Identity tint. Set `--tint-h` inline (a hue number) and read `var(--tint)` for
+  the resolved colour; lightness/saturation come from the active theme so the
+  same hue works on both canvases. Used for per-person avatars and accents.
+*/
+.tint {
+  --tint: hsl(var(--tint-h, 150) var(--tint-s) var(--tint-l));
 }
 
 /*
