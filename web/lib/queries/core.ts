@@ -605,6 +605,34 @@ export function getBudgetSpendByDay(): { date: string; spent: number }[] {
     .map((r) => ({ date: r.date, spent: Number(r.spent) }));
 }
 
+/**
+ * The same budget-month spend as {@link getBudgetSpendByDay}, split by category
+ * — one row per (category, day) that had spend. The budgets page derives both
+ * the whole-month pace line and any single envelope's pace from this one set,
+ * so focusing a category re-scopes the chart with no server round-trip and the
+ * two readings can't disagree.
+ */
+export function getBudgetSpendByCategoryDay(): {
+  categoryId: string;
+  date: string;
+  spent: number;
+}[] {
+  const month = getBudgetMonth();
+  return db
+    .all<{ categoryId: string; date: string; spent: number }>(
+      sql`SELECT cat.id AS categoryId, t.date AS date, SUM(t.amount) AS spent
+          FROM transactions t
+          JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+          JOIN budgets b ON b.category_id = cat.id
+          WHERE ${settledOnly()} AND t.amount > 0
+            AND cat."group" = 'spending'
+            AND substr(t.date, 1, 7) = ${month}
+          GROUP BY cat.id, t.date
+          ORDER BY t.date ASC`,
+    )
+    .map((r) => ({ categoryId: r.categoryId, date: r.date, spent: Number(r.spent) }));
+}
+
 export type CategoryTrend = {
   category: string;
   icon: string | null;
