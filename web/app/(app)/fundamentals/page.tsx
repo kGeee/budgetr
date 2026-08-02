@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { PageHead } from "@/components/page-head";
+import { InvestmentsTabs } from "@/components/investments-tabs";
 import { Card } from "@/components/ui/card";
 import { IncomeSankey } from "@/components/fundamentals/income-sankey";
 import { getIncomeStatement } from "@/lib/sec";
@@ -29,6 +30,8 @@ export default async function FundamentalsPage({
 
   return (
     <div className="space-y-6">
+      {/* Lives outside investments/layout.tsx, so it renders the section bar itself. */}
+      <InvestmentsTabs />
       <PageHead
         title="Fundamentals"
         action={

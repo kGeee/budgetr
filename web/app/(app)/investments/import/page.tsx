@@ -1,5 +1,3 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { TradeImport } from "@/components/import/trade-import";
 import { StockSplits } from "@/components/import/stock-splits";
@@ -20,17 +18,8 @@ export default function ImportTradesPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-5 py-8 sm:px-8">
-      <PageHead
-        title="Import trades"
-        action={
-          <Link
-            href="/investments"
-            className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] transition hover:text-[var(--paper)]"
-          >
-            <ArrowLeft size={15} /> Investments
-          </Link>
-        }
-      />
+      {/* No back-link: the section tab bar above this flow now covers the exit. */}
+      <PageHead title="Import trades" />
 
       <TradeImport accounts={accounts} />
 
