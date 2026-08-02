@@ -239,16 +239,19 @@ function PersonCard({ person }: { person: PersonBalance }) {
         </button>
       </div>
 
-      <p
-        className={`mono mt-3 text-2xl tabular ${square ? "text-[var(--muted)]" : "text-[var(--jade)]"}`}
-      >
-        {formatCurrency(person.balance)}
-      </p>
-      <p className="mt-1 text-xs text-[var(--muted)]">
-        {square
-          ? "Settled up"
-          : `owes you · ${formatCurrency(person.settled)} paid back so far`}
-      </p>
+      {/* A zero balance is noise — say "settled up" rather than print $0.00. */}
+      {square ? (
+        <p className="mt-3 text-sm text-[var(--muted)]">Settled up</p>
+      ) : (
+        <>
+          <p className="mono mt-3 text-2xl tabular text-[var(--jade)]">
+            {formatCurrency(person.balance)}
+          </p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            owes you · {formatCurrency(person.settled)} paid back so far
+          </p>
+        </>
+      )}
 
       {!square &&
         (settling ? (
