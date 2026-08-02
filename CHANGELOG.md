@@ -5,7 +5,7 @@ tags that publish the macOS desktop app via the Release workflow.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.9.0] — 2026-07-28
+## [0.9.0] — 2026-08-01
 
 ### Added
 
