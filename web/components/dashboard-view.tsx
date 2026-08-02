@@ -21,10 +21,10 @@ import {
   renameDashboard,
   reorderWidgets,
 } from "@/lib/actions-dashboards";
-import type { CategoryRow, WidgetData } from "@/lib/queries";
+import type { CategoryRow, WidgetConfig, WidgetData } from "@/lib/queries";
 import type { Dashboard } from "@/db/schema";
 
-export type ResolvedWidget = { id: string; data: WidgetData };
+export type ResolvedWidget = { id: string; data: WidgetData; config?: WidgetConfig };
 
 /**
  * The composable widget grid for a single dashboard. Read mode renders the
@@ -139,7 +139,7 @@ export function DashboardView({
                     </button>
                   </div>
                 )}
-                <DashboardWidget data={w.data} categories={categories} />
+                <DashboardWidget id={w.id} config={w.config} data={w.data} categories={categories} />
               </div>
             );
           })}

@@ -94,6 +94,22 @@ describe("classifyOptionLegs", () => {
     expect(s.label).toBe("Short put");
   });
 
+  it("splits same-direction legs at different strikes into independent singles", () => {
+    // Two cash-secured puts on one underlying/expiry — a wheel ladder, NOT a
+    // spread. Folding them into a "combo" hid them from the wheel report and
+    // zeroed collateral-at-risk / open-contract counts.
+    const p400 = parseOccSymbol("NUAI260821P00004000")!;
+    const p450 = parseOccSymbol("NUAI260821P00004500")!;
+    const structs = classifyOptionLegs([
+      { parsed: p400, quantity: -100 },
+      { parsed: p450, quantity: -100 },
+    ]);
+    expect(structs).toHaveLength(2);
+    expect(structs.every((s) => s.kind === "single")).toBe(true);
+    expect(structs.every((s) => s.label === "Short put")).toBe(true);
+    expect(structs.flatMap((s) => s.legIndexes).sort()).toEqual([0, 1]);
+  });
+
   it("computes correct vertical economics from share-based quantities + cost basis", () => {
     // Regression guard for the reward:risk bug: quantities are SHARES (±100 = 1
     // contract), cost basis is total dollars. The LRCX 410/430 bull call spread.

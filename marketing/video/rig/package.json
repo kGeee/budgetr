@@ -1,0 +1,13 @@
+{
+  "name": "budgetr-video-rig",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic frame-sequence capture of the app against the seeded demo persona.",
+  "scripts": {
+    "shoot": "node shoot.mjs",
+    "compose": "node compose.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

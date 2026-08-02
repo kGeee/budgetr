@@ -79,9 +79,9 @@ them you must redeploy (a rebuild), not just restart.
 2. **Products → New product** → **one-time payment** (fixed price). Set the price
    (match `NEXT_PUBLIC_PRICE`), name ("budgetr — lifetime license"), and a
    description.
-3. Add a **License Key** benefit to the product so each order issues a key and
-   emails it to the buyer. (Honor-system — the app doesn't validate the key; it's
-   the buyer's proof of purchase.)
+3. Leave Polar's own **License Key** benefit off — budgetr mints its own. The
+   checkout webhook (step below) signs an Ed25519 license key that the app
+   verifies offline, so the key is enforced, not just proof of purchase.
 4. Create a **Checkout Link** for the product (Product → Share / Checkout Links)
    → this URL is `NEXT_PUBLIC_CHECKOUT_URL`.
 5. Set the checkout's **Success URL** to `https://budgetr.dev/thanks` so buyers
@@ -94,11 +94,25 @@ them you must redeploy (a rebuild), not just restart.
    sandbox and production environments — sandbox checkout links only take test
    cards).
 
-_No webhook is required for the honor-system model._ If you later want to record
-orders or gate downloads, add a `/api/webhooks/polar` route. Polar signs
-webhooks with the **Standard Webhooks** spec (HMAC over the raw body, verified
-with the endpoint's secret — the `@polar-sh/nextjs` adapter's `Webhooks()`
-handler does this for you) — ask and we'll wire it.
+**The webhook is required** — it's what turns an order into a working license.
+Point Polar at `/api/license/webhook` (`app/api/license/webhook/route.ts`). Polar
+signs with the **Standard Webhooks** spec (HMAC over the raw body); the route
+verifies it, then on a paid order mints a perpetual Ed25519 license keyed to the
+order id (so retries re-mint the same key) and emails it via Resend.
+
+It needs three env vars, **on the checkout deployment only**:
+
+| Var | Purpose |
+| --- | --- |
+| `POLAR_WEBHOOK_SECRET` | verifies the Standard Webhooks signature |
+| `LICENSE_SIGNING_KEY` | the PEM private key that signs licenses |
+| `RESEND_API_KEY` | delivers the key to the buyer |
+
+Never set these on a self-hosted install — anyone holding `LICENSE_SIGNING_KEY`
+can mint their own licenses. With them unset the route no-ops with a 503, so it's
+inert on user installs. The matching public key is compiled into the app
+(`lib/license/public-key.ts`) and verification is fully offline: no phone-home,
+14-day trial first, and `BUDGETR_LICENSE_DISABLED=1` opts self-hosters out.
 
 ---
 

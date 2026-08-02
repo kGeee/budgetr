@@ -98,9 +98,55 @@ export function Screen({
   );
 }
 
+/**
+ * Single-screen scaffold: everything fits between the safe area and the tab
+ * pill, so nothing scrolls. It's still a ScrollView with `flexGrow: 1` — that
+ * keeps pull-to-refresh (a RefreshControl needs a scroll host) and degrades
+ * into a short scroll on small devices instead of clipping content off-screen.
+ *
+ * Children own their own heights; give the flexible one `flex: 1`.
+ */
+export function FixedScreen({
+  refreshing,
+  onRefresh,
+  children,
+}: {
+  refreshing: boolean;
+  onRefresh: () => void;
+  children: React.ReactNode;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={s.root}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <Aurora />
+      </View>
+      <Animated.ScrollView
+        contentContainerStyle={[
+          s.fixedContent,
+          { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 96 },
+        ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              haptics.thud();
+              onRefresh();
+            }}
+            tintColor={T.muted}
+          />
+        }
+      >
+        {children}
+      </Animated.ScrollView>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.ink },
   content: { padding: 18, paddingBottom: 124 },
+  fixedContent: { flexGrow: 1, paddingHorizontal: 18 },
   header: { position: "absolute", top: 0, left: 0, right: 0, justifyContent: "center" },
   compactTitle: {
     fontFamily: F.sansSemiBold,

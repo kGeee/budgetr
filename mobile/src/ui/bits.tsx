@@ -164,22 +164,75 @@ export function Aurora() {
   );
 }
 
+/** How long a "synced just now" confirmation stays up after a pull. */
+const SYNC_CONFIRM_MS = 4000;
+
 /**
- * "Synced Xm ago" + error/pending state — errors are states, not crashes.
- * Past 24h the banner turns brass and says so plainly: a glance app must
- * never let stale numbers pass as fresh (spec T6 stale-cache warning).
+ * Sync status — but only when it's worth saying.
+ *
+ * Errors, stale data and queued edits are STATES the user needs to know about,
+ * so they show unconditionally: a glance app must never let stale numbers pass
+ * as fresh (spec T6 stale-cache warning). The plain "synced Xm ago"
+ * confirmation is different — it answers a question only someone who just
+ * pulled to refresh is asking, so it appears for a few seconds after a manual
+ * pull and stays out of the way otherwise.
  */
 export function SyncBanner() {
-  const { lastSyncAt, syncError, pendingOps } = useCompanion();
+  const { lastSyncAt, syncError, pendingOps, refreshing, manualSyncAt } = useCompanion();
+  const [confirming, setConfirming] = React.useState(false);
+
+  React.useEffect(() => {
+    if (manualSyncAt === null) return;
+    setConfirming(true);
+    const id = setTimeout(() => setConfirming(false), SYNC_CONFIRM_MS);
+    return () => clearTimeout(id);
+  }, [manualSyncAt]);
+
   const stale = lastSyncAt !== null && Date.now() / 1000 - lastSyncAt > 24 * 3600;
   const warn = Boolean(syncError) || stale;
+  const pending = pendingOps.length > 0;
+  // Nothing to report and nobody asked — render nothing rather than an empty row,
+  // so the layout above doesn't reserve space for a message that isn't coming.
+  if (!warn && !pending && !confirming && !refreshing) return null;
+
+  const lead = syncError ? `${syncError} · ` : stale ? "⚠ showing old data · " : "";
+  const synced = refreshing ? "syncing…" : confirming || warn ? `synced ${agoLabel(lastSyncAt)}` : "";
+  const edits = pending ? `${synced ? " · " : ""}${pendingOps.length} edit${pendingOps.length > 1 ? "s" : ""} pending` : "";
+
   return (
     <View style={s.bannerRow}>
       <Text style={[s.bannerText, warn ? { color: T.brass } : null]} numberOfLines={1}>
-        {syncError ? `${syncError} · ` : stale ? "⚠ showing old data · " : ""}synced {agoLabel(lastSyncAt)}
-        {pendingOps.length > 0 ? ` · ${pendingOps.length} edit${pendingOps.length > 1 ? "s" : ""} pending` : ""}
+        {lead}
+        {synced}
+        {edits}
       </Text>
     </View>
+  );
+}
+
+/**
+ * Sample-data ribbon. Sits above every tab whenever the app is showing the
+ * fixture rather than a real desktop's summary.
+ *
+ * It is permanent and unmissable on purpose: a finance app quietly displaying
+ * invented balances is the one failure mode worth spending vertical space to
+ * prevent. Tapping it leaves — the same call that unpairs a real device, since
+ * demo state and paired state are torn down identically.
+ */
+export function DemoRibbon() {
+  const { demo, unpair } = useCompanion();
+  if (!demo) return null;
+  return (
+    <Pressable
+      style={s.ribbon}
+      onPress={() => {
+        haptics.tap();
+        void unpair();
+      }}
+    >
+      <Text style={s.ribbonText}>SAMPLE DATA — NOT YOUR ACCOUNTS</Text>
+      <Text style={s.ribbonExit}>Exit</Text>
+    </Pressable>
   );
 }
 
@@ -466,6 +519,116 @@ export function Donut({ slices, size = 132 }: { slices: { cents: number; color: 
   );
 }
 
+/**
+ * Compact, non-interactive bars for tiles and sheets, where there's no room for
+ * Bars' scrub readout. Days with no spend still take a slot so the rhythm of a
+ * month reads correctly — gaps are the signal.
+ */
+export function MiniBars({
+  points,
+  height = 40,
+  color = T.brass,
+}: {
+  points: SparkPoint[];
+  height?: number;
+  color?: string;
+}) {
+  const [width, setWidth] = React.useState(0);
+  if (points.length === 0) return null;
+  const max = Math.max(1, ...points.map((p) => p.cents));
+  const slot = width / points.length;
+  const barW = Math.max(1.5, slot * 0.58);
+
+  return (
+    <View style={{ height }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {width > 0 && (
+        <Svg width={width} height={height}>
+          {points.map((p, i) => {
+            const h = Math.max(1.5, (p.cents / max) * (height - 2));
+            return (
+              <Rect
+                key={p.d}
+                x={i * slot + (slot - barW) / 2}
+                y={height - h}
+                width={barW}
+                height={h}
+                rx={Math.min(1.5, barW / 2)}
+                fill={color}
+                opacity={0.85}
+              />
+            );
+          })}
+        </Svg>
+      )}
+    </View>
+  );
+}
+
+/**
+ * Cumulative spend against the even-pace line — the same reading as the Home
+ * Screen widget, so the two never disagree. Jade while under pace, coral once
+ * the solid line crosses above the dashes.
+ */
+export function PaceLine({
+  cumulative,
+  limitCents,
+  daysInMonth,
+  dayOfMonth,
+  height = 96,
+}: {
+  cumulative: number[];
+  limitCents: number;
+  daysInMonth: number;
+  dayOfMonth: number;
+  height?: number;
+}) {
+  const [width, setWidth] = React.useState(0);
+  const rid = React.useId().replace(/[^a-zA-Z0-9]/g, "");
+  if (cumulative.length < 2) return null;
+
+  const spent = cumulative[cumulative.length - 1];
+  // No budget set? Pace against the month's own run rate instead, so the chart
+  // still has a reference line rather than silently dropping it.
+  const target = limitCents > 0 ? limitCents : Math.round((spent / Math.max(1, dayOfMonth)) * daysInMonth);
+  const paceToDate = Math.round((target * dayOfMonth) / daysInMonth);
+  const ahead = spent > paceToDate;
+  const color = ahead ? T.coral : T.jade;
+  const yMax = Math.max(target, spent, 1);
+
+  const x = (i: number) => (i / Math.max(1, daysInMonth - 1)) * width;
+  const y = (v: number) => 3 + (1 - v / yMax) * (height - 6);
+  const line = cumulative.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(cumulative.length - 1).toFixed(1)},${height} L0,${height} Z`;
+
+  return (
+    <View style={{ height, marginTop: 12 }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {width > 0 && (
+        <Svg width={width} height={height}>
+          <Defs>
+            <SvgGradient id={`pace${rid}`} x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={color} stopOpacity="0.24" />
+              <Stop offset="1" stopColor={color} stopOpacity="0" />
+            </SvgGradient>
+          </Defs>
+          {/* even-pace guide: 0 → the month's target across every day */}
+          <Line
+            x1={0}
+            y1={y(0)}
+            x2={width}
+            y2={y(target)}
+            stroke={T.faint}
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
+          <Path d={area} fill={`url(#pace${rid})`} />
+          <Path d={line} stroke={color} strokeWidth={2} fill="none" strokeLinejoin="round" strokeLinecap="round" />
+          <Circle cx={x(cumulative.length - 1)} cy={y(spent)} r={3.5} fill={color} stroke={T.ink} strokeWidth={1.5} />
+        </Svg>
+      )}
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   card: {
     borderRadius: T.radius,
@@ -544,6 +707,26 @@ const s = StyleSheet.create({
   },
   bannerRow: { paddingVertical: 8, alignItems: "center" },
   bannerText: { color: T.faint, fontSize: 12, fontFamily: F.sans },
+  ribbon: {
+    // Overlaid rather than stacked, the same way the floating tab bar is: every
+    // screen already reserves ~92-110px of top padding, so the ribbon lands in
+    // space that was empty instead of pushing each layout down by its height.
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    backgroundColor: T.brassDim,
+    paddingTop: 62, // clears the notch
+    paddingBottom: 7,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  ribbonText: { color: T.ink, fontSize: 10.5, fontFamily: F.sansSemiBold, letterSpacing: 1.1 },
+  ribbonExit: { color: T.ink, fontSize: 11, fontFamily: F.sansSemiBold, textDecorationLine: "underline" },
   scrubLabel: { position: "absolute", top: 0, width: 96, alignItems: "center" },
   scrubValue: { color: T.paper, fontSize: 13, fontFamily: F.monoSemiBold },
   scrubDate: { color: T.faint, fontSize: 10, fontFamily: F.sans, marginTop: 1 },

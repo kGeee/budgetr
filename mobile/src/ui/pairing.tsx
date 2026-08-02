@@ -12,7 +12,7 @@ import { useCompanion } from "@/state/companion";
 import { Aurora, Eyebrow } from "@/ui/bits";
 
 export function PairingScreen() {
-  const { pair } = useCompanion();
+  const { pair, enterDemo } = useCompanion();
   const [permission, requestPermission] = useCameraPermissions();
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState("");
@@ -77,6 +77,20 @@ export function PairingScreen() {
       >
         <Text style={s.buttonText}>Pair</Text>
       </Pressable>
+
+      {/* Deliberately the quietest thing on the screen. Someone holding a
+          pairing code should never take this by accident — it exists for
+          people who have no Mac to pair with, which for a shipped build means
+          an App Review tester. */}
+      <Pressable
+        style={s.demoLink}
+        onPress={() => {
+          haptics.tap();
+          enterDemo();
+        }}
+      >
+        <Text style={s.demoText}>Look around with sample data</Text>
+      </Pressable>
     </View>
   );
 }
@@ -110,6 +124,13 @@ const s = StyleSheet.create({
     textAlign: "center",
     marginTop: 26,
     marginBottom: 10,
+  },
+  demoLink: { alignItems: "center", paddingVertical: 16, marginTop: 4 },
+  demoText: {
+    color: T.faint,
+    fontSize: 13,
+    fontFamily: F.sans,
+    textDecorationLine: "underline",
   },
   input: {
     backgroundColor: T.panel,

@@ -118,7 +118,7 @@ export default function Holdings() {
 
   return (
     <>
-    <Screen title="Holdings" refreshing={refreshing} onRefresh={() => void refresh()}>
+    <Screen title="Holdings" refreshing={refreshing} onRefresh={() => void refresh({ manual: true })}>
         <SyncBanner />
 
         {positions.length === 0 ? (
@@ -387,7 +387,7 @@ const s = StyleSheet.create({
   stratUnderlying: { color: T.paper, fontSize: 14, fontFamily: F.monoSemiBold },
   stratLabel: { color: T.paper, fontSize: 13.5, fontFamily: F.sansMedium, flexShrink: 1 },
   stratDetail: { color: T.faint, fontSize: 12, fontFamily: F.mono, marginTop: 3 },
-  stratChevron: { color: T.faint, fontSize: 11 },
+  stratChevron: { color: T.faint, fontSize: 11, fontFamily: F.sans },
   stratRight: { alignItems: "flex-end", gap: 4 },
   dte: {
     fontSize: 10.5,

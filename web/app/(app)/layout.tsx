@@ -16,7 +16,9 @@ import { getEntitlement } from "@/lib/license";
 import { getFinnhubKey, getPlaidConfig, isDemoMode } from "@/lib/app-config";
 import { demoEnabled } from "@/lib/site";
 import { hasPlaidCredentials } from "@/lib/plaid";
-import { getAccounts, getDisplayCurrencyRates } from "@/lib/queries";
+import { getAccounts, getDisplayCurrencyRates, getPendingSummary } from "@/lib/queries";
+import { getIncludePending } from "@/lib/pending";
+import { PendingToggle } from "@/components/pending-toggle";
 import { OBF_COOKIE, hiddenFromCookie, setHidden } from "@/lib/scale";
 import {
   CURRENCY_COOKIE,
@@ -69,6 +71,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const accounts = getAccounts();
 
+  // Whether pending charges count toward spending, plus what's in flight — the
+  // header toggle shows itself only when it would change a number.
+  const countPending = getIncludePending();
+  const pendingSummary = getPendingSummary();
+
   // Demo banner (shown while exploring the bundled sample data). Precompute the
   // Plaid config so its "set up my accounts" modal can resume at the right step.
   const demo = isDemoMode();
@@ -99,6 +106,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <header className="material sticky top-0 z-20 flex items-center gap-2 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-4 sm:px-8">
             <MobileNav webDemo={webDemo} />
             <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+              <PendingToggle
+                on={countPending}
+                count={pendingSummary.count}
+                amount={pendingSummary.amount}
+              />
               <CurrencySwitcher current={displayCurrency} />
               <ThemeToggle initialTheme={theme} />
               <ObfuscationToggle initialHidden={obfHidden} />

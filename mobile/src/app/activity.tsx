@@ -176,7 +176,7 @@ export default function Activity() {
 
   return (
     <>
-      <Screen title="Activity" refreshing={refreshing} onRefresh={() => void refresh()}>
+      <Screen title="Activity" refreshing={refreshing} onRefresh={() => void refresh({ manual: true })}>
         <SyncBanner />
         <Animated.View entering={entering(0)}>
           <SpendChart points={summary?.spendByDay ?? []} />
