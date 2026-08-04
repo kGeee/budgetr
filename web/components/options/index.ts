@@ -2,6 +2,7 @@ export * from "./options-analytics";
 export * from "./options-chain-view";
 export * from "./fixed-strike-vol-view";
 export * from "./iv-surface";
+export * from "./leaps-view";
 export * from "./payoff-diagram";
 export * from "./pnl-matrix";
 export * from "./scanner-view";

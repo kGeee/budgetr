@@ -37,6 +37,7 @@ const TOOLS: (Tab & { carriesTicker?: boolean })[] = [
   { href: "/investments/options/chain", label: "Chain", carriesTicker: true },
   { href: "/investments/options/wheel", label: "Wheel" },
   { href: "/investments/options/scanner", label: "Scanner" },
+  { href: "/investments/options/leaps", label: "LEAPS", carriesTicker: true },
   { href: "/investments/options/vol", label: "Vol", carriesTicker: true },
 ];
 
