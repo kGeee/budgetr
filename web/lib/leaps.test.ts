@@ -63,13 +63,34 @@ describe("analyzeLeap", () => {
 
   it("finds the downside price where the call wins, and agrees with the curves", () => {
     const a = analyzeLeap(DEEP_ITM)!;
-    const cross = a.leapWinsBelow;
+    expect(a.beatsSharesEverywhere).toBe(false);
+    const cross = a.leapWinsBelow!;
+    // The crossover is only meaningful below the strike — that's the region its
+    // derivation assumes the call expired worthless in.
+    expect(cross).toBeLessThan(DEEP_ITM.strike);
     const [below, above] = compareToShares(DEEP_ITM, a, [cross - 5, cross + 5]);
     expect(below.leap).toBeGreaterThan(below.shares);
     expect(above.shares).toBeGreaterThan(above.leap);
     // And at the crossing itself the two are equal.
     const [at] = compareToShares(DEEP_ITM, a, [cross]);
     expect(at.leap).toBeCloseTo(at.shares, 6);
+  });
+
+  it("reports no crossover at all when the call wins at every price", () => {
+    // A very deep strike on a low-yield name: the interest on the freed capital
+    // more than covers the thin time value, so the call is ahead everywhere.
+    const a = analyzeLeap({ ...DEEP_ITM, strike: 30, premium: 71 })!;
+    expect(a.netCarry).toBeLessThanOrEqual(0);
+    expect(a.beatsSharesEverywhere).toBe(true);
+
+    // The raw solve would land ABOVE the strike here, which is outside the
+    // region it's valid in — printing it read as a contradiction next to
+    // "beats the shares above the strike". It has to come back null instead.
+    expect(a.leapWinsBelow).toBeNull();
+
+    // And the claim holds against the curves, above and below the strike.
+    const pts = compareToShares({ ...DEEP_ITM, strike: 30, premium: 71 }, a, [10, 29, 31, 200]);
+    for (const p of pts) expect(p.leap).toBeGreaterThan(p.shares);
   });
 
   it("puts breakeven at strike plus premium", () => {

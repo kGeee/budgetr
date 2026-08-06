@@ -143,8 +143,21 @@ export type LeapsAnalysis = {
    * above the strike. Negative means the call is ahead everywhere above it.
    */
   trailsSharesAboveStrikeBy: number;
-  /** Price at expiry below which the call beats the shares. */
-  leapWinsBelow: number;
+  /**
+   * Price at expiry below which the call beats the shares — null when the call
+   * is ahead at every price, which is what `beatsSharesEverywhere` reports. The
+   * crossover is derived assuming the call has expired worthless, so it only
+   * means anything below the strike; when the solution lands above it, the
+   * assumption is violated and the number would be nonsense to print.
+   */
+  leapWinsBelow: number | null;
+  /**
+   * True when the interest on the freed capital more than covers the option's
+   * time value and forgone dividends. The call then wins at every terminal
+   * price — better above the strike by a fixed amount, and better below it
+   * because its loss stops. Rare, and worth saying plainly when it happens.
+   */
+  beatsSharesEverywhere: boolean;
 
   // ── decay + odds ──
   /** Black-Scholes theta per calendar day, per share. */
@@ -242,7 +255,16 @@ export function analyzeLeap(input: LeapsInputs): LeapsAnalysis | null {
 
   // Below the strike the call is worthless and holds only the freed cash; the
   // shares keep falling. Solve for where the two terminal wealths meet.
-  const leapWinsBelow = financedAmount * (1 + r * T) - q * S * T;
+  //
+  // That solve assumes the call finished out of the money, so it's only valid
+  // below the strike. The two expressions agree exactly AT the strike, so a
+  // solution landing above it is the same statement as netCarry ≤ 0: the call
+  // is ahead everywhere and there is no crossover to quote. Reporting the raw
+  // root anyway prints a price above the strike and reads as a contradiction
+  // next to "beats the shares above the strike".
+  const rawCrossover = financedAmount * (1 + r * T) - q * S * T;
+  const beatsSharesEverywhere = netCarry <= 0;
+  const leapWinsBelow = beatsSharesEverywhere ? null : rawCrossover;
 
   return {
     years: T,
@@ -279,6 +301,7 @@ export function analyzeLeap(input: LeapsInputs): LeapsAnalysis | null {
     sharesLossAtThatPrice: Math.max(0, (S - K) / S),
     trailsSharesAboveStrikeBy,
     leapWinsBelow,
+    beatsSharesEverywhere,
 
     thetaPerDay,
     thetaPctOfPremiumPerMonth,
@@ -325,6 +348,13 @@ export function priceLadder(spot: number, spanPct = 0.6, steps = 81): number[] {
   const step = (hi - lo) / (steps - 1);
   return Array.from({ length: steps }, (_, i) => lo + i * step);
 }
+
+/**
+ * Delta at or above which a call is behaving enough like the shares to be
+ * worth comparing against them. Below it you're looking at a directional bet,
+ * which is a different question and belongs on the Chain tab.
+ */
+export const REPLACEMENT_MIN_DELTA = 0.55;
 
 export type LeapsCandidate = LeapsAnalysis & {
   occ: string;
@@ -412,4 +442,60 @@ export function analyzeChainForLeaps(
   }
 
   return out.sort((a, b) => a.dte - b.dte || a.strike - b.strike);
+}
+
+/** Is this call close enough to share-like to belong in a replacement table? */
+export function isReplacementCandidate(
+  c: Pick<LeapsCandidate, "delta" | "isStockReplacement">,
+  minDelta = REPLACEMENT_MIN_DELTA,
+): boolean {
+  // Delta is the real test. When the feed doesn't supply one and there's no IV
+  // to derive it from, fall back to moneyness so the row isn't silently lost.
+  return c.delta == null ? c.isStockReplacement : c.delta >= minDelta;
+}
+
+export type LeapsExpiryGroup = {
+  expiry: string;
+  dte: number;
+  candidates: LeapsCandidate[];
+};
+
+/**
+ * Bucket candidates by expiry, nearest first.
+ *
+ * A liquid name lists hundreds of long-dated calls — AAPL alone returns ~400 —
+ * so anything that renders "every LEAP" at once produces a wall rather than a
+ * view. Picking an expiry is the natural first cut: it's the decision a trader
+ * makes first, and it brings the strike list down to a normal chain table.
+ */
+export function groupByExpiry(candidates: LeapsCandidate[]): LeapsExpiryGroup[] {
+  const byExpiry = new Map<string, LeapsCandidate[]>();
+  for (const c of candidates) {
+    const list = byExpiry.get(c.expiry);
+    if (list) list.push(c);
+    else byExpiry.set(c.expiry, [c]);
+  }
+  return [...byExpiry.entries()]
+    .map(([expiry, list]) => ({
+      expiry,
+      dte: list[0].dte,
+      candidates: [...list].sort((a, b) => a.strike - b.strike),
+    }))
+    .sort((a, b) => a.dte - b.dte);
+}
+
+/**
+ * The contract to open on: the deepest in-the-money call that still clears the
+ * replacement delta, which is the canonical stock substitute. Falls back to
+ * whatever is closest to spot when nothing qualifies.
+ */
+export function defaultCandidate(candidates: LeapsCandidate[]): LeapsCandidate | null {
+  if (!candidates.length) return null;
+  const replacements = candidates.filter((c) => isReplacementCandidate(c));
+  if (replacements.length) {
+    return replacements.reduce((a, b) => (a.strike < b.strike ? a : b));
+  }
+  return candidates.reduce((a, b) =>
+    Math.abs(a.moneyness) < Math.abs(b.moneyness) ? a : b,
+  );
 }

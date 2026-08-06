@@ -26,7 +26,14 @@ import {
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { formatOptionExpiry } from "@/lib/options";
-import { compareToShares, priceLadder, type LeapsCandidate } from "@/lib/quant/leaps";
+import {
+  compareToShares,
+  defaultCandidate,
+  groupByExpiry,
+  isReplacementCandidate,
+  priceLadder,
+  type LeapsCandidate,
+} from "@/lib/quant/leaps";
 
 const money = (n: number) => formatCurrency(n, "USD", { maximumFractionDigits: 0 });
 const money2 = (n: number) => formatCurrency(n, "USD", { maximumFractionDigits: 2 });
@@ -71,16 +78,29 @@ export function LeapsView({
   rate: number;
   marginRate: number;
 }) {
-  // Default to the deepest in-the-money long-dated call — the one that behaves
-  // most like the shares, which is the comparison people actually come for.
-  const defaultOcc = useMemo(() => {
-    const itm = candidates.filter((c) => c.isStockReplacement);
-    const pool = itm.length ? itm : candidates;
-    return pool.length ? pool.reduce((a, b) => (a.strike < b.strike ? a : b)).occ : null;
-  }, [candidates]);
+  // A liquid name lists hundreds of long-dated calls, so the view is scoped:
+  // choose an expiry, then a strike within it. Rendering the lot at once is
+  // what made the first cut of this page a 19,000px wall.
+  const groups = useMemo(() => groupByExpiry(candidates), [candidates]);
 
-  const [selectedOcc, setSelectedOcc] = useState<string | null>(defaultOcc);
-  const selected = candidates.find((c) => c.occ === selectedOcc) ?? candidates[0] ?? null;
+  const [expiry, setExpiry] = useState<string | null>(groups[0]?.expiry ?? null);
+  const [showAllStrikes, setShowAllStrikes] = useState(false);
+
+  const group = groups.find((g) => g.expiry === expiry) ?? groups[0] ?? null;
+
+  // Within the expiry, default to showing only the strikes that are actually
+  // standing in for the shares — the far OTM tail is a different question.
+  const rows = useMemo(() => {
+    if (!group) return [];
+    const replacements = group.candidates.filter((c) => isReplacementCandidate(c));
+    return showAllStrikes || replacements.length === 0 ? group.candidates : replacements;
+  }, [group, showAllStrikes]);
+
+  const [selectedOcc, setSelectedOcc] = useState<string | null>(null);
+  const selected =
+    rows.find((c) => c.occ === selectedOcc) ?? defaultCandidate(rows) ?? rows[0] ?? null;
+
+  const hiddenCount = group ? group.candidates.length - rows.length : 0;
 
   const series = useMemo(() => {
     if (!selected) return [];
@@ -117,28 +137,36 @@ export function LeapsView({
 
   return (
     <div className="space-y-5">
-      {/* ── contract picker ─────────────────────────────────────────── */}
+      {/* ── expiry picker ───────────────────────────────────────────── */}
       <Card>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="eyebrow mr-1 text-[var(--muted)]">Contract</span>
-          {candidates.map((c) => {
-            const on = c.occ === selected.occ;
+          <span className="eyebrow mr-1 text-[var(--muted)]">Expiry</span>
+          {groups.map((g) => {
+            const on = g.expiry === selected.expiry;
             return (
               <button
-                key={c.occ}
-                onClick={() => setSelectedOcc(c.occ)}
+                key={g.expiry}
+                onClick={() => {
+                  setExpiry(g.expiry);
+                  setSelectedOcc(null); // re-default within the new expiry
+                }}
                 className={`rounded-full border px-3 py-1.5 text-xs tabular transition-colors ${
                   on
                     ? "border-[var(--jade)] bg-[var(--jade)]/12 text-[var(--jade)]"
                     : "border-line text-[var(--muted)] hover:text-[var(--paper)]"
                 }`}
               >
-                {formatOptionExpiry(c.expiry)} · {money(c.strike)}
-                {c.isStockReplacement ? "" : " OTM"}
+                {formatOptionExpiry(g.expiry)}
+                <span className="ml-1.5 opacity-60">{(g.dte / 365).toFixed(1)}y</span>
               </button>
             );
           })}
         </div>
+        <p className="mt-3 text-xs text-[var(--muted)]">
+          Selected: <span className="tabular text-[var(--paper)]">{money(selected.strike)}</span>{" "}
+          call · {formatOptionExpiry(selected.expiry)} · {money2(selected.premium)} per share.
+          Pick another from the ladder below.
+        </p>
       </Card>
 
       {/* ── the headline tradeoff ───────────────────────────────────── */}
@@ -229,11 +257,24 @@ export function LeapsView({
               Above {money(selected.strike)} this call actually <em>beats</em> 100 shares by a flat{" "}
               <span className="tabular text-[var(--jade)]">{money2(-trails * 100)}</span> — the
               interest on the {money(selected.capitalFreed)} it frees up more than covers its time
-              value and forgone dividends. The tradeoff is only the downside gap below.
+              value and forgone dividends.
             </>
           )}{" "}
-          Below <span className="tabular text-[var(--paper)]">{money2(selected.leapWinsBelow)}</span>{" "}
-          the call is ahead, because its loss stops at the premium while the shares keep falling.
+          {selected.leapWinsBelow != null ? (
+            <>
+              Below{" "}
+              <span className="tabular text-[var(--paper)]">{money2(selected.leapWinsBelow)}</span>{" "}
+              the call is ahead, because its loss stops at the premium while the shares keep
+              falling.
+            </>
+          ) : (
+            <>
+              And it stays ahead all the way down: below the strike its loss stops at the premium
+              while the shares keep falling. On these numbers there is no price at which owning the
+              shares wins — which usually means the market is pricing very little time value into
+              this strike, so check the spread before believing it.
+            </>
+          )}
         </p>
       </Card>
 
@@ -309,13 +350,29 @@ export function LeapsView({
 
       {/* ── the strike ladder ───────────────────────────────────────── */}
       <Card>
-        <div className="eyebrow mb-3 text-[var(--brass)]">Every long-dated call</div>
-        <div className="overflow-x-auto">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <div className="eyebrow text-[var(--brass)]">
+            Strikes · {formatOptionExpiry(selected.expiry)}
+            <span className="ml-2 font-normal normal-case tracking-normal text-[var(--muted)]">
+              {rows.length} of {group?.candidates.length ?? 0}
+            </span>
+          </div>
+          {hiddenCount > 0 || showAllStrikes ? (
+            <button
+              onClick={() => setShowAllStrikes((v) => !v)}
+              className="rounded-full border border-line px-3 py-1 text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+            >
+              {showAllStrikes
+                ? "Show replacements only"
+                : `Show all strikes (+${hiddenCount} further out)`}
+            </button>
+          ) : null}
+        </div>
+        <div className="max-h-[420px] overflow-auto">
           <table className="w-full min-w-[720px] text-sm">
-            <thead>
+            <thead className="sticky top-0 z-10 bg-[var(--panel)]">
               <tr className="border-b border-line text-left">
                 {[
-                  "Expiry",
                   "Strike",
                   "Premium",
                   "Time value",
@@ -332,7 +389,7 @@ export function LeapsView({
               </tr>
             </thead>
             <tbody>
-              {candidates.map((c) => {
+              {rows.map((c) => {
                 const on = c.occ === selected.occ;
                 return (
                   <tr
@@ -342,7 +399,6 @@ export function LeapsView({
                       on ? "bg-[var(--jade)]/8" : "hover:bg-[var(--panel-2)]"
                     }`}
                   >
-                    <td className="py-2.5 pr-3 tabular">{formatOptionExpiry(c.expiry)}</td>
                     <td className="py-2.5 pr-3 tabular">
                       {money(c.strike)}
                       {c.isStockReplacement ? null : (
