@@ -4,7 +4,11 @@ import { format, parseISO } from "date-fns";
 import { PageHead } from "@/components/page-head";
 import { CategoryChart, MonthlySpendChart } from "@/components/charts";
 import { TransactionsTable } from "@/components/transactions-table";
-import { MergeVendorButton, VendorGroupDetail } from "@/components/vendor-merge-dialog";
+import {
+  MergeVendorButton,
+  VendorGroupDetail,
+  VendorMergeProvider,
+} from "@/components/vendor-merge-dialog";
 import { Card } from "@/components/ui/card";
 import {
   getCategories,
@@ -13,6 +17,7 @@ import {
   getVendorMonthlySpend,
   getVendors,
   getVendorTransactions,
+  toVendorCandidates,
 } from "@/lib/queries";
 import { formatCurrency } from "@/lib/utils";
 
@@ -45,6 +50,9 @@ export default async function VendorsPage({
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         {/* Vendor list */}
         <div className="lg:col-span-2">
+          {/* The merge dialog's candidate + group lists are the same for every
+              row, so they're provided once here rather than passed per row. */}
+          <VendorMergeProvider candidates={toVendorCandidates(vendors)} groups={groups}>
           <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
             <ul className="max-h-[70vh] overflow-y-auto">
               {vendors.map((vendor) => {
@@ -82,9 +90,7 @@ export default async function VendorsPage({
                         <MergeVendorButton
                           vendorKey={vendor.vendorKey}
                           vendorName={vendor.displayName}
-                          groups={groups}
                           currentGroupId={vendor.groupId}
-                          candidates={vendors.filter((x) => x.vendorKey !== vendor.vendorKey)}
                         />
                       )}
 
@@ -103,6 +109,7 @@ export default async function VendorsPage({
               )}
             </ul>
           </div>
+          </VendorMergeProvider>
         </div>
 
         {/* Selected vendor detail: summary + visualizations */}

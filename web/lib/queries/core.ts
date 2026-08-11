@@ -864,6 +864,35 @@ export type VendorRow = {
   members: string[];
 };
 
+/**
+ * The slice of a vendor the merge dialog needs. Narrower than VendorRow on
+ * purpose: `members` is a full string[] per group and the dialog only ever
+ * reads its length, so the array itself never crosses to the client.
+ */
+export type VendorCandidate = {
+  vendorKey: string;
+  displayName: string;
+  groupId: string | null;
+  count: number;
+  memberCount: number;
+};
+
+/**
+ * Narrow vendor rows for the merge dialog's suggestion list. Lives here rather
+ * than beside the dialog because the dialog is a client component — a helper
+ * exported from a "use client" module becomes a client reference and throws if
+ * a server component calls it.
+ */
+export function toVendorCandidates(vendors: VendorRow[]): VendorCandidate[] {
+  return vendors.map((v) => ({
+    vendorKey: v.vendorKey,
+    displayName: v.displayName,
+    groupId: v.groupId,
+    count: v.count,
+    memberCount: v.members.length,
+  }));
+}
+
 // Raw vendor key per transaction — merchant name when Plaid provides one, else raw descriptor.
 const vendorKeyExpr = sql`COALESCE(NULLIF(t.merchant_name, ''), t.name)`;
 
