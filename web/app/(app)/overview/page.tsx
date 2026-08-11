@@ -1,5 +1,7 @@
 import { PlaidLink } from "@/components/plaid-link";
 import { DashboardView, type ResolvedWidget } from "@/components/dashboard-view";
+import { ConnectionAlert } from "@/components/connection-status";
+import { getConnectionSummary } from "@/lib/connection-health";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
 import {
   ensureOverviewDashboard,
@@ -49,8 +51,15 @@ export default async function Overview() {
   // Categories back the review inbox drawer + daily-spend heatmap drill-down.
   const categories = getCategories();
 
+  // Landing screen: a dead or stale connection is the one thing that should
+  // interrupt before any figure below it is read.
+  const connections = getConnectionSummary();
+
   return (
-    <DashboardView dashboard={dashboard} widgets={resolved} categories={categories} overview />
+    <>
+      <ConnectionAlert summary={connections} className="mb-6" />
+      <DashboardView dashboard={dashboard} widgets={resolved} categories={categories} overview />
+    </>
   );
 }
 
