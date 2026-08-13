@@ -6,6 +6,7 @@ import { DataFreshnessBanner } from "@/components/data-freshness";
 import { getDataFreshness } from "@/lib/data-freshness";
 import { Card } from "@/components/ui/card";
 import { getCashflowForecast, getForecastSeries, getRemainingRecurring } from "@/lib/forecast";
+import { streamLabel } from "@/lib/recurring";
 import type { RecurringRow } from "@/lib/queries";
 import { formatCurrency } from "@/lib/utils";
 
@@ -251,7 +252,7 @@ function RecurringList({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
-                  {r.merchantName ?? r.description ?? "Recurring"}
+                  {streamLabel(r).name}
                 </p>
                 <p className="truncate text-xs text-[var(--muted)]">{r.accountName}</p>
               </div>

@@ -1518,6 +1518,8 @@ export type RecurringRow = {
   direction: "inflow" | "outflow";
   description: string | null;
   merchantName: string | null;
+  /** User-set name. Wins over merchantName; never written by sync. */
+  userLabel: string | null;
   category: string | null;
   frequency: string | null;
   averageAmount: number | null;
@@ -1531,7 +1533,8 @@ export type RecurringRow = {
 
 const recurringSelect = sql`
   SELECT r.id AS id, r.direction AS direction, r.description AS description,
-         r.merchant_name AS merchantName, r.category AS category, r.frequency AS frequency,
+         r.merchant_name AS merchantName, r.user_label AS userLabel,
+         r.category AS category, r.frequency AS frequency,
          r.average_amount AS averageAmount, r.last_amount AS lastAmount,
          r.last_date AS lastDate, r.predicted_next_date AS predictedNextDate,
          r.iso_currency_code AS currency, a.name AS accountName, r.status AS status

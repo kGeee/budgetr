@@ -5,6 +5,7 @@ export * from "./fire";
 export * from "./import";
 export * from "./license";
 export * from "./onboarding";
+export * from "./recurring";
 export * from "./reports";
 export * from "./savings";
 export * from "./settings";
