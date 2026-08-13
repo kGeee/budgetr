@@ -1002,6 +1002,14 @@ export type VendorRow = {
   groupName: string | null;
   /** Raw vendor keys merged into this group (only set when vendorKey IS a groupId) */
   members: string[];
+  /**
+   * True when most of this vendor's spend sits in `transfer` categories — card
+   * payments and moves between your own accounts. Not spending, and it
+   * out-ranks every real merchant when the list is sorted by amount.
+   */
+  isMovement: boolean;
+  /** Spend attributed to transfer categories — the input to isMovement. */
+  transferSpent: number;
 };
 
 /**
@@ -1050,6 +1058,7 @@ export function getVendors(): VendorRow[] {
     count: number;
     spent: number;
     lastDate: string;
+    transferSpent: number;
     groupId: string | null;
     groupName: string | null;
   }>(
@@ -1057,10 +1066,13 @@ export function getVendors(): VendorRow[] {
            MAX(t.merchant_name) AS merchant, MAX(t.name) AS sampleName,
            COUNT(*) AS count,
            SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS spent,
+           SUM(CASE WHEN t.amount > 0 AND cat."group" = 'transfer'
+                    THEN t.amount ELSE 0 END) AS transferSpent,
            MAX(t.date) AS lastDate,
            vgm.group_id AS groupId,
            vg.name AS groupName
         FROM transactions t
+        LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
         LEFT JOIN vendor_group_members vgm ON vgm.vendor_key = ${vendorKeyExpr}
         LEFT JOIN vendor_groups vg ON vg.id = vgm.group_id
         WHERE ${settledOnly()}
@@ -1078,6 +1090,7 @@ export function getVendors(): VendorRow[] {
       if (existing) {
         existing.count += Number(r.count);
         existing.spent += Number(r.spent);
+        existing.transferSpent += Number(r.transferSpent);
         if (r.lastDate > existing.lastDate) existing.lastDate = r.lastDate;
         existing.members.push(r.vendorKey);
       } else {
@@ -1086,10 +1099,12 @@ export function getVendors(): VendorRow[] {
           displayName: r.groupName!,
           count: Number(r.count),
           spent: Number(r.spent),
+          transferSpent: Number(r.transferSpent),
           lastDate: r.lastDate,
           groupId: r.groupId,
           groupName: r.groupName,
           members: [r.vendorKey],
+          isMovement: false,
         });
       }
     } else {
@@ -1098,15 +1113,22 @@ export function getVendors(): VendorRow[] {
         displayName: cleanTransactionName(r.sampleName, r.merchant),
         count: Number(r.count),
         spent: Number(r.spent),
+        transferSpent: Number(r.transferSpent),
         lastDate: r.lastDate,
         groupId: null,
         groupName: null,
         members: [],
+        isMovement: false,
       });
     }
   }
 
-  return [...grouped.values(), ...ungrouped].sort((a, b) => b.spent - a.spent);
+  // Classify by where the majority of the money went, not by any single
+  // transaction: a merchant with one stray transfer stays a merchant, and a
+  // group merging four card payments is movement even if one member isn't.
+  return [...grouped.values(), ...ungrouped]
+    .map((v) => ({ ...v, isMovement: v.spent > 0 && v.transferSpent > v.spent / 2 }))
+    .sort((a, b) => b.spent - a.spent);
 }
 
 /**
