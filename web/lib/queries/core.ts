@@ -717,6 +717,13 @@ export type TransactionRow = {
   attachmentCount: number;
   /** True when this transaction is a leg of a confirmed refund/transfer match. */
   matched: boolean;
+  /**
+   * True when the effective category sits in the `transfer` group — money moved
+   * between your own accounts, or a card payment. Excluded from every spend
+   * total, so the row has to be able to say so rather than looking like a
+   * £2,145 purchase.
+   */
+  isTransfer: boolean;
   tags: TxTag[];
 };
 
@@ -742,6 +749,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     splitCount: number;
     attachmentCount: number;
     matched: number;
+    isTransfer: number;
     tagsJson: string | null;
   }>(sql`
     SELECT t.id AS id, t.date AS date, t.name AS name, t.merchant_name AS merchantName,
@@ -752,6 +760,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
            (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) AS splitCount,
            (SELECT COUNT(*) FROM attachments at WHERE at.transaction_id = t.id) AS attachmentCount,
            ${isConfirmedMatch("t")} AS matched,
+           (cat."group" = 'transfer') AS isTransfer,
            EXISTS(SELECT 1 FROM recurring_streams r
                   WHERE r.is_active = 1 AND r.merchant_name IS NOT NULL
                     AND r.merchant_name = t.merchant_name) AS recurring,
@@ -785,6 +794,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     splitCount: Number(r.splitCount),
     attachmentCount: Number(r.attachmentCount),
     matched: !!r.matched,
+    isTransfer: !!r.isTransfer,
     tags: r.tagsJson ? (JSON.parse(r.tagsJson) as TxTag[]) : [],
   }));
 }
@@ -821,6 +831,12 @@ export type TxnCriteria = {
  * transactions still surface under any of their split categories.
  */
 export function searchTransactions(criteria: TxnCriteria, limit = 200): TransactionRow[] {
+  const where = criteriaWhere(criteria);
+  return selectTransactions(where, limit);
+}
+
+/** The WHERE fragment for a criteria set, or null when nothing is constrained. */
+function criteriaWhere(criteria: TxnCriteria): ReturnType<typeof sql> | null {
   const clauses: ReturnType<typeof sql>[] = [];
 
   const q = criteria.q?.trim().toLowerCase();
@@ -846,8 +862,71 @@ export function searchTransactions(criteria: TxnCriteria, limit = 200): Transact
   if (criteria.amountMax != null) clauses.push(sql`abs(t.amount) <= ${criteria.amountMax}`);
   if (criteria.reviewed != null) clauses.push(sql`t.reviewed = ${criteria.reviewed ? 1 : 0}`);
 
-  const where = clauses.length ? sql.join(clauses, sql` AND `) : null;
-  return selectTransactions(where, limit);
+  return clauses.length ? sql.join(clauses, sql` AND `) : null;
+}
+
+export type TransactionsSummary = {
+  /** Every transaction matching the criteria — not just the page's capped slice. */
+  total: number;
+  /** Spend, transfers excluded. Positive. */
+  spent: number;
+  /** Income, transfers excluded. Positive. */
+  received: number;
+  /** Moved between your own accounts. Counted in neither of the above. */
+  transferred: number;
+  unreviewed: number;
+  firstDate: string | null;
+  lastDate: string | null;
+};
+
+/**
+ * Totals for a criteria set, over *all* matches rather than the rows the table
+ * happens to show.
+ *
+ * Two separate problems this fixes. The page opened with "500 most recent
+ * entries", which reads as a total when it's a cap — 817 transactions existed.
+ * And no money figure was attached to a filter at all: you could narrow to a
+ * category and still not be told what it cost you.
+ *
+ * Transfers are split out rather than netted or ignored, because they're large,
+ * they're not spending, and leaving them silently out of a total invites the
+ * "these numbers don't add up" reading.
+ */
+export function summarizeTransactions(criteria: TxnCriteria): TransactionsSummary {
+  const where = criteriaWhere(criteria);
+  const filter = where ? sql`WHERE ${where}` : sql``;
+  const row = db.get<{
+    total: number;
+    spent: number;
+    received: number;
+    transferred: number;
+    unreviewed: number;
+    firstDate: string | null;
+    lastDate: string | null;
+  }>(sql`
+    SELECT COUNT(*) AS total,
+           COALESCE(SUM(CASE WHEN cat."group" IS NOT 'transfer' AND t.amount > 0
+                             THEN t.amount ELSE 0 END), 0) AS spent,
+           COALESCE(SUM(CASE WHEN cat."group" IS NOT 'transfer' AND t.amount < 0
+                             THEN -t.amount ELSE 0 END), 0) AS received,
+           COALESCE(SUM(CASE WHEN cat."group" IS 'transfer'
+                             THEN abs(t.amount) ELSE 0 END), 0) AS transferred,
+           COALESCE(SUM(CASE WHEN t.reviewed = 0 THEN 1 ELSE 0 END), 0) AS unreviewed,
+           MIN(t.date) AS firstDate, MAX(t.date) AS lastDate
+    FROM transactions t
+    LEFT JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+    ${filter}`);
+
+  return {
+    total: Number(row?.total ?? 0),
+    spent: Number(row?.spent ?? 0),
+    received: Number(row?.received ?? 0),
+    transferred: Number(row?.transferred ?? 0),
+    unreviewed: Number(row?.unreviewed ?? 0),
+    firstDate: row?.firstDate ?? null,
+    lastDate: row?.lastDate ?? null,
+  };
 }
 
 /** All saved transaction filters, newest first. */

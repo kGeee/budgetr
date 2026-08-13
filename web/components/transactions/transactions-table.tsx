@@ -151,10 +151,19 @@ export function TransactionsTable({
                   <td className="whitespace-nowrap px-6 py-3.5 text-[var(--muted)]">
                     {t.accountName}
                   </td>
+                  {/* Transfers are excluded from the spend total above, so the
+                      amount is dimmed to show it isn't part of that figure —
+                      otherwise a $2,145 move between your own accounts reads as
+                      the largest purchase on the page. */}
                   <td
                     className={`mono whitespace-nowrap px-6 py-3.5 text-right ${
-                      income ? "text-[var(--jade)]" : "text-[var(--paper)]"
+                      t.isTransfer
+                        ? "text-[var(--muted)]"
+                        : income
+                          ? "text-[var(--jade)]"
+                          : "text-[var(--paper)]"
                     }`}
+                    title={t.isTransfer ? "Between your own accounts — not counted as spending" : undefined}
                   >
                     {income ? "+" : "−"}
                     {formatCurrency(Math.abs(t.amount), t.currency ?? "USD")}

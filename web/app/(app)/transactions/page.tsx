@@ -8,9 +8,21 @@ import {
   getSavedFilters,
   getTags,
   searchTransactions,
+  summarizeTransactions,
   type TxnCriteria,
 } from "@/lib/queries";
 import { suggestMatches } from "@/lib/matching";
+import { formatCurrency } from "@/lib/utils";
+
+/** "Mar 26 – Aug 1", collapsing to one date when the range is a single day. */
+function formatDayRange(from: string, to: string): string {
+  const fmt = (iso: string) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+  return from === to ? fmt(from) : `${fmt(from)} – ${fmt(to)}`;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -65,25 +77,51 @@ export default async function TransactionsPage({
   const accounts = getAccounts().map((a) => ({ id: a.id, name: a.name }));
   const savedFilters = getSavedFilters();
   const suggestions = filtered ? [] : suggestMatches();
-  const unreviewed = txns.filter((t) => !t.reviewed).length;
+
+  // Over every match, not the capped slice below — "500 most recent entries"
+  // read as a total when it was a ceiling, and a filtered view never told you
+  // what it cost.
+  const summary = summarizeTransactions(criteria);
+  const capped = summary.total > txns.length;
 
   return (
     <div className="space-y-7">
       <PageHead title="Transactions" />
-      <p className="-mt-3 text-sm text-[var(--muted)]">
-        {filtered ? (
-          <>
-            {txns.length} matching {txns.length === 1 ? "entry" : "entries"}
-          </>
-        ) : (
-          <>
-            {txns.length} most recent {txns.length === 1 ? "entry" : "entries"}
-          </>
+      <div className="-mt-3 space-y-2">
+        <p className="text-sm text-[var(--muted)]">
+          {summary.total.toLocaleString()} {filtered ? "matching " : ""}
+          {summary.total === 1 ? "entry" : "entries"}
+          {summary.firstDate && summary.lastDate && (
+            <> · {formatDayRange(summary.firstDate, summary.lastDate)}</>
+          )}
+          {capped && <> · showing {txns.length.toLocaleString()} most recent</>}
+        </p>
+        {summary.total > 0 && (
+          <p className="text-sm">
+            <span className="font-medium text-[var(--paper)]">
+              {formatCurrency(summary.spent)}
+            </span>{" "}
+            <span className="text-[var(--muted)]">out against</span>{" "}
+            <span className="font-medium text-[var(--paper)]">
+              {formatCurrency(summary.received)}
+            </span>{" "}
+            <span className="text-[var(--muted)]">in.</span>
+            {summary.transferred > 0 && (
+              <span className="text-[var(--muted)]">
+                {" "}
+                A further {formatCurrency(summary.transferred)} moved between your own
+                accounts — not counted as spending.
+              </span>
+            )}
+            {summary.unreviewed > 0 && (
+              <span className="text-[var(--brass)]">
+                {" "}
+                {summary.unreviewed.toLocaleString()} never reviewed.
+              </span>
+            )}
+          </p>
         )}
-        {unreviewed > 0 && (
-          <span className="text-[var(--brass)]"> · {unreviewed} to review</span>
-        )}
-      </p>
+      </div>
 
       <TransactionsFilterBar
         criteria={criteria}
