@@ -11,6 +11,7 @@ import { parseOccSymbol } from "@/lib/options";
 import { getCboeOptionChain } from "@/lib/cboe";
 import { getOptionChain } from "@/lib/yahoo";
 import { getQuotes } from "@/lib/finnhub";
+import { after } from "next/server";
 import { captureIvSnapshots } from "@/lib/fixed-strike-vol";
 
 export const dynamic = "force-dynamic";
@@ -58,9 +59,12 @@ export default async function OptionsChainPage({
   const snapshot = await getQuotes([ticker]);
   const snapshotPrice = snapshot[ticker]?.price ?? null;
 
-  // Every desk visit refreshes today's fixed-strike vol capture (idempotent per
-  // day) — the history tape behind the Vol tool.
-  if (chain) captureIvSnapshots(ticker, chain, snapshotPrice);
+  // The capture is a few thousand-row upsert and nothing on this page reads it
+  // back — the Vol tool does, on its own visit. Running it inline made the desk
+  // wait on a write it doesn't need, so it now runs after the response is sent.
+  // Behaviour is otherwise unchanged: history still builds from desk visits,
+  // and the per-day unique key keeps repeats idempotent.
+  if (chain) after(() => captureIvSnapshots(ticker, chain, snapshotPrice));
 
   const currency = heldLegs[0]?.currency ?? "USD";
 
