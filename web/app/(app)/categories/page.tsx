@@ -1,8 +1,14 @@
 import { PageHead } from "@/components/page-head";
 import { CategoryManager } from "@/components/category-manager";
+import { CategorySpendSummary } from "@/components/budget/category-spend-summary";
 import { CategoriesSpendChart } from "@/components/categories-spend-chart";
 import { Card } from "@/components/ui/card";
-import { getArchivedCategories, getCategories, getDailySpend } from "@/lib/queries";
+import {
+  getArchivedCategories,
+  getCategories,
+  getCategorySpendVsAverage,
+  getDailySpend,
+} from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +16,17 @@ export default function CategoriesPage() {
   const categories = getCategories();
   const archived = getArchivedCategories();
   const daily = getDailySpend(30);
+  const vsAverage = getCategorySpendVsAverage(30);
 
   return (
     <div className="space-y-7">
       <PageHead title="Categories" />
-      <p className="-mt-3 max-w-xl text-sm text-[var(--muted)]">
+
+      {/* Ranked spend first — what the page is actually consulted for. The
+          management list below is the settings half of it. */}
+      <CategorySpendSummary rows={vsAverage} />
+
+      <p className="max-w-xl text-sm text-[var(--muted)]">
         Rename, add, or archive the categories your spending rolls up into. Every transaction maps
         through these — overrides set per-transaction take precedence. Click a category to see its
         transactions broken down by month.

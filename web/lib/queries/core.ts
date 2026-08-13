@@ -668,6 +668,64 @@ export function getCategorySpendTrend(): CategoryTrend[] {
     }));
 }
 
+export type CategorySpendVsAverage = {
+  id: string;
+  name: string;
+  icon: string | null;
+  /** Spend in the trailing `days` window. */
+  recent: number;
+  /** Comparable per-window average over the `baselineWindows` windows before it. */
+  average: number;
+  /** recent/average − 1, or null when there's no baseline to compare against. */
+  delta: number | null;
+};
+
+/**
+ * Per-category spend for a recent window, beside its own trailing average.
+ *
+ * A bare "$1,370.15 on Food & Drink" is a number, not a signal — it only means
+ * something next to what that category usually costs. The baseline is the same
+ * query over a wider window divided by the number of windows, so a category
+ * with a genuinely quiet quarter doesn't get flagged for a normal month.
+ *
+ * Categories with no spend in either window are returned too (with zeroes), so
+ * the caller can fold them into a single "no spend" line rather than making the
+ * eye skip past a column of dashes.
+ */
+export function getCategorySpendVsAverage(
+  days = 30,
+  baselineWindows = 3,
+): CategorySpendVsAverage[] {
+  const baselineDays = days * baselineWindows;
+  return db
+    .all<{ id: string; name: string; icon: string | null; recent: number; baseline: number }>(
+      sql`SELECT cat.id AS id, cat.name AS name, cat.icon AS icon,
+             COALESCE(SUM(CASE WHEN t.date >= date('now', ${"-" + days + " days"})
+                               THEN t.amount ELSE 0 END), 0) AS recent,
+             COALESCE(SUM(CASE WHEN t.date < date('now', ${"-" + days + " days"})
+                                AND t.date >= date('now', ${"-" + (days + baselineDays) + " days"})
+                               THEN t.amount ELSE 0 END), 0) AS baseline
+          FROM categories cat
+          LEFT JOIN transactions t
+            ON ${effectiveCatId("t")} = cat.id AND ${settledOnly()} AND t.amount > 0
+          WHERE cat.archived = 0 AND cat."group" = 'spending'
+          GROUP BY cat.id
+          ORDER BY recent DESC, cat.name ASC`,
+    )
+    .map((r) => {
+      const recent = Number(r.recent);
+      const average = Number(r.baseline) / baselineWindows;
+      return {
+        id: r.id,
+        name: r.name,
+        icon: r.icon,
+        recent,
+        average,
+        delta: average > 0 ? recent / average - 1 : null,
+      };
+    });
+}
+
 export type TopMerchant = { vendor: string; total: number; count: number };
 
 /** Highest-spend merchants over the last `days`, excluding internal transfers. */
