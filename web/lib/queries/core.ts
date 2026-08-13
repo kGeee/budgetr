@@ -809,6 +809,8 @@ export type TxnCriteria = {
   dateTo?: string; // YYYY-MM-DD, inclusive
   amountMin?: number; // abs(amount) >=
   amountMax?: number; // abs(amount) <=
+  /** Review state. Omitted ⇒ both; false ⇒ the untouched backlog. */
+  reviewed?: boolean;
 };
 
 /**
@@ -842,6 +844,7 @@ export function searchTransactions(criteria: TxnCriteria, limit = 200): Transact
   if (criteria.dateTo) clauses.push(sql`t.date <= ${criteria.dateTo}`);
   if (criteria.amountMin != null) clauses.push(sql`abs(t.amount) >= ${criteria.amountMin}`);
   if (criteria.amountMax != null) clauses.push(sql`abs(t.amount) <= ${criteria.amountMax}`);
+  if (criteria.reviewed != null) clauses.push(sql`t.reviewed = ${criteria.reviewed ? 1 : 0}`);
 
   const where = clauses.length ? sql.join(clauses, sql` AND `) : null;
   return selectTransactions(where, limit);

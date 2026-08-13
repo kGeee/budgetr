@@ -2,6 +2,8 @@ import { format, parseISO } from "date-fns";
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { ForecastChart } from "@/components/charts";
+import { DataFreshnessBanner } from "@/components/data-freshness";
+import { getDataFreshness } from "@/lib/data-freshness";
 import { Card } from "@/components/ui/card";
 import { getCashflowForecast, getForecastSeries, getRemainingRecurring } from "@/lib/forecast";
 import type { RecurringRow } from "@/lib/queries";
@@ -28,6 +30,19 @@ export default function CashflowPage() {
     month: "long",
     year: "numeric",
   });
+
+  // Every figure on this page is downstream of one number — the cash balance —
+  // and that balance is only as current as the last successful refresh. A
+  // projection to Aug 31 built on an Aug 2 balance is not wrong so much as
+  // unqualified, so the page now stamps the age wherever the balance appears.
+  const freshness = getDataFreshness();
+  const balanceAsOf = freshness.connections.all.reduce<Date | null>(
+    (latest, c) =>
+      c.lastSuccessAt && (!latest || c.lastSuccessAt > latest) ? c.lastSuccessAt : latest,
+    null,
+  );
+  const balanceStale = freshness.connections.daysSinceAnySync >= 1;
+  const asOfLabel = balanceAsOf ? format(balanceAsOf, "MMM d") : null;
 
   const daysInMonth = forecast.daysElapsed + forecast.daysRemaining;
   const isCurrentMonth = new Date().toISOString().slice(0, 7) === month;
@@ -57,6 +72,8 @@ export default function CashflowPage() {
         still to clear, and your discretionary spending pace.
       </p>
 
+      <DataFreshnessBanner freshness={freshness} />
+
       {/* Hero: projected end-of-month balance + supporting stats. */}
       <div className="flex flex-col gap-6 rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
@@ -69,14 +86,18 @@ export default function CashflowPage() {
             </p>
             <p className="mt-3 text-sm text-[var(--muted)]">
               {forecast.daysRemaining > 0
-                ? `${forecast.daysRemaining} day${forecast.daysRemaining === 1 ? "" : "s"} left · ${formatCurrency(currentCash)} in cash today`
+                ? `${forecast.daysRemaining} day${forecast.daysRemaining === 1 ? "" : "s"} left · ${formatCurrency(currentCash)} in cash`
                 : `Month closed · ${formatCurrency(currentCash)} in cash`}
+              {asOfLabel && balanceStale ? ` as of ${asOfLabel}` : " today"}
             </p>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
-          <Stat label="Cash today" value={formatCurrency(currentCash)} />
+          <Stat
+            label={asOfLabel && balanceStale ? `Cash · as of ${asOfLabel}` : "Cash today"}
+            value={formatCurrency(currentCash)}
+          />
           <Stat label="Bills remaining" value={formatCurrency(remainingBills)} tone="coral" />
           <Stat label="Income remaining" value={formatCurrency(remainingIncome)} tone="jade" />
           <Stat

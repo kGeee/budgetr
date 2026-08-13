@@ -41,6 +41,13 @@ function parseCriteria(sp: SearchParams): TxnCriteria {
   const max = Number(maxRaw);
   if (maxRaw && !Number.isNaN(max)) c.amountMax = max;
 
+  // ?reviewed=no is the destination of the Insights review-backlog alert, so it
+  // has to actually narrow the list — an action that silently shows everything
+  // is worse than no action.
+  const reviewed = one(sp.reviewed);
+  if (reviewed === "no") c.reviewed = false;
+  else if (reviewed === "yes") c.reviewed = true;
+
   return c;
 }
 
