@@ -548,6 +548,17 @@ function EnvelopeCard({
       </p>
       <p className="mt-1 text-xs text-[var(--muted)]">
         {!limited ? "spent this month" : over ? "over budget" : "left this month"}
+        {/* "346%" lands faster than "$1,037.73 of $300.00" — the ratio is the
+            thing being judged, and it was only ever available as a division the
+            reader had to do. */}
+        {limited && (
+          <>
+            {" · "}
+            <span className={over ? "text-[var(--coral)]" : ""}>
+              {Math.round((row.spent / budget) * 100)}%
+            </span>
+          </>
+        )}
         {rollover && row.carryIn != null && Math.abs(row.carryIn) > 0.01 && (
           <>
             {" · "}
@@ -735,8 +746,11 @@ function UnbudgetedStrip({
             >
               <Disc row={r} size="sm" />
               {r.name}
+              {/* Say which side of the ledger the figure is. A bare "$8.00" on
+                  a chip is equally readable as a budget or as a spend, and
+                  these rows have no budget at all. */}
               <span className="mono text-[var(--faint)]">
-                {r.spent > 0.01 ? formatCurrency(r.spent) : "no budget"}
+                {r.spent > 0.01 ? `${formatCurrency(r.spent)} spent` : "no budget"}
               </span>
             </button>
           </li>
