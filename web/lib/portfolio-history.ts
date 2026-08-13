@@ -15,6 +15,50 @@ export type Trade = { ticker: string | null; date: string; quantity: number | nu
  */
 export type ReconstructedPoint = { date: string; value: number; flow: number };
 
+/**
+ * Thin a price series for display without moving its endpoints.
+ *
+ * Every held ticker's full daily history was crossing the server/client
+ * boundary so a ~60px row sparkline and a line chart could draw it. Twelve
+ * months of daily closes is ~250 points per ticker; neither chart can resolve
+ * that, and the closes arrive as float32 values widened to full double
+ * precision, so "644.8900146484375" ships fourteen characters of noise per
+ * point.
+ *
+ * Both endpoints are always kept: the last close is the price a holding is
+ * valued at, and the first anchors the chart's left edge. Trade markers on the
+ * expanded chart are positioned from the trade list, not from this series, so
+ * thinning it costs line smoothness and nothing else.
+ *
+ * Server-side maths must keep using the raw series — this is a presentation
+ * step applied at the point of serialization.
+ */
+export function downsampleSeries(points: PricePoint[], maxPoints = 130): PricePoint[] {
+  const round = (p: PricePoint): PricePoint => ({
+    date: p.date,
+    close: Math.round(p.close * 100) / 100,
+  });
+  if (points.length <= maxPoints) return points.map(round);
+
+  const step = (points.length - 1) / (maxPoints - 1);
+  const out: PricePoint[] = [];
+  for (let i = 0; i < maxPoints - 1; i++) {
+    out.push(round(points[Math.round(i * step)]));
+  }
+  out.push(round(points[points.length - 1]));
+  return out;
+}
+
+/** Downsample every series in a history map. */
+export function downsampleHistories(
+  histories: Record<string, PricePoint[]>,
+  maxPoints = 130,
+): Record<string, PricePoint[]> {
+  return Object.fromEntries(
+    Object.entries(histories).map(([k, v]) => [k, downsampleSeries(v, maxPoints)]),
+  );
+}
+
 /** Per-ticker daily close history, keyed by UPPER-cased ticker. */
 export async function getTickerHistories(
   symbols: string[],
