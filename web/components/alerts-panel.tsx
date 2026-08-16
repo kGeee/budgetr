@@ -10,6 +10,7 @@ import {
   Timer,
   X,
   Clock,
+  PlugZap,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
@@ -22,15 +23,18 @@ const ICONS: Record<AlertKind, LucideIcon> = {
   duplicate: CopyMinus,
   creep: TrendingUp,
   trial: Timer,
+  health: PlugZap,
 };
 
-// Per-kind accent — coral for money-at-risk (spike/duplicate), brass for
-// heads-up (creep/trial). Drives icon chip + left rail colour.
+// Per-kind accent — coral for money-at-risk (spike/duplicate) and for data the
+// app can't stand behind (health), brass for heads-up (creep/trial). Drives
+// icon chip + left rail colour.
 const ACCENT: Record<AlertKind, string> = {
   spike: "var(--coral)",
   duplicate: "var(--coral)",
   creep: "var(--brass)",
   trial: "var(--brass)",
+  health: "var(--coral)",
 };
 
 const KIND_LABEL: Record<AlertKind, string> = {
@@ -38,6 +42,7 @@ const KIND_LABEL: Record<AlertKind, string> = {
   duplicate: "Duplicate charge",
   creep: "Price creep",
   trial: "Trial ending",
+  health: "Data health",
 };
 
 function snoozeDate(days: number): string {
@@ -64,9 +69,14 @@ export function AlertsPanel({
             <ShieldCheck size={16} />
           </span>
           <div>
-            <p className="text-sm font-medium text-[var(--paper)]">Nothing unusual</p>
+            {/* A clear board is a claim about what was checked, not an absence
+                of output — so it names the checks. Saying only "nothing
+                unusual" is what let a seven-week-dead connection sit behind a
+                reassuring green tick. */}
+            <p className="text-sm font-medium text-[var(--paper)]">Nothing needs you</p>
             <p className="text-xs text-[var(--muted)]">
-              No spending spikes, duplicate charges, or subscription surprises right now.
+              Every connection is reporting, your ledger is current, and no spending spikes,
+              duplicate charges or subscription surprises turned up.
             </p>
           </div>
         </div>
@@ -168,6 +178,23 @@ function AlertCard({ alert, compact }: { alert: Alert; compact: boolean }) {
             </p>
           )}
 
+          {/* Health alerts carry an action instead of a dismissal. Letting
+              someone permanently hide "Chase is disconnected" would reintroduce
+              exactly the silence these alerts exist to break — and dismissal is
+              keyed through detectAnomalies, which never sees them anyway, so the
+              button would appear to work and then undo itself on refresh. */}
+          {alert.kind === "health" ? (
+            alert.action && (
+              <div className="mt-3">
+                <Link
+                  href={alert.action.href}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-line bg-[var(--panel)] px-3 py-1 text-xs font-medium text-[var(--paper)] transition hover:border-[var(--line-strong)]"
+                >
+                  {alert.action.label} →
+                </Link>
+              </div>
+            )
+          ) : (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {showSnooze ? (
               <>
@@ -209,6 +236,7 @@ function AlertCard({ alert, compact }: { alert: Alert; compact: boolean }) {
               </>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

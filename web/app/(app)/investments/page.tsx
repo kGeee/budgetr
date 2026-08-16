@@ -17,6 +17,8 @@ import {
 } from "@/lib/queries";
 import {
   buildReconstructedSeriesWithFlows,
+  downsampleHistories,
+  downsampleSeries,
   getTickerHistories,
   type PricePoint,
 } from "@/lib/portfolio-history";
@@ -209,10 +211,15 @@ export default async function InvestmentsPage() {
       />
       <PortfolioView
         holdings={holdings}
-        histories={histories}
+        // Raw daily history above powers valuation, the reconstructed value
+        // curve and the TWR index; only the display copy crosses to the client.
+        histories={downsampleHistories(histories)}
         portfolioSeries={portfolioSeries}
         portfolioReturnSeries={portfolioReturnSeries}
-        benchmarks={benchmarks}
+        benchmarks={{
+          SPY: benchmarks.SPY && downsampleSeries(benchmarks.SPY),
+          QQQ: benchmarks.QQQ && downsampleSeries(benchmarks.QQQ),
+        }}
         comparison={comparison}
         transactions={transactions}
         knownSectors={knownSectors}

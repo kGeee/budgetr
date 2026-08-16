@@ -3,6 +3,8 @@ import { PlaidLink } from "@/components/plaid-link";
 import { PageHead } from "@/components/page-head";
 import { AccountVisibilityToggle } from "@/components/account-visibility-toggle";
 import { ConnectWalletButton, WalletsCard } from "@/components/connect-wallet-dialog";
+import { ConnectionAlert, ConnectionChip } from "@/components/connection-status";
+import { getConnectionSummary, getHealthByInstitution } from "@/lib/connection-health";
 import { getAccounts, getWallets } from "@/lib/queries";
 import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
@@ -20,6 +22,8 @@ const TYPE_LABEL: Record<string, string> = {
 export default function AccountsPage() {
   const accounts = getAccounts();
   const wallets = getWallets();
+  const connections = getConnectionSummary();
+  const healthByInstitution = getHealthByInstitution();
 
   const byInstitution = new Map<string, typeof accounts>();
   for (const a of accounts) {
@@ -54,6 +58,8 @@ export default function AccountsPage() {
         }
       />
 
+      <ConnectionAlert summary={connections} />
+
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-display text-3xl tabular">
           {formatCurrency(net, displayCurrency)}
@@ -83,14 +89,16 @@ export default function AccountsPage() {
               (s, a) => s + convertToDisplay(signedBalance(a.type, a.currentBalance), a.currency),
               0,
             );
+          const health = healthByInstitution.get(institution);
           return (
             <Card key={institution} className="p-0">
-              <div className="flex items-center justify-between border-b border-line px-6 py-4">
-                <div className="flex items-center gap-3">
-                  <span className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-[var(--panel-2)] font-display text-sm text-[var(--brass)]">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-6 py-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] font-display text-sm text-[var(--brass)]">
                     {institution.charAt(0)}
                   </span>
-                  <span className="font-medium">{institution}</span>
+                  <span className="truncate font-medium">{institution}</span>
+                  {health && <ConnectionChip health={health} />}
                 </div>
                 <span className="mono text-sm text-[var(--muted)]">
                   {formatCurrency(subtotal, displayCurrency)}
@@ -123,6 +131,17 @@ export default function AccountsPage() {
                           {TYPE_LABEL[a.type] ?? a.type}
                         </span>
                         {a.subtype ? ` · ${a.subtype}` : ""}
+                        {/* A frozen balance is still a real balance — say when
+                            it stopped moving rather than hiding the row. */}
+                        {health?.state === "error" && health.lastSuccessAt && (
+                          <span className="text-[var(--coral)]">
+                            {" · "}Frozen since{" "}
+                            {health.lastSuccessAt.toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-3">

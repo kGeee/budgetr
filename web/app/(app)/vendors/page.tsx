@@ -4,7 +4,11 @@ import { format, parseISO } from "date-fns";
 import { PageHead } from "@/components/page-head";
 import { CategoryChart, MonthlySpendChart } from "@/components/charts";
 import { TransactionsTable } from "@/components/transactions-table";
-import { MergeVendorButton, VendorGroupDetail } from "@/components/vendor-merge-dialog";
+import {
+  MergeVendorButton,
+  VendorGroupDetail,
+  VendorMergeProvider,
+} from "@/components/vendor-merge-dialog";
 import { Card } from "@/components/ui/card";
 import {
   getCategories,
@@ -13,6 +17,7 @@ import {
   getVendorMonthlySpend,
   getVendors,
   getVendorTransactions,
+  toVendorCandidates,
 } from "@/lib/queries";
 import { formatCurrency } from "@/lib/utils";
 
@@ -35,23 +40,71 @@ export default async function VendorsPage({
 
   const avg = selected && selected.count > 0 ? selected.spent / selected.count : 0;
 
+  // Two lists, not one. Card payments and moves between your own accounts are
+  // the three largest rows on this page and none of them is a merchant, so
+  // ranking everything together buries real spending below bank plumbing.
+  const merchants = vendors.filter((x) => !x.isMovement);
+  const movement = vendors.filter((x) => x.isMovement);
+  const merchantTotal = merchants.reduce((sum, x) => sum + x.spent, 0);
+  const movementTotal = movement.reduce((sum, x) => sum + x.spent, 0);
+  const mostFrequent = [...merchants].sort((a, b) => b.count - a.count)[0];
+
   return (
     <div className="space-y-7">
       <PageHead title="Vendors" />
-      <p className="-mt-3 text-sm text-[var(--muted)]">
-        {vendors.length} vendors · grouped from your transaction history
-      </p>
+      <div className="-mt-3 space-y-1">
+        <p className="text-sm">
+          <span className="font-medium text-[var(--paper)]">
+            {formatCurrency(merchantTotal)}
+          </span>{" "}
+          <span className="text-[var(--muted)]">
+            across {merchants.length} {merchants.length === 1 ? "merchant" : "merchants"}
+            {mostFrequent && (
+              <>
+                {" "}
+                — most frequent is{" "}
+                <span className="text-[var(--paper)]">{mostFrequent.displayName}</span> at{" "}
+                {mostFrequent.count} {mostFrequent.count === 1 ? "visit" : "visits"}
+              </>
+            )}
+            .
+          </span>
+        </p>
+        {movement.length > 0 && (
+          <p className="text-xs text-[var(--muted)]">
+            A further {formatCurrency(movementTotal)} across {movement.length} transfer and
+            card-payment {movement.length === 1 ? "row" : "rows"}, listed separately below — not
+            spending.
+          </p>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         {/* Vendor list */}
         <div className="lg:col-span-2">
+          {/* The merge dialog's candidate + group lists are the same for every
+              row, so they're provided once here rather than passed per row. */}
+          <VendorMergeProvider candidates={toVendorCandidates(vendors)} groups={groups}>
           <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
             <ul className="max-h-[70vh] overflow-y-auto">
-              {vendors.map((vendor) => {
+              {merchants.length > 0 && (
+                <li className="sticky top-0 z-10 border-b border-line bg-[var(--panel)] px-4 py-2">
+                  <span className="eyebrow">Merchants · {merchants.length}</span>
+                </li>
+              )}
+              {[...merchants, ...movement].map((vendor, idx) => {
+                const startsMovement = idx === merchants.length && movement.length > 0;
                 const active = vendor.vendorKey === v;
                 const isGroup = vendor.groupId !== null;
                 return (
                   <li key={vendor.vendorKey} className="group/row">
+                    {startsMovement && (
+                      <div className="sticky top-0 z-10 border-y border-line bg-[var(--panel)] px-4 py-2">
+                        <span className="eyebrow">
+                          Money movement · not spending · {movement.length}
+                        </span>
+                      </div>
+                    )}
                     <Link
                       href={{ pathname: "/vendors", query: { v: vendor.vendorKey } }}
                       scroll={false}
@@ -75,16 +128,20 @@ export default async function VendorsPage({
                           {vendor.count} {vendor.count === 1 ? "txn" : "txns"} · last {vendor.lastDate}
                         </p>
                       </div>
-                      <span className="mono shrink-0 text-sm">{formatCurrency(vendor.spent)}</span>
+                      <span
+                        className={`mono shrink-0 text-sm ${
+                          vendor.isMovement ? "text-[var(--muted)]" : ""
+                        }`}
+                      >
+                        {formatCurrency(vendor.spent)}
+                      </span>
 
                       {/* Merge button — only for standalone (non-group) vendor rows */}
                       {!isGroup && (
                         <MergeVendorButton
                           vendorKey={vendor.vendorKey}
                           vendorName={vendor.displayName}
-                          groups={groups}
                           currentGroupId={vendor.groupId}
-                          candidates={vendors.filter((x) => x.vendorKey !== vendor.vendorKey)}
                         />
                       )}
 
@@ -103,6 +160,7 @@ export default async function VendorsPage({
               )}
             </ul>
           </div>
+          </VendorMergeProvider>
         </div>
 
         {/* Selected vendor detail: summary + visualizations */}

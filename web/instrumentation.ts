@@ -19,6 +19,15 @@ export async function register(): Promise<void> {
     return;
   }
 
+  // Prune, checkpoint and analyze before serving anything. Guarded so a failed
+  // sweep can never stop the server from starting.
+  try {
+    const { runStartupMaintenance, describeMaintenance } = await import("@/lib/db-maintenance");
+    console.log(describeMaintenance(runStartupMaintenance()));
+  } catch (err) {
+    console.warn("[maintenance] skipped:", (err as Error).message);
+  }
+
   const { startCompanionEngine } = await import("@/lib/companion/engine");
   startCompanionEngine();
 }

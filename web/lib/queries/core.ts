@@ -668,6 +668,64 @@ export function getCategorySpendTrend(): CategoryTrend[] {
     }));
 }
 
+export type CategorySpendVsAverage = {
+  id: string;
+  name: string;
+  icon: string | null;
+  /** Spend in the trailing `days` window. */
+  recent: number;
+  /** Comparable per-window average over the `baselineWindows` windows before it. */
+  average: number;
+  /** recent/average − 1, or null when there's no baseline to compare against. */
+  delta: number | null;
+};
+
+/**
+ * Per-category spend for a recent window, beside its own trailing average.
+ *
+ * A bare "$1,370.15 on Food & Drink" is a number, not a signal — it only means
+ * something next to what that category usually costs. The baseline is the same
+ * query over a wider window divided by the number of windows, so a category
+ * with a genuinely quiet quarter doesn't get flagged for a normal month.
+ *
+ * Categories with no spend in either window are returned too (with zeroes), so
+ * the caller can fold them into a single "no spend" line rather than making the
+ * eye skip past a column of dashes.
+ */
+export function getCategorySpendVsAverage(
+  days = 30,
+  baselineWindows = 3,
+): CategorySpendVsAverage[] {
+  const baselineDays = days * baselineWindows;
+  return db
+    .all<{ id: string; name: string; icon: string | null; recent: number; baseline: number }>(
+      sql`SELECT cat.id AS id, cat.name AS name, cat.icon AS icon,
+             COALESCE(SUM(CASE WHEN t.date >= date('now', ${"-" + days + " days"})
+                               THEN t.amount ELSE 0 END), 0) AS recent,
+             COALESCE(SUM(CASE WHEN t.date < date('now', ${"-" + days + " days"})
+                                AND t.date >= date('now', ${"-" + (days + baselineDays) + " days"})
+                               THEN t.amount ELSE 0 END), 0) AS baseline
+          FROM categories cat
+          LEFT JOIN transactions t
+            ON ${effectiveCatId("t")} = cat.id AND ${settledOnly()} AND t.amount > 0
+          WHERE cat.archived = 0 AND cat."group" = 'spending'
+          GROUP BY cat.id
+          ORDER BY recent DESC, cat.name ASC`,
+    )
+    .map((r) => {
+      const recent = Number(r.recent);
+      const average = Number(r.baseline) / baselineWindows;
+      return {
+        id: r.id,
+        name: r.name,
+        icon: r.icon,
+        recent,
+        average,
+        delta: average > 0 ? recent / average - 1 : null,
+      };
+    });
+}
+
 export type TopMerchant = { vendor: string; total: number; count: number };
 
 /** Highest-spend merchants over the last `days`, excluding internal transfers. */
@@ -717,6 +775,13 @@ export type TransactionRow = {
   attachmentCount: number;
   /** True when this transaction is a leg of a confirmed refund/transfer match. */
   matched: boolean;
+  /**
+   * True when the effective category sits in the `transfer` group — money moved
+   * between your own accounts, or a card payment. Excluded from every spend
+   * total, so the row has to be able to say so rather than looking like a
+   * £2,145 purchase.
+   */
+  isTransfer: boolean;
   tags: TxTag[];
 };
 
@@ -742,6 +807,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     splitCount: number;
     attachmentCount: number;
     matched: number;
+    isTransfer: number;
     tagsJson: string | null;
   }>(sql`
     SELECT t.id AS id, t.date AS date, t.name AS name, t.merchant_name AS merchantName,
@@ -752,6 +818,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
            (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) AS splitCount,
            (SELECT COUNT(*) FROM attachments at WHERE at.transaction_id = t.id) AS attachmentCount,
            ${isConfirmedMatch("t")} AS matched,
+           (cat."group" = 'transfer') AS isTransfer,
            EXISTS(SELECT 1 FROM recurring_streams r
                   WHERE r.is_active = 1 AND r.merchant_name IS NOT NULL
                     AND r.merchant_name = t.merchant_name) AS recurring,
@@ -785,6 +852,7 @@ function selectTransactions(where: ReturnType<typeof sql> | null, limit: number)
     splitCount: Number(r.splitCount),
     attachmentCount: Number(r.attachmentCount),
     matched: !!r.matched,
+    isTransfer: !!r.isTransfer,
     tags: r.tagsJson ? (JSON.parse(r.tagsJson) as TxTag[]) : [],
   }));
 }
@@ -809,6 +877,8 @@ export type TxnCriteria = {
   dateTo?: string; // YYYY-MM-DD, inclusive
   amountMin?: number; // abs(amount) >=
   amountMax?: number; // abs(amount) <=
+  /** Review state. Omitted ⇒ both; false ⇒ the untouched backlog. */
+  reviewed?: boolean;
 };
 
 /**
@@ -819,6 +889,12 @@ export type TxnCriteria = {
  * transactions still surface under any of their split categories.
  */
 export function searchTransactions(criteria: TxnCriteria, limit = 200): TransactionRow[] {
+  const where = criteriaWhere(criteria);
+  return selectTransactions(where, limit);
+}
+
+/** The WHERE fragment for a criteria set, or null when nothing is constrained. */
+function criteriaWhere(criteria: TxnCriteria): ReturnType<typeof sql> | null {
   const clauses: ReturnType<typeof sql>[] = [];
 
   const q = criteria.q?.trim().toLowerCase();
@@ -842,9 +918,73 @@ export function searchTransactions(criteria: TxnCriteria, limit = 200): Transact
   if (criteria.dateTo) clauses.push(sql`t.date <= ${criteria.dateTo}`);
   if (criteria.amountMin != null) clauses.push(sql`abs(t.amount) >= ${criteria.amountMin}`);
   if (criteria.amountMax != null) clauses.push(sql`abs(t.amount) <= ${criteria.amountMax}`);
+  if (criteria.reviewed != null) clauses.push(sql`t.reviewed = ${criteria.reviewed ? 1 : 0}`);
 
-  const where = clauses.length ? sql.join(clauses, sql` AND `) : null;
-  return selectTransactions(where, limit);
+  return clauses.length ? sql.join(clauses, sql` AND `) : null;
+}
+
+export type TransactionsSummary = {
+  /** Every transaction matching the criteria — not just the page's capped slice. */
+  total: number;
+  /** Spend, transfers excluded. Positive. */
+  spent: number;
+  /** Income, transfers excluded. Positive. */
+  received: number;
+  /** Moved between your own accounts. Counted in neither of the above. */
+  transferred: number;
+  unreviewed: number;
+  firstDate: string | null;
+  lastDate: string | null;
+};
+
+/**
+ * Totals for a criteria set, over *all* matches rather than the rows the table
+ * happens to show.
+ *
+ * Two separate problems this fixes. The page opened with "500 most recent
+ * entries", which reads as a total when it's a cap — 817 transactions existed.
+ * And no money figure was attached to a filter at all: you could narrow to a
+ * category and still not be told what it cost you.
+ *
+ * Transfers are split out rather than netted or ignored, because they're large,
+ * they're not spending, and leaving them silently out of a total invites the
+ * "these numbers don't add up" reading.
+ */
+export function summarizeTransactions(criteria: TxnCriteria): TransactionsSummary {
+  const where = criteriaWhere(criteria);
+  const filter = where ? sql`WHERE ${where}` : sql``;
+  const row = db.get<{
+    total: number;
+    spent: number;
+    received: number;
+    transferred: number;
+    unreviewed: number;
+    firstDate: string | null;
+    lastDate: string | null;
+  }>(sql`
+    SELECT COUNT(*) AS total,
+           COALESCE(SUM(CASE WHEN cat."group" IS NOT 'transfer' AND t.amount > 0
+                             THEN t.amount ELSE 0 END), 0) AS spent,
+           COALESCE(SUM(CASE WHEN cat."group" IS NOT 'transfer' AND t.amount < 0
+                             THEN -t.amount ELSE 0 END), 0) AS received,
+           COALESCE(SUM(CASE WHEN cat."group" IS 'transfer'
+                             THEN abs(t.amount) ELSE 0 END), 0) AS transferred,
+           COALESCE(SUM(CASE WHEN t.reviewed = 0 THEN 1 ELSE 0 END), 0) AS unreviewed,
+           MIN(t.date) AS firstDate, MAX(t.date) AS lastDate
+    FROM transactions t
+    LEFT JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+    ${filter}`);
+
+  return {
+    total: Number(row?.total ?? 0),
+    spent: Number(row?.spent ?? 0),
+    received: Number(row?.received ?? 0),
+    transferred: Number(row?.transferred ?? 0),
+    unreviewed: Number(row?.unreviewed ?? 0),
+    firstDate: row?.firstDate ?? null,
+    lastDate: row?.lastDate ?? null,
+  };
 }
 
 /** All saved transaction filters, newest first. */
@@ -862,7 +1002,44 @@ export type VendorRow = {
   groupName: string | null;
   /** Raw vendor keys merged into this group (only set when vendorKey IS a groupId) */
   members: string[];
+  /**
+   * True when most of this vendor's spend sits in `transfer` categories — card
+   * payments and moves between your own accounts. Not spending, and it
+   * out-ranks every real merchant when the list is sorted by amount.
+   */
+  isMovement: boolean;
+  /** Spend attributed to transfer categories — the input to isMovement. */
+  transferSpent: number;
 };
+
+/**
+ * The slice of a vendor the merge dialog needs. Narrower than VendorRow on
+ * purpose: `members` is a full string[] per group and the dialog only ever
+ * reads its length, so the array itself never crosses to the client.
+ */
+export type VendorCandidate = {
+  vendorKey: string;
+  displayName: string;
+  groupId: string | null;
+  count: number;
+  memberCount: number;
+};
+
+/**
+ * Narrow vendor rows for the merge dialog's suggestion list. Lives here rather
+ * than beside the dialog because the dialog is a client component — a helper
+ * exported from a "use client" module becomes a client reference and throws if
+ * a server component calls it.
+ */
+export function toVendorCandidates(vendors: VendorRow[]): VendorCandidate[] {
+  return vendors.map((v) => ({
+    vendorKey: v.vendorKey,
+    displayName: v.displayName,
+    groupId: v.groupId,
+    count: v.count,
+    memberCount: v.members.length,
+  }));
+}
 
 // Raw vendor key per transaction — merchant name when Plaid provides one, else raw descriptor.
 const vendorKeyExpr = sql`COALESCE(NULLIF(t.merchant_name, ''), t.name)`;
@@ -881,6 +1058,7 @@ export function getVendors(): VendorRow[] {
     count: number;
     spent: number;
     lastDate: string;
+    transferSpent: number;
     groupId: string | null;
     groupName: string | null;
   }>(
@@ -888,10 +1066,13 @@ export function getVendors(): VendorRow[] {
            MAX(t.merchant_name) AS merchant, MAX(t.name) AS sampleName,
            COUNT(*) AS count,
            SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS spent,
+           SUM(CASE WHEN t.amount > 0 AND cat."group" = 'transfer'
+                    THEN t.amount ELSE 0 END) AS transferSpent,
            MAX(t.date) AS lastDate,
            vgm.group_id AS groupId,
            vg.name AS groupName
         FROM transactions t
+        LEFT JOIN categories cat ON cat.id = ${effectiveCatId("t")}
         LEFT JOIN vendor_group_members vgm ON vgm.vendor_key = ${vendorKeyExpr}
         LEFT JOIN vendor_groups vg ON vg.id = vgm.group_id
         WHERE ${settledOnly()}
@@ -909,6 +1090,7 @@ export function getVendors(): VendorRow[] {
       if (existing) {
         existing.count += Number(r.count);
         existing.spent += Number(r.spent);
+        existing.transferSpent += Number(r.transferSpent);
         if (r.lastDate > existing.lastDate) existing.lastDate = r.lastDate;
         existing.members.push(r.vendorKey);
       } else {
@@ -917,10 +1099,12 @@ export function getVendors(): VendorRow[] {
           displayName: r.groupName!,
           count: Number(r.count),
           spent: Number(r.spent),
+          transferSpent: Number(r.transferSpent),
           lastDate: r.lastDate,
           groupId: r.groupId,
           groupName: r.groupName,
           members: [r.vendorKey],
+          isMovement: false,
         });
       }
     } else {
@@ -929,15 +1113,22 @@ export function getVendors(): VendorRow[] {
         displayName: cleanTransactionName(r.sampleName, r.merchant),
         count: Number(r.count),
         spent: Number(r.spent),
+        transferSpent: Number(r.transferSpent),
         lastDate: r.lastDate,
         groupId: null,
         groupName: null,
         members: [],
+        isMovement: false,
       });
     }
   }
 
-  return [...grouped.values(), ...ungrouped].sort((a, b) => b.spent - a.spent);
+  // Classify by where the majority of the money went, not by any single
+  // transaction: a merchant with one stray transfer stays a merchant, and a
+  // group merging four card payments is movement even if one member isn't.
+  return [...grouped.values(), ...ungrouped]
+    .map((v) => ({ ...v, isMovement: v.spent > 0 && v.transferSpent > v.spent / 2 }))
+    .sort((a, b) => b.spent - a.spent);
 }
 
 /**
@@ -1349,6 +1540,8 @@ export type RecurringRow = {
   direction: "inflow" | "outflow";
   description: string | null;
   merchantName: string | null;
+  /** User-set name. Wins over merchantName; never written by sync. */
+  userLabel: string | null;
   category: string | null;
   frequency: string | null;
   averageAmount: number | null;
@@ -1362,7 +1555,8 @@ export type RecurringRow = {
 
 const recurringSelect = sql`
   SELECT r.id AS id, r.direction AS direction, r.description AS description,
-         r.merchant_name AS merchantName, r.category AS category, r.frequency AS frequency,
+         r.merchant_name AS merchantName, r.user_label AS userLabel,
+         r.category AS category, r.frequency AS frequency,
          r.average_amount AS averageAmount, r.last_amount AS lastAmount,
          r.last_date AS lastDate, r.predicted_next_date AS predictedNextDate,
          r.iso_currency_code AS currency, a.name AS accountName, r.status AS status

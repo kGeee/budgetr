@@ -12,7 +12,7 @@
 
 import { db } from "@/db";
 import { optionIvSnapshots } from "@/db/schema";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, lt, sql } from "drizzle-orm";
 import type { OptionChain } from "@/lib/yahoo";
 import { daysToExpiry } from "@/lib/options";
 import { impliedVol } from "@/lib/black-scholes";
@@ -97,7 +97,49 @@ export function captureIvSnapshots(
       .run();
     written += chunk.length;
   }
+
+  // Keep the table bounded. Throttled to once a day so a multi-ticker sweep
+  // pays for the scan once, not once per ticker.
+  pruneIvSnapshotsThrottled();
+
   return written;
+}
+
+/**
+ * Days of snapshots actually kept on disk. Slightly wider than HISTORY_DAYS so
+ * a timezone edge or an off-by-one at the window boundary can never delete a
+ * day the matrix is still rendering.
+ */
+const RETENTION_DAYS = HISTORY_DAYS + 5;
+
+/** Prune at most once a day per process — see pruneIvSnapshots. */
+let lastPruneDay: string | null = null;
+
+/**
+ * Drop snapshots older than the retention window.
+ *
+ * HISTORY_DAYS has always bounded what `loadIvSnapshots` reads, but nothing
+ * ever deleted the rest, so the table grew without limit: 196k rows over seven
+ * days of use, 29 MB of a 31 MB database, of which only the last 30 days were
+ * ever readable. One wheel-scanner sweep across 68 tickers writes ~76k rows.
+ *
+ * Returns the number of rows deleted.
+ */
+export function pruneIvSnapshots(): number {
+  const cutoff = new Date(Date.now() - RETENTION_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const res = db.delete(optionIvSnapshots).where(lt(optionIvSnapshots.date, cutoff)).run();
+  lastPruneDay = new Date().toISOString().slice(0, 10);
+  return res.changes;
+}
+
+/**
+ * Prune, but at most once per calendar day per process. `date` has no leading
+ * index, so the delete is a full scan — fine daily, wasteful if it ran on every
+ * one of a 68-ticker sweep's captures.
+ */
+function pruneIvSnapshotsThrottled(): void {
+  if (lastPruneDay === new Date().toISOString().slice(0, 10)) return;
+  pruneIvSnapshots();
 }
 
 /** Load the last `days` of snapshots for a ticker (all expiries). */

@@ -3,6 +3,7 @@ export * from "./budget-editor";
 export * from "./category-detail-panel";
 export * from "./category-manager";
 export * from "./category-pill";
+export * from "./category-spend-summary";
 export * from "./categories-spend-chart";
 export * from "./period-spend-chart";
 export * from "./daily-spend-chart";

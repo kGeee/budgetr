@@ -8,6 +8,12 @@ import {
   subYears,
 } from "date-fns";
 import { ReviewView } from "@/components/review-view";
+import { IncompletePeriodNotice } from "@/components/data-freshness";
+import {
+  getLatestTransactionDate,
+  lastCompleteMonth,
+  periodCoverage,
+} from "@/lib/data-freshness";
 import {
   getBiggestPurchases,
   getCategories,
@@ -86,16 +92,43 @@ function resolvePeriod(period: Period, now: Date) {
   }
 }
 
+/** The same bounds shape as resolvePeriod, for an arbitrary 'YYYY-MM'. */
+function resolveMonth(month: string) {
+  const anchor = new Date(`${month}-01T00:00:00`);
+  return resolvePeriod("this-month", anchor);
+}
+
 export default async function ReviewPage({
   searchParams,
 }: {
   searchParams: Promise<{ period?: string }>;
 }) {
   const { period: raw } = await searchParams;
-  const period: Period = PERIODS.includes(raw as Period) ? (raw as Period) : "this-month";
+  const explicit = PERIODS.includes(raw as Period);
+  const period: Period = explicit ? (raw as Period) : "this-month";
 
   const now = new Date();
-  const p = resolvePeriod(period, now);
+  let p = resolvePeriod(period, now);
+
+  // The page's whole failure mode: reporting the current month with total
+  // confidence when the sync stopped part-way through it, so "August: $1,959.85
+  // across 4 transactions" reads as a quiet month rather than as missing data.
+  //
+  // An explicit period choice is always honoured — if you click "This month" you
+  // get this month — but the default falls back to the last month the ledger
+  // actually covers, and says so either way.
+  const latestDate = getLatestTransactionDate();
+  const coverage = periodCoverage(p.start, p.end, latestDate);
+  const requestedLabel = p.label;
+  let fellBack = false;
+
+  if (!explicit && !coverage.complete) {
+    const complete = lastCompleteMonth(latestDate);
+    if (complete && complete !== p.start.slice(0, 7)) {
+      p = resolveMonth(complete);
+      fellBack = true;
+    }
+  }
 
   // Day-level spend scoped to the selected period — the review page's daily-spend
   // chart follows the period tabs (daily bars for short spans, weekly beyond).
@@ -137,11 +170,23 @@ export default async function ReviewPage({
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
     .slice(0, 8);
 
+  // Either we fell back and must say which period is on screen and why, or the
+  // period you explicitly asked for is short of data and must be labelled as
+  // such. Both are the same banner; only the "showing X instead" clause differs.
+  const banner = coverage.complete ? null : (
+    <IncompletePeriodNotice
+      requestedLabel={requestedLabel}
+      shownLabel={fellBack ? p.label : requestedLabel}
+      coverage={coverage}
+    />
+  );
+
   return (
     <ReviewView
       period={period}
       label={p.label}
       prevLabel={p.prevLabel}
+      banner={banner}
       totals={totals}
       topVendors={topVendors}
       biggest={biggest}

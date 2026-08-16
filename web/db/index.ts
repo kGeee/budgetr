@@ -77,4 +77,11 @@ function openSqlite(): Database.Database {
 const sqlite = openSqlite();
 
 export const db = drizzle(sqlite, { schema });
+/**
+ * The raw better-sqlite3 handle. Drizzle has no API for pragmas that return
+ * rows (`wal_checkpoint`, `freelist_count`) or for statements that can't run
+ * inside a transaction (`VACUUM`), so lib/db-maintenance.ts reaches through
+ * this. Prefer `db` for everything else.
+ */
+export { sqlite };
 export { schema };

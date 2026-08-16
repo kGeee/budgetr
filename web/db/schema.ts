@@ -225,6 +225,13 @@ export const recurringStreams = sqliteTable(
     direction: text("direction").notNull(), // inflow | outflow
     description: text("description"),
     merchantName: text("merchant_name"),
+    /**
+     * User-set name, which wins over anything Plaid sends. Plaid returns no
+     * merchant for some streams — including the two largest in a typical
+     * ledger — leaving a four-figure monthly bill rendered as "Unknown".
+     * Nullable and never written by sync, so a rename survives every refresh.
+     */
+    userLabel: text("user_label"),
     category: text("category"), // personal_finance_category.primary
     frequency: text("frequency"), // WEEKLY | MONTHLY | ...
     averageAmount: real("average_amount"),
