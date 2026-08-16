@@ -7,6 +7,16 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-15
+
+The release is mostly about one thing: pages that say how much they know. The
+arithmetic on these screens was never wrong, but a correct number presented
+without its provenance is worse than an obvious error, because you act on it.
+A stalled sync, a bank disconnected since June, a list capped at 500 of 817
+entries — all of it rendered with total confidence. Every page now qualifies
+its own figures. Alongside that, the two heaviest pages were measured and cut,
+and the LEAPS desk lands as the release's one new tool.
+
 ### Added
 
 - **LEAPS desk — one long-dated call against 100 shares.** A new tool on the
@@ -29,6 +39,110 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
   where the call isn't standing in for the shares and the number would flatter
   a lottery ticket. A delta-weighted **cost per unit of exposure** ranks every
   strike on one scale instead.
+- **Every page says how current its numbers are.** Three shared primitives —
+  how old the ledger is, whether a reporting period can be honestly reported,
+  and the three health detectors that actually fire (broken connection, stale
+  sync, unreviewed backlog) — wired through Overview, Review, Budgets, Cashflow
+  and Insights. Review falls back to the last complete month and says so;
+  Budgets always fell back silently and now admits which month and why;
+  Cashflow stamps the balance's age wherever it appears. The alerts are not
+  dismissible, because permanently hiding "Chase is disconnected" would restore
+  the exact silence they exist to break. A period is measured against its end
+  **or today, whichever is sooner**, so an unfinished current month isn't
+  mistaken for a gap.
+- **Broken and stale bank connections are surfaced.** Chase had been in an
+  error state for 47 days with its balance rendering exactly like six healthy
+  institutions. A chip on each institution header, a banner for the worst
+  problem, and the full list in Settings. Health keys off the last actual
+  refresh rather than the last *attempt* — a failed sync still stamps the item,
+  so a broken connection otherwise looks freshly synced. Known Plaid error
+  codes get copy in the user's terms and say whether re-linking is really the
+  remedy.
+- **Transactions states its cap honestly and totals what's in view.** The
+  header read "500 most recent entries", which parses as a total when it's a
+  ceiling — there are 817. It now reads "817 entries · Mar 26 – Aug 12 ·
+  showing 500 most recent", with out/in totals aggregated over every match
+  rather than the capped slice. Transfers are split out rather than netted
+  away, and those rows dim their amount: a $2,145 move between your own
+  accounts had been rendering as the largest purchase on the page.
+- **Categories ranks by spend and compares it to normal.** Each category's
+  recent window sits beside its own trailing average, so a genuinely quiet
+  quarter doesn't get flagged for an ordinary month. Dormant categories
+  collapse into one expandable line instead of padding the list with dashes,
+  and the headline names the most interesting mover — filtered to changes over
+  15% on categories worth at least 5% of the total, so noise on a $2 category
+  can't win the sentence.
+- **Budgets shows the ratio.** "$1,037.73 of $300.00" makes the reader do the
+  division; "346%" is the judgement itself. Unbudgeted chips now say "$8.00
+  spent", since a bare amount reads equally as a budget or as a spend.
+- **Recurring splits overdue from upcoming, normalises to monthly, and lets
+  you name a stream.** Streams with a date in the past move to their own
+  "Awaiting confirmation" section with a days-late chip — worded *unconfirmed*
+  rather than *missed*, because Plaid predicts the date and a stale sync
+  produces overdue rows that are entirely expected. Mixed frequencies normalise
+  using 52/12 and 26/12 rather than 4 and 2, so a $20 weekly subscription is
+  $86.67 a month rather than $80. Streams Plaid names no merchant for can be
+  labelled by hand (migration 0021), and the label carries through to Cashflow
+  and the Overview bills widget.
+- **Vendors ranks merchants first and folds money movement into its own list.**
+  The top three rows were card payments and brokerage transfers — bank plumbing
+  ranked above every real merchant. Rows are now classified by where the
+  majority of their spend sits, so a merchant with one stray transfer stays a
+  merchant. The page leads with merchant spend and the most frequent merchant,
+  since 151 Walmart visits is a more actionable fact than the $1,054 it adds
+  up to.
+- **A social-share card.** OpenGraph and Twitter `summary_large_image`
+  metadata plus the 1200×630 card, so a shared budgetr.dev link renders richly.
+
+### Changed
+
+- **The vendor page no longer ships the vendor list once per row.** Every row
+  rendered a merge button holding the entire rest of the vendor list — at 293
+  vendors, 86,100 serialized candidates crossing the server/client boundary on
+  every navigation, growing as N². The list crosses once through a context and
+  the buttons read from there, with suggestions ranked lazily on dialog open.
+  Payload 5,055 KB → 1,186 KB, render 0.45–0.62s → ~0.054s, growth O(N²) → O(N).
+- **The IV snapshot table is bounded and the database maintains itself.**
+  `option_iv_snapshots` had a read window but no delete — 208k rows, 29 MB of a
+  31 MB database, only the last 30 days ever readable. Capture prunes past a
+  35-day retention window (a 5-day margin so a timezone edge can't drop a day
+  still on screen), throttled to once a day. Startup runs prune, WAL checkpoint,
+  `PRAGMA optimize`, and vacuums only when the freelist is ≥20% of the file;
+  every step is guarded, since maintenance failing is not a reason to refuse to
+  boot.
+- **The IV capture is off the response path.** Both desk routes wrote a
+  few-thousand-row upsert synchronously during render, so every visit waited on
+  a write it mostly didn't need. It now runs after the response is sent.
+  /chain 1.99s → ~0.94–1.04s warm, /vol 1.39s → ~1.12–1.31s. The residual is
+  the live chain fetch, not the write.
+- **Price series are downsampled at the client boundary.** A full twelve months
+  of daily history crossed to the client so a 60px sparkline could draw it,
+  each close arriving as float32 widened to full double precision — fourteen
+  characters of noise per point. Thinned to 130 points and rounded to cents,
+  both endpoints always preserved. Valuation, the value curve and the TWR index
+  still use the raw server-side series. Price points 5,726 → 2,730, 299 KB →
+  113 KB (−62%), page weight −11%.
+
+### Fixed
+
+- **The LEAPS view is usable, and no longer quotes a crossover that isn't one.**
+  AAPL lists 393 calls beyond a year and the first cut put every one in a pill
+  picker *and* a table — a ~19,000px page fronted by 400 buttons. Now scoped
+  the way the decision is made: pick an expiry, then a strike, defaulting to
+  the ones behaving like the shares. 19,461px → 1,874px. Separately, when
+  interest on the freed capital exceeds time value and dividends, the
+  break-even root lands above the strike and the page printed a flat
+  contradiction; that case is the call winning everywhere, and it now says so.
+- **A mangled PEM signing key is repaired rather than fatal.** Env UIs collapse
+  PEM line breaks, leaving the key on one line, which OpenSSL can't parse —
+  license minting threw `DECODER routines::unsupported` after the signature
+  check had already passed. The key is now un-escaped and re-wrapped from the
+  base64 body between the markers.
+- **The demo database is shared across module layers.** Next instantiates the
+  module once per bundle layer, so an in-memory demo DB gave each layer its own
+  empty copy: instrumentation seeded one while pages queried another. Any route
+  reached by clicking rather than loading could come back blank until a manual
+  refresh. Every layer now points at one temp file per process.
 
 ## [0.9.0] — 2026-08-01
 
