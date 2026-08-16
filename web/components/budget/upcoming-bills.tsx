@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import type { RecurringRow } from "@/lib/queries";
+import { streamLabel } from "@/lib/recurring";
 
 export function UpcomingBills({ bills }: { bills: RecurringRow[] }) {
   const total = bills.reduce((s, b) => s + Math.abs(b.averageAmount ?? 0), 0);
@@ -36,7 +37,7 @@ export function UpcomingBills({ bills }: { bills: RecurringRow[] }) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
-                    {b.merchantName ?? b.description ?? "Bill"}
+                    {streamLabel(b).name}
                   </p>
                   <p className="truncate text-xs text-[var(--muted)]">{b.accountName}</p>
                 </div>

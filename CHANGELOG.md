@@ -5,6 +5,31 @@ tags that publish the macOS desktop app via the Release workflow.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **LEAPS desk — one long-dated call against 100 shares.** A new tool on the
+  Options desk that answers the stock-replacement question with arithmetic
+  rather than vibes: what the contract costs against the shares, how much
+  capital it frees, how much exposure it actually buys, and what the leverage
+  costs per year. The comparison credits both sides properly — dividends to the
+  shares, interest to the cash the call doesn't tie up — because omitting those
+  is what makes LEAPS look worse than they are on a plain payoff chart.
+- Two facts fall out of the maths and are stated outright rather than left for
+  the reader to infer from a chart: above the strike both positions gain a
+  dollar per dollar, so the call trails (or beats) the shares by a **fixed**
+  amount however far the stock runs — there is no upside crossover, and
+  leverage shows up in return on capital, not in dollars. And there is a price
+  below which the call wins, because its loss stops at the premium while the
+  shares keep falling.
+- The strike ladder carries an **implied borrow rate** — the annualised cost of
+  controlling the shares through the option, quoted against the capital freed —
+  which is directly comparable to a margin rate. It's blank out of the money,
+  where the call isn't standing in for the shares and the number would flatter
+  a lottery ticket. A delta-weighted **cost per unit of exposure** ranks every
+  strike on one scale instead.
+
 ## [0.9.0] — 2026-08-01
 
 ### Added

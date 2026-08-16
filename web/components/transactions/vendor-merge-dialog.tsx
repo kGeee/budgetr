@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { createContext, useContext, useMemo, useRef, useState, useTransition } from "react";
 import { GitMerge, Plus, Sparkles, X, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +10,7 @@ import {
   removeVendorFromGroup,
   renameVendorGroup,
 } from "@/lib/actions";
-import type { VendorGroupRow, VendorRow } from "@/lib/queries";
+import type { VendorCandidate, VendorGroupRow } from "@/lib/queries";
 import { rankSimilarVendors } from "@/lib/utils";
 
 // ── Small inline modal ───────────────────────────────────────────────────────
@@ -28,34 +28,57 @@ function Modal({ onClose, children }: { onClose: () => void; children: React.Rea
   );
 }
 
+// ── Shared merge context ─────────────────────────────────────────────────────
+
+/**
+ * Merge suggestions need the whole vendor list, and the existing-groups list is
+ * identical for every row. Passing either as a per-row prop made the RSC payload
+ * quadratic — 293 vendor rows shipped ~86k serialized objects and 5 MB of HTML,
+ * growing as N². Both cross the boundary exactly once through this context now;
+ * the buttons read from it.
+ */
+type MergeContext = { candidates: VendorCandidate[]; groups: VendorGroupRow[] };
+
+const MergeCtx = createContext<MergeContext>({ candidates: [], groups: [] });
+
+export function VendorMergeProvider({
+  candidates,
+  groups,
+  children,
+}: MergeContext & { children: React.ReactNode }) {
+  const value = useMemo(() => ({ candidates, groups }), [candidates, groups]);
+  return <MergeCtx.Provider value={value}>{children}</MergeCtx.Provider>;
+}
+
 // ── Merge button shown per-vendor-row ────────────────────────────────────────
 
 export function MergeVendorButton({
   vendorKey,
   vendorName,
-  groups,
   currentGroupId,
-  candidates = [],
 }: {
   vendorKey: string;
   vendorName: string;
-  groups: VendorGroupRow[];
   currentGroupId: string | null;
-  /** Other vendors (standalone + groups) used to auto-suggest similar merges. */
-  candidates?: VendorRow[];
 }) {
   const [open, setOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [isPending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+  const { candidates, groups } = useContext(MergeCtx);
 
   // Fuzzy name matches — the lightweight token/trigram ranker, no dependency.
-  const suggestions = useMemo(
-    () =>
-      rankSimilarVendors(vendorName, candidates, (c) => c.displayName)
-        .filter((s) => s.item.groupId !== currentGroupId),
-    [vendorName, candidates, currentGroupId],
-  );
+  // Only ranked once the dialog is actually open: this runs per vendor row, and
+  // scoring the full list on every row's first render is wasted work when the
+  // result is invisible until someone clicks.
+  const suggestions = useMemo(() => {
+    if (!open) return [];
+    return rankSimilarVendors(
+      vendorName,
+      candidates.filter((c) => c.vendorKey !== vendorKey),
+      (c) => c.displayName,
+    ).filter((s) => s.item.groupId !== currentGroupId);
+  }, [open, vendorName, vendorKey, candidates, currentGroupId]);
 
   function close() {
     setOpen(false);
@@ -73,7 +96,7 @@ export function MergeVendorButton({
    * Accept a fuzzy suggestion: merge into the candidate's existing group, or —
    * if the candidate is standalone — spin up a new group holding both vendors.
    */
-  function mergeWithSuggestion(candidate: VendorRow) {
+  function mergeWithSuggestion(candidate: VendorCandidate) {
     startTransition(async () => {
       if (candidate.groupId) {
         await addVendorToGroup(vendorKey, candidate.groupId);
@@ -138,7 +161,7 @@ export function MergeVendorButton({
                     <span className="flex-1 truncate">{item.displayName}</span>
                     <span className="text-xs text-[var(--faint)]">
                       {item.groupId
-                        ? `${item.members.length} vendors`
+                        ? `${item.memberCount} vendors`
                         : `${item.count} ${item.count === 1 ? "txn" : "txns"}`}
                     </span>
                   </button>

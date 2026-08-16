@@ -41,6 +41,7 @@ const money = (v: number) => formatMoney(v, "USD");
 export function ReviewView({
   period,
   label,
+  banner,
   prevLabel,
   totals,
   topVendors,
@@ -56,6 +57,8 @@ export function ReviewView({
 }: {
   period: Period;
   label: string;
+  /** Data-provenance notice, rendered between the head and the headline figure. */
+  banner?: React.ReactNode;
   prevLabel: string;
   totals: PeriodTotals;
   topVendors: TopMerchant[];
@@ -98,6 +101,8 @@ export function ReviewView({
           </div>
         }
       />
+
+      {banner}
 
       {/* Hero — the headline number for the chosen period. */}
       <Card className="rise overflow-hidden">

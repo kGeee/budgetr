@@ -3,6 +3,7 @@ export * from "./transactions-filter-bar";
 export * from "./transactions-table";
 export * from "./matches-review";
 export * from "./review-inbox";
+export * from "./recurring-view";
 export * from "./review-view";
 export * from "./rules-manager";
 export * from "./split-bill-modal";

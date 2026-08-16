@@ -7,6 +7,8 @@ import { ThemeSegmented } from "@/components/theme-toggle";
 import { ReportScheduleForm } from "@/components/report-schedule-form";
 import { ApiKeysForm } from "@/components/api-keys-form";
 import { CompanionCard } from "@/components/companion-card";
+import { ConnectionList } from "@/components/connection-status";
+import { getConnectionSummary } from "@/lib/connection-health";
 import { LicensePanel } from "@/components/license-panel";
 import { getSyncStatus } from "@/lib/companion/store";
 import { PendingSwitch } from "@/components/pending-toggle";
@@ -29,6 +31,7 @@ export default async function SettingsPage() {
   const entitlement = getEntitlement();
   const countPending = getIncludePending();
   const pendingSummary = getPendingSummary();
+  const connections = getConnectionSummary();
 
   return (
     <div className="space-y-7">
@@ -43,12 +46,21 @@ export default async function SettingsPage() {
         <LicensePanel entitlement={entitlement} />
       </Card>
 
-      {/* Connections — Plaid + Finnhub API keys */}
-      <Card>
+      {/* Connections — linked institution health, then the API keys behind them */}
+      <Card id="connections">
         <CardHeader>
           <CardTitle>Connections</CardTitle>
           <KeyRound size={15} className="text-[var(--brass)]" />
         </CardHeader>
+        {connections.total > 0 && (
+          <div className="mb-6 space-y-3">
+            <p className="text-sm text-[var(--muted)]">
+              {connections.liveCount} of {connections.total}{" "}
+              {connections.total === 1 ? "institution is" : "institutions are"} reporting normally.
+            </p>
+            <ConnectionList summary={connections} />
+          </div>
+        )}
         <p className="mb-6 max-w-md text-sm text-[var(--muted)]">
           Your Plaid keys power bank connections; the optional Finnhub key adds live stock prices.
           Keys are encrypted on this device. Leave a field blank to keep the saved value.{" "}

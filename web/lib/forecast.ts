@@ -40,6 +40,7 @@ type StreamRow = {
   direction: "inflow" | "outflow";
   description: string | null;
   merchantName: string | null;
+  userLabel: string | null;
   category: string | null;
   frequency: string | null;
   averageAmount: number | null;
@@ -58,7 +59,8 @@ type Occurrence = { date: string; direction: "inflow" | "outflow"; amount: numbe
 function activeStreams(): StreamRow[] {
   return db.all<StreamRow>(sql`
     SELECT r.id AS id, r.direction AS direction, r.description AS description,
-           r.merchant_name AS merchantName, r.category AS category, r.frequency AS frequency,
+           r.merchant_name AS merchantName, r.user_label AS userLabel,
+           r.category AS category, r.frequency AS frequency,
            r.average_amount AS averageAmount, r.last_amount AS lastAmount,
            r.last_date AS lastDate, r.predicted_next_date AS predictedNextDate,
            r.iso_currency_code AS currency, a.name AS accountName, r.status AS status
@@ -291,6 +293,7 @@ export function getRemainingRecurring(month: string = currentMonth()): {
       direction: o.stream.direction,
       description: o.stream.description,
       merchantName: o.stream.merchantName,
+      userLabel: o.stream.userLabel,
       category: o.stream.category,
       frequency: o.stream.frequency,
       averageAmount: o.stream.averageAmount,

@@ -20,7 +20,11 @@ import { sql } from "drizzle-orm";
  * a plain sync function callable straight from server components.
  */
 
-export type AlertKind = "spike" | "duplicate" | "creep" | "trial";
+// "health" is not a spending pattern — it's a fact about the ledger itself
+// (a dead connection, a stale sync, an unreviewed backlog). It shares this type
+// so the alerts panel renders it with no special-casing; the detectors live in
+// lib/data-health.ts.
+export type AlertKind = "spike" | "duplicate" | "creep" | "trial" | "health";
 export type AlertSeverity = "high" | "medium" | "low";
 
 export type Alert = {
@@ -32,6 +36,12 @@ export type Alert = {
   vendor?: string;
   amount?: number;
   date?: string;
+  /**
+   * Where this alert is resolved. An insight you can't act on from the insight
+   * is a notification, not an insight — and the destination differs per alert
+   * (a dead link is fixed in Settings, a review backlog is not).
+   */
+  action?: { href: string; label: string };
 };
 
 // Ignore spikes/duplicates below this dollar floor — small amounts aren't worth

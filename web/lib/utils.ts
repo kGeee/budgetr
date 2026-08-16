@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { isHidden } from "./scale";
 import { convertToDisplay, getDisplayCurrency } from "./currency";
+import { parseDescriptor } from "./display-names";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -78,9 +79,18 @@ export function formatCompactCurrency(amount: number, currency = "USD"): string 
  * `merchantName`; otherwise strips the noise from the raw descriptor
  * (reference numbers, store codes, asterisks, location cruft) so
  * "SQ *BLUE BOTTLE 00123 OAKLAND CA" reads as "Blue Bottle Oakland Ca".
+ *
+ * Descriptors that follow a known settlement grammar — ACH `DES:` records,
+ * Zelle payments, ATM lines, bank-internal transfers — are handled by
+ * parseDescriptor first and returned as-is. The generic pass below must not run
+ * over those: it deletes standalone numbers, which is right for a store code
+ * and wrong for "Keep the Change → 6904" or "IRS Treas 310".
  */
 export function cleanTransactionName(name: string, merchantName?: string | null): string {
   if (merchantName && merchantName.trim()) return merchantName.trim();
+
+  const parsed = parseDescriptor(name);
+  if (parsed.matched) return parsed.name;
 
   let s = ` ${name} `
     .replace(/\*+/g, " ") // asterisks / SQ* POS prefixes

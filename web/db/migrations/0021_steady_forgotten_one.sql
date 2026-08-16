@@ -1,0 +1,1 @@
+ALTER TABLE `recurring_streams` ADD `user_label` text;
