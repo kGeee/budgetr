@@ -27,6 +27,7 @@ import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
 import { Sheet } from "@/ui/sheet";
+import { capturePhoto } from "@/ui/capture";
 import { initialsOf, personColor } from "@/app/shared";
 
 const emptyReceipt = (): ParsedReceipt => ({
@@ -41,7 +42,10 @@ const emptyReceipt = (): ParsedReceipt => ({
 });
 
 export function SplitSheet({ txnId, onClose }: { txnId: string | null; onClose: () => void }) {
-  const { summary, splitBill } = useCompanion();
+  const { summary, splitBill, scanReceipt } = useCompanion();
+  /** The scan we're waiting on, if any. Answered through `summary.scans`. */
+  const [scanOpId, setScanOpId] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ParsedReceipt>(emptyReceipt);
   const [assignments, setAssignments] = useState<Record<string, ItemAssignment>>({});
   const [selected, setSelected] = useState<string[]>([]);
@@ -76,6 +80,47 @@ export function SplitSheet({ txnId, onClose }: { txnId: string | null; onClose: 
       }),
     [receipt, assignments, participants],
   );
+
+  /**
+   * The Mac's answer, when it arrives. There is no callback here — the phone
+   * polls, so a scan is a round trip measured in seconds and the UI waits for it
+   * rather than pretending to be instant.
+   */
+  const answer = useMemo(
+    () => (scanOpId ? (summary?.scans ?? []).find((sc) => sc.opId === scanOpId) ?? null : null),
+    [summary, scanOpId],
+  );
+
+  React.useEffect(() => {
+    if (!answer) return;
+    if (answer.error) {
+      setScanError(answer.error);
+      setScanOpId(null);
+      return;
+    }
+    if (!answer.receiptJson) return;
+    try {
+      const parsed = JSON.parse(answer.receiptJson) as ParsedReceipt;
+      setReceipt(parsed);
+      setAssignments(assignAllEvenly(parsed, participants.map((p) => p.id)));
+      setScanError(null);
+    } catch {
+      setScanError("That scan came back unreadable.");
+    }
+    setScanOpId(null);
+    // participants is derived from `selected`, which the user isn't changing
+    // while a scan is in flight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answer]);
+
+  async function shoot() {
+    setScanError(null);
+    const photo = await capturePhoto();
+    if (!photo) return;
+    if (!txn) return;
+    haptics.tap();
+    setScanOpId(scanReceipt({ txnId: txn.id, imageBase64: photo }));
+  }
 
   const gap = chargeGap(receipt, charged);
   const total = receiptTotal(receipt);
@@ -180,6 +225,22 @@ export function SplitSheet({ txnId, onClose }: { txnId: string | null; onClose: 
                   );
                 })}
               </View>
+
+              {receipt.items.length === 0 && (
+                <View style={s.scanBox}>
+                  <Pressable onPress={() => void shoot()} disabled={scanOpId !== null} style={s.scanBtn}>
+                    <Text style={s.scanBtnText}>
+                      {scanOpId ? "Reading on your Mac…" : "📷  Scan the receipt"}
+                    </Text>
+                  </Pressable>
+                  <Text style={s.scanNote}>
+                    {scanOpId
+                      ? "Your Mac is reading it. If it's asleep this finishes when it wakes."
+                      : "Sent to your Mac to read — encrypted end to end, the relay can't see it."}
+                  </Text>
+                </View>
+              )}
+              {scanError && <Text style={s.warn}>{scanError}</Text>}
 
               <ScrollView style={{ maxHeight: 220 }}>
                 {receipt.items.map((item) => {
@@ -401,6 +462,17 @@ const s = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 4,
   },
+  scanBox: { paddingVertical: 8 },
+  scanBtn: {
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.brassDim,
+    backgroundColor: "rgba(203,176,124,0.12)",
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  scanBtnText: { color: T.brass, fontSize: 13.5, fontFamily: F.sansMedium },
+  scanNote: { color: T.faint, fontSize: 10.5, lineHeight: 15, fontFamily: F.sans, marginTop: 7, textAlign: "center" },
   lineActions: { flexDirection: "row", alignItems: "center", gap: 16, paddingVertical: 10 },
   addLineText: { color: T.brass, fontSize: 12.5, fontFamily: F.sans },
   bulkText: { color: T.muted, fontSize: 12.5, fontFamily: F.sans },

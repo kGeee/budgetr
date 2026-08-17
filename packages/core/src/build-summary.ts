@@ -9,6 +9,7 @@ import {
   MAX_APPLIED_OP_IDS,
   MAX_CATEGORIES,
   MAX_PEOPLE,
+  MAX_SCAN_RESULTS,
   MAX_SETTLE_SUGGESTIONS,
   MAX_SHARED,
   MAX_CURVE_POINTS,
@@ -88,6 +89,13 @@ export interface DesktopReadModel {
     ts: number;
     cents: number;
     detail: string;
+  }>;
+  scans?: Array<{
+    opId: string;
+    txnId: string;
+    ts: number;
+    receiptJson?: string | null;
+    error?: string | null;
   }>;
   // Optional investments detail. Strategy inputs may carry extra fields
   // (maxProfit, payoffLegs, …) — buildSummary strips to the contract shape.
@@ -303,6 +311,20 @@ export function buildSummary(model: DesktopReadModel): Summary {
               ts: seconds(sg.ts, `suggestion ${sg.txnId} ts`),
               cents: cents(sg.cents, `suggestion ${sg.txnId}`),
               detail: sg.detail,
+            })),
+        }
+      : {}),
+    ...(model.scans
+      ? {
+          scans: [...model.scans]
+            .sort((a, b) => b.ts - a.ts || (a.opId < b.opId ? -1 : 1))
+            .slice(0, MAX_SCAN_RESULTS)
+            .map((sc) => ({
+              opId: sc.opId,
+              txnId: sc.txnId,
+              ts: seconds(sc.ts, `scan ${sc.opId} ts`),
+              ...(sc.receiptJson ? { receiptJson: sc.receiptJson } : {}),
+              ...(sc.error ? { error: sc.error } : {}),
             })),
         }
       : {}),

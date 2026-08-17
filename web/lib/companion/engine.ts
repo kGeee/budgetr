@@ -13,6 +13,7 @@ import { assertValidOutbox, buildSummary, type OutboxBatch } from "@budgetr/core
 import { fromBase64, open, seal, type Envelope } from "@budgetr/sync-crypto";
 import { buildReadModel } from "./read-model";
 import { applyOps } from "./ops";
+import { processScans } from "./scans";
 import {
   getLastPushedHash,
   getLastSeq,
@@ -63,6 +64,10 @@ export async function syncNow(): Promise<SyncResult> {
         const batch = open<OutboxBatch>(env, key);
         assertValidOutbox(batch);
         mutated += applyOps(batch.ops).mutated;
+        // Receipt photos are read after the write transaction closes —
+        // recognition shells out to a helper binary, which cannot happen inside
+        // a SQLite transaction. Its answers ride out on the summary below.
+        mutated += (await processScans(batch.ops)).scanned;
         result.batchesApplied += 1;
       } catch (err) {
         // Tampered or malformed batch: discard it (spec §5.2) but keep the

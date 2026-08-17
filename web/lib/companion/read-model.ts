@@ -28,6 +28,7 @@ import {
   sectorKeyFor,
 } from "@/lib/queries";
 import { getPeopleBalances, getSharedExpenses, suggestSettlements } from "@/lib/sharing";
+import { getScanResults } from "./scans";
 import { detectAnomalies, type Alert } from "@/lib/anomalies";
 import { classifyOptionLegs, parseOccSymbol, type OptionLegInput, type ParsedOption } from "@/lib/options";
 import { payoffCurve } from "@/lib/payoff";
@@ -184,6 +185,8 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
       // without parsing the blob it deliberately doesn't read.
       itemized: Boolean(e.itemsJson),
     })),
+    // Answers to receipt photos the phone sent up for reading.
+    scans: getScanResults(),
     settleSuggestions: suggestSettlements(10).map((sg) => ({
       txnId: sg.txnId,
       personId: sg.personId,

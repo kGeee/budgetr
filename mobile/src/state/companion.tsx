@@ -42,6 +42,11 @@ interface CompanionState {
   }): void;
   /** "They paid me back." */
   recordSettlement(input: { personId: string; cents: number; txnId?: string | null }): void;
+  /**
+   * Send a receipt photo to the Mac to read. Returns the op id so the caller can
+   * watch `summary.scans` for its answer — this is a round trip, not a call.
+   */
+  scanReceipt(input: { txnId: string; imageBase64: string }): string;
   unpair(): Promise<void>;
 }
 
@@ -280,6 +285,21 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [enqueue],
   );
 
+  const scanReceipt = useCallback<CompanionState["scanReceipt"]>(
+    (input) => {
+      const id = uuid4();
+      enqueue({
+        id,
+        ts: Math.floor(Date.now() / 1000),
+        kind: "scanReceipt",
+        txnId: input.txnId,
+        imageBase64: input.imageBase64,
+      });
+      return id;
+    },
+    [enqueue],
+  );
+
   const recordSettlement = useCallback<CompanionState["recordSettlement"]>(
     (input) =>
       enqueue({
@@ -311,7 +331,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <Ctx.Provider
-      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, manualSyncAt, widget, demo, pair, enterDemo, refresh, recategorize, dismissAlert, splitBill, recordSettlement, unpair }}
+      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, manualSyncAt, widget, demo, pair, enterDemo, refresh, recategorize, dismissAlert, splitBill, recordSettlement, scanReceipt, unpair }}
     >
       {children}
     </Ctx.Provider>

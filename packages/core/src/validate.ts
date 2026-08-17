@@ -246,6 +246,19 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
     });
   }
 
+  if (s.scans !== undefined) {
+    reqArr(s.scans, '$.scans');
+    s.scans.forEach((sc, i) => {
+      const path = `$.scans[${i}]`;
+      req(isRecord(sc), path, 'must be an object');
+      reqStr(sc.opId, `${path}.opId`);
+      reqStr(sc.txnId, `${path}.txnId`);
+      reqInt(sc.ts, `${path}.ts`);
+      if (sc.receiptJson != null) reqStr(sc.receiptJson, `${path}.receiptJson`);
+      if (sc.error != null) reqStr(sc.error, `${path}.error`);
+    });
+  }
+
   if (s.investments !== undefined) {
     const inv = s.investments;
     req(isRecord(inv), '$.investments', 'must be an object');

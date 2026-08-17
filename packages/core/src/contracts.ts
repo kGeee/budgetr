@@ -53,6 +53,24 @@ export interface Summary {
   // Repayments the desktop believes it has spotted (a Venmo inflow matching an
   // outstanding share), for one-tap confirmation on the phone.
   settleSuggestions?: SettleSuggestionSummary[]; // ≤ MAX_SETTLE_SUGGESTIONS
+  /**
+   * Answers to `scanReceipt` ops, keyed by the op id that asked. The phone
+   * cannot read a receipt itself, so this is how the Mac replies — on the next
+   * poll, which is why the phone's scan UI is built around waiting rather than
+   * pretending to be instant.
+   */
+  scans?: ScanResultSummary[]; // ≤ MAX_SCAN_RESULTS
+}
+
+export interface ScanResultSummary {
+  /** The ScanReceiptOp.id this answers. */
+  opId: string;
+  txnId: string;
+  ts: number;
+  /** Parsed receipt as JSON (a ParsedReceipt), when the read succeeded. */
+  receiptJson?: string | null;
+  /** Why it failed, in the user's terms, when it didn't. */
+  error?: string | null;
 }
 
 export interface PersonSummary {
@@ -299,6 +317,7 @@ export const MAX_CATEGORIES = 96;
 export const MAX_PEOPLE = 32;
 export const MAX_SHARED = 40;
 export const MAX_SETTLE_SUGGESTIONS = 10;
+export const MAX_SCAN_RESULTS = 5;
 /**
  * Ceiling for a receipt photo, before base64. Every other op is a small JSON
  * object; this one carries an image, and an unbounded upload through a shared

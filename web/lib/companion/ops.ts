@@ -25,7 +25,7 @@ import {
   transactionSplits,
   transactions,
 } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Op } from "@budgetr/core";
 import { REIMBURSABLE_CATEGORY_ID, seedReimbursableCategory } from "@/lib/seed-categories-data";
 import { appendAppliedOpIds, getAppliedOpIds } from "./store";
