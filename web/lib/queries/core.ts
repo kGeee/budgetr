@@ -1598,6 +1598,12 @@ export function getAccounts() {
       excluded: accounts.excluded,
       institutionName: items.institutionName,
       itemStatus: items.status,
+      // The owning connection. Carried so the Accounts page can group by the
+      // real link rather than by display name (two items can share one name)
+      // and offer a per-connection disconnect. `itemSource` distinguishes a
+      // Plaid link from the 'manual' container, which has nothing to revoke.
+      itemId: accounts.itemId,
+      itemSource: items.source,
     })
     .from(accounts)
     .leftJoin(items, eq(accounts.itemId, items.id))

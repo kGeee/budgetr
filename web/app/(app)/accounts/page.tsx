@@ -4,6 +4,7 @@ import { PageHead } from "@/components/page-head";
 import { AccountVisibilityToggle } from "@/components/account-visibility-toggle";
 import { ConnectWalletButton, WalletsCard } from "@/components/connect-wallet-dialog";
 import { ConnectionAlert, ConnectionChip } from "@/components/connection-status";
+import { DisconnectInstitution } from "@/components/disconnect-institution";
 import { getConnectionSummary, getHealthByInstitution } from "@/lib/connection-health";
 import { getAccounts, getWallets } from "@/lib/queries";
 import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
@@ -25,11 +26,15 @@ export default function AccountsPage() {
   const connections = getConnectionSummary();
   const healthByInstitution = getHealthByInstitution();
 
-  const byInstitution = new Map<string, typeof accounts>();
+  // Grouped by the owning connection, not by display name: two links can carry
+  // the same institution name, and disconnect acts on one item — so the card and
+  // the button have to agree on which link they mean.
+  const byItem = new Map<string, { label: string; source: string | null; accts: typeof accounts }>();
   for (const a of accounts) {
-    const key = a.institutionName ?? "Other";
-    if (!byInstitution.has(key)) byInstitution.set(key, []);
-    byInstitution.get(key)!.push(a);
+    const key = a.itemId;
+    const group = byItem.get(key);
+    if (group) group.accts.push(a);
+    else byItem.set(key, { label: a.institutionName ?? "Other", source: a.itemSource, accts: [a] });
   }
 
   // Mixed source currencies — convert each account into the display currency
@@ -82,7 +87,7 @@ export default function AccountsPage() {
       <WalletsCard wallets={wallets} />
 
       <div className="space-y-5">
-        {[...byInstitution.entries()].map(([institution, accts]) => {
+        {[...byItem.entries()].map(([itemId, { label: institution, source, accts }]) => {
           const subtotal = accts
             .filter((a) => !a.excluded)
             .reduce(
@@ -91,7 +96,7 @@ export default function AccountsPage() {
             );
           const health = healthByInstitution.get(institution);
           return (
-            <Card key={institution} className="p-0">
+            <Card key={itemId} className="p-0">
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-6 py-4">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] font-display text-sm text-[var(--brass)]">
@@ -100,9 +105,21 @@ export default function AccountsPage() {
                   <span className="truncate font-medium">{institution}</span>
                   {health && <ConnectionChip health={health} />}
                 </div>
-                <span className="mono text-sm text-[var(--muted)]">
-                  {formatCurrency(subtotal, displayCurrency)}
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="mono text-sm text-[var(--muted)]">
+                    {formatCurrency(subtotal, displayCurrency)}
+                  </span>
+                  {/* Read-only demo: nothing to disconnect. The 'manual'
+                      container isn't a link — its accounts are removed one by
+                      one from where they were created. */}
+                  {!demoEnabled() && source === "plaid" && (
+                    <DisconnectInstitution
+                      itemId={itemId}
+                      institution={institution}
+                      accountCount={accts.length}
+                    />
+                  )}
+                </div>
               </div>
               <ul>
                 {accts.map((a) => (
