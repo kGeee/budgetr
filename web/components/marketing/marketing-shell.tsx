@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { SITE, hasCheckout, primaryCtaHref } from "@/lib/site";
 
 /**
  * Public marketing chrome — a translucent top nav + footer wrapping every
- * marketing page (and the landing at /). On-brand with the app: the ₿ mark, the
+ * marketing page (and the landing at /). On-brand with the app: the `b.` mark, the
  * Fraunces wordmark, jade primary CTA. No sidebar, no DB — fully public/static.
  */
 export function MarketingShell({ children }: { children: React.ReactNode }) {
@@ -13,9 +14,7 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
       <header className="material sticky top-0 z-30 border-b border-line">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-5 py-3.5 sm:px-8">
           <Link href="/" className="flex items-center gap-2.5">
-            <span className="grid h-8 w-8 place-items-center rounded-lg border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-[var(--brass)]">
-              ₿
-            </span>
+            <BrandMark size={32} />
             <span className="font-display text-xl tracking-tight">budgetr</span>
           </Link>
           <nav className="ml-auto hidden items-center gap-6 text-sm text-[var(--muted)] sm:flex">
@@ -38,9 +37,7 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-8 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div className="flex items-center gap-2.5">
-            <span className="grid h-7 w-7 place-items-center rounded-lg border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-sm text-[var(--brass)]">
-              ₿
-            </span>
+            <BrandMark size={28} />
             <span>Read-only · data stays on your machine.</span>
           </div>
           <div className="flex flex-wrap items-center gap-5">
