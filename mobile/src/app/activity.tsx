@@ -14,6 +14,7 @@ import { F, T } from "@/theme";
 import { useCompanion } from "@/state/companion";
 import { Bars, Card, Eyebrow, Segmented, SyncBanner } from "@/ui/bits";
 import { Screen } from "@/ui/screen";
+import { SplitSheet } from "@/ui/split-sheet";
 import { useEntering } from "@/ui/motion";
 import { Sheet } from "@/ui/sheet";
 
@@ -63,6 +64,7 @@ function TxnSheet({
   initialPicking,
   onClose,
   onRecategorize,
+  onSplit,
 }: {
   txn: TxnSummary | null;
   categories: CategoryInfo[];
@@ -71,6 +73,7 @@ function TxnSheet({
   initialPicking: boolean;
   onClose: () => void;
   onRecategorize: (txnId: string, toCategory: string) => void;
+  onSplit?: (txnId: string) => void;
 }) {
   const [picking, setPicking] = useState(false);
   const income = (txn?.cents ?? 0) > 0;
@@ -114,6 +117,21 @@ function TxnSheet({
               <Text style={tx.rowLabel}>Category</Text>
               <Text style={[tx.rowValue, { color: T.brass }]}>{catName(catIndex, txn.category)} ›</Text>
             </Pressable>
+            {/* Splitting lives here rather than on the Shared tab, because this
+                is where the bill is. Only outflows: there is nothing to split
+                about money arriving. */}
+            {!income && onSplit && (
+              <Pressable
+                style={tx.row}
+                onPress={() => {
+                  haptics.tap();
+                  onSplit(txn.id);
+                }}
+              >
+                <Text style={tx.rowLabel}>Split</Text>
+                <Text style={[tx.rowValue, { color: T.brass }]}>Split with people ›</Text>
+              </Pressable>
+            )}
           </View>
         </>
       )}
@@ -184,6 +202,7 @@ export default function Activity() {
   const catIndex = useMemo(() => categoryIndex(summary), [summary]);
 
   const [filter, setFilter] = useState<Filter>("all");
+  const [splitting, setSplitting] = useState<string | null>(null);
 
   const all = useMemo(() => summary?.recent ?? [], [summary]);
 
@@ -318,7 +337,13 @@ export default function Activity() {
         initialPicking={startPicking}
         onClose={() => setSelected(null)}
         onRecategorize={recategorize}
+        onSplit={(id) => {
+          setSelected(null);
+          setSplitting(id);
+        }}
       />
+
+      <SplitSheet txnId={splitting} onClose={() => setSplitting(null)} />
     </>
   );
 }

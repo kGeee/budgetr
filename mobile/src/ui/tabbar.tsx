@@ -10,7 +10,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import Animated, { FadeIn, LinearTransition, useReducedMotion } from "react-native-reanimated";
-import { ArrowLeftRight, LayoutDashboard, LineChart, Wallet, type LucideIcon } from "lucide-react-native";
+import { ArrowLeftRight, LayoutDashboard, LineChart, Users, Wallet, type LucideIcon } from "lucide-react-native";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import * as haptics from "@/haptics";
 import { F, T } from "@/theme";
@@ -19,6 +19,7 @@ const ICONS: Record<string, LucideIcon> = {
   index: LayoutDashboard,
   budgets: Wallet,
   activity: ArrowLeftRight,
+  shared: Users,
   holdings: LineChart,
 };
 
