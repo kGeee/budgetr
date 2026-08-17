@@ -31,7 +31,41 @@ export type OcrResult =
   | { ok: true; lines: OcrLine[] }
   | { ok: false; reason: "unsupported" | "failed"; message: string };
 
-/** Where the compiled helper is cached between runs. */
+/**
+ * Where the helper lives, in preference order.
+ *
+ * A packaged build ships the binary already compiled (see
+ * desktop/scripts/build-receipt-ocr.sh) because compiling Swift needs the Xcode
+ * command line tools, which a customer's Mac usually does not have. Shipping the
+ * .swift source alone is why scanning reported itself unavailable on the DMG
+ * while working perfectly in development.
+ *
+ * `process.resourcesPath` is Electron's app-bundle Resources dir; the
+ * `desktop/bin` entries cover `next start` and dev, where cwd is the web root.
+ */
+function candidateBinaries(): string[] {
+  const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  return [
+    resources ? path.join(resources, "receipt-ocr") : null,
+    resources ? path.join(resources, "bin", "receipt-ocr") : null,
+    path.join(process.cwd(), "desktop", "bin", "receipt-ocr"),
+    path.join(process.cwd(), "web", "desktop", "bin", "receipt-ocr"),
+  ].filter((p): p is string => p != null);
+}
+
+/** A prebuilt helper, if one shipped with this install. */
+function prebuiltBinary(): string | null {
+  for (const candidate of candidateBinaries()) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      /* unreadable path — try the next */
+    }
+  }
+  return null;
+}
+
+/** Where a locally-compiled helper is cached between runs (development only). */
 function binaryPath(): string {
   return path.join(os.tmpdir(), "budgetr-receipt-ocr");
 }
@@ -46,16 +80,21 @@ export function ocrAvailable(): boolean {
   // never try to shell out there.
   if (process.env.DEMO_DB) return false;
   if (process.platform !== "darwin") return false;
-  return fs.existsSync(sourcePath());
+  // Either a shipped binary, or the source plus a toolchain to build it.
+  return prebuiltBinary() != null || fs.existsSync(sourcePath());
 }
 
 /**
- * Compile the helper if we haven't already, and return its path.
+ * Resolve the helper, compiling it only if this install shipped source without a
+ * binary — which is the development case.
  *
- * Cached by a hash of the source so editing the Swift file rebuilds it, but a
- * normal run pays nothing. Compilation is a few seconds once per machine.
+ * The dev build is cached by a hash of the source so editing the Swift rebuilds
+ * it, while a normal run pays nothing.
  */
 async function ensureBinary(): Promise<string> {
+  const shipped = prebuiltBinary();
+  if (shipped) return shipped;
+
   const src = sourcePath();
   const source = await fs.promises.readFile(src);
   const stamp = createHash("sha256").update(source).digest("hex").slice(0, 12);
@@ -94,8 +133,8 @@ export async function recognizeReceipt(imagePath: string): Promise<OcrResult> {
       ok: false,
       reason: "unsupported",
       message:
-        "Couldn't build the on-device text recognizer — install Xcode command line tools " +
-        `(xcode-select --install) or enter the items by hand. (${errText(err)})`,
+        "Couldn't prepare the on-device text recognizer. Enter the items by hand, or " +
+        `install the Xcode command line tools (xcode-select --install). (${errText(err)})`,
     };
   }
 

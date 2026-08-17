@@ -12,6 +12,7 @@ import {
   receiptTotal,
   reconcileToCharge,
 } from "@/lib/receipt/allocate";
+import { acceptsMoneyDraft, formatMoneyDraft, parseMoneyDraft } from "@/lib/receipt/money-input";
 import { ME, type ItemAssignment, type ParsedReceipt, type ReceiptItem } from "@/lib/receipt/types";
 
 /**
@@ -116,18 +117,24 @@ export function ReceiptSplit({
               : "Receipt scanning needs macOS on-device text recognition. Add the lines by hand instead."}
           </p>
 
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) pick(f);
-              e.target.value = "";
-            }}
-          />
+          {/* Inline display:none rather than a utility class — a native file
+              input rendering its own "No file chosen" label in the middle of the
+              empty state is exactly what a losing cascade looks like, and this
+              cannot lose. Not rendered at all when there is nothing to scan. */}
+          {scanAvailable && (
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) pick(f);
+                e.target.value = "";
+              }}
+            />
+          )}
 
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             {scanAvailable && (
@@ -469,14 +476,11 @@ function ReceiptEditor({
                       ×{item.quantity}
                     </span>
                   )}
-                  <input
-                    value={item.total === 0 ? "" : String(item.total)}
-                    inputMode="decimal"
-                    placeholder="0.00"
+                  <MoneyInput
+                    value={item.total === 0 ? null : item.total}
+                    onChange={(v) => editItem(item.id, { total: v ?? 0 })}
                     disabled={disabled}
-                    aria-label={`Price of ${item.label || "line"}`}
-                    onChange={(e) => editItem(item.id, { total: Number(e.target.value) || 0 })}
-                    className="mono w-[5.5rem] shrink-0 rounded-md border border-line px-2 py-1 text-right text-sm outline-none focus:border-[var(--brass-dim)]"
+                    label={`Price of ${item.label || "line"}`}
                   />
                 </div>
 
@@ -769,18 +773,7 @@ function MoneyRow({
         {hint && <span className="mono text-[11px] text-[var(--faint)]">{hint}</span>}
         <span className="ml-auto flex items-center gap-1">
           <span className="text-xs text-[var(--faint)]">$</span>
-          <input
-            value={value == null ? "" : String(value)}
-            inputMode="decimal"
-            placeholder="0.00"
-            disabled={disabled}
-            aria-label={label}
-            onChange={(e) => {
-              const raw = e.target.value.trim();
-              onChange(raw === "" ? null : Number(raw) || 0);
-            }}
-            className="mono w-[5.5rem] rounded-md border border-line px-2 py-1 text-right text-sm outline-none focus:border-[var(--brass-dim)]"
-          />
+          <MoneyInput value={value} onChange={onChange} disabled={disabled} label={label} />
         </span>
       </div>
 
@@ -801,5 +794,47 @@ function MoneyRow({
         </div>
       )}
     </li>
+  );
+}
+
+
+/**
+ * A money field you can actually type a decimal into.
+ *
+ * Holds what was typed, not what it parsed to. Storing `Number(text)` and
+ * rendering `String(value)` looks correct until someone types "6." — that stores
+ * 6, re-renders "6", and swallows the point, so the field silently refuses cents.
+ * The draft is released on blur so a value set from elsewhere (a scan, a tip
+ * preset) shows up cleanly.
+ */
+function MoneyInput({
+  value,
+  onChange,
+  disabled,
+  label,
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+  disabled?: boolean;
+  label: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  return (
+    <input
+      value={draft ?? formatMoneyDraft(value)}
+      inputMode="decimal"
+      placeholder="0.00"
+      disabled={disabled}
+      aria-label={label}
+      onChange={(e) => {
+        const raw = e.target.value;
+        if (!acceptsMoneyDraft(raw)) return;
+        setDraft(raw);
+        onChange(parseMoneyDraft(raw));
+      }}
+      onBlur={() => setDraft(null)}
+      className="mono w-[5.5rem] shrink-0 rounded-md border border-line px-2 py-1 text-right text-sm outline-none focus:border-[var(--brass-dim)]"
+    />
   );
 }
