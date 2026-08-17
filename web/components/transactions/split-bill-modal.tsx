@@ -216,9 +216,17 @@ function SplitModal({
       .map((p) => ({ personId: p.participantId, value: p.total }));
   }, [mode, itemized, participants]);
 
+  /**
+   * What the split is computed over. For an itemized split that's the receipt,
+   * not the transaction — when a tip is still settling the bank is simply behind
+   * the paper, and people owe what the paper says.
+   */
+  const basis = mode === "items" && receipt ? receiptTotal(receipt) : Math.abs(total);
+  const basisSigned = total < 0 ? -basis : basis;
+
   const preview = useMemo(
-    () => computeSplit(total, effectiveMode, effectiveParticipants),
-    [total, effectiveMode, effectiveParticipants],
+    () => computeSplit(basisSigned, effectiveMode, effectiveParticipants),
+    [basisSigned, effectiveMode, effectiveParticipants],
   );
 
   /**
@@ -240,12 +248,19 @@ function SplitModal({
       const n = itemized.unassignedItemIds.length;
       return `${n} ${n === 1 ? "line still needs" : "lines still need"} someone on it.`;
     }
-    const gap = Math.abs(receiptTotal(receipt) - Math.abs(total));
-    if (gap >= 0.01) {
-      return `Items, tax and tip come to ${fmt(receiptTotal(receipt), currency)} — ${fmt(gap, currency)} off the ${fmt(Math.abs(total), currency)} charged. Adjust tip or a line.`;
-    }
     return null;
-  }, [mode, receipt, itemized, total, currency]);
+  }, [mode, receipt, itemized]);
+
+  /**
+   * Not a blocker — a note. A receipt that runs ahead of the charge is the
+   * ordinary pending-tip case, and the split should still go through.
+   */
+  const pendingNote: string | null = useMemo(() => {
+    if (mode !== "items" || !receipt) return null;
+    const diff = Math.round((receiptTotal(receipt) - Math.abs(total)) * 100) / 100;
+    if (diff <= 0.004) return null;
+    return `Splitting the ${fmt(receiptTotal(receipt), currency)} receipt. ${fmt(Math.abs(total), currency)} has posted so far — the remaining ${fmt(diff, currency)} is a tip still settling.`;
+  }, [mode, receipt, total, currency]);
 
   /**
    * Switching modes seeds the new inputs from an even split, so Amounts and
@@ -317,6 +332,7 @@ function SplitModal({
         // that no longer exists.
         itemsJson:
           mode === "items" && receipt ? JSON.stringify({ v: 1, receipt, assignments }) : null,
+        basis: mode === "items" ? basis : null,
       });
       if (!res.ok) {
         setError(res.error ?? "Could not save the split.");
@@ -552,6 +568,12 @@ function SplitModal({
               className="w-full rounded-lg border border-line bg-[var(--ink)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--brass-dim)]"
             />
           </div>
+
+          {pendingNote && !itemsBlocker && (
+            <p className="rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_10%,transparent)] px-3 py-2 text-xs text-[var(--brass)]">
+              {pendingNote}
+            </p>
+          )}
 
           {(error || itemsBlocker || (!preview.ok && selected.length > 0)) && (
             <p className="text-xs text-[var(--coral)]">

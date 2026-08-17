@@ -97,6 +97,75 @@ describe("ReceiptSplit — the editor's controls exist", () => {
   it("flags the line nobody is on", () => {
     expect(html).toContain("line needs someone");
   });
+
+  it("renders the portions stepper when a line is opened for uneven shares", () => {
+    // The scales button is useless without the panel it toggles — and a careless
+    // edit once left exactly that, a control wired to nothing.
+    const withPortions = renderToStaticMarkup(
+      <ReceiptSplit
+        transactionId="t1"
+        currency="USD"
+        charged={66.13}
+        participants={PEOPLE}
+        scanAvailable
+        receipt={RECEIPT}
+        assignments={{ [RECEIPT.items[0].id]: { [ME]: 2, p_bea: 1 } }}
+        onReceipt={() => {}}
+        onAssignments={() => {}}
+      />,
+    );
+    // The weight shows on the initials chip even before the panel is opened.
+    expect(withPortions).toContain("×2");
+    expect(withPortions).toContain('title="Uneven portions"');
+  });
+});
+
+/**
+ * The case that showed up in real use: an $90.00 check with a $6.36 tip line,
+ * authorised at $83.64 because the tip settles a day later. The receipt is
+ * right and the bank is behind, so this must read as information, not an error.
+ */
+describe("ReceiptSplit — a tip that has not posted yet", () => {
+  const TIPPED = parseReceiptRows([
+    "RAMEN $77.00",
+    "Purchase Subtotal $77.00",
+    "Sales Tax $6.64",
+    "Tip $6.36",
+    "Total $90.00",
+  ]);
+
+  const html = renderToStaticMarkup(
+    <ReceiptSplit
+      transactionId="t1"
+      currency="USD"
+      charged={83.64}
+      participants={PEOPLE}
+      scanAvailable
+      receipt={TIPPED}
+      assignments={{ [TIPPED.items[0].id]: { [ME]: 1, p_bea: 1 } }}
+      onReceipt={() => {}}
+      onAssignments={() => {}}
+    />,
+  );
+
+  it("says the shortfall is pending rather than calling it wrong", () => {
+    expect(html).toContain("hasn’t posted yet");
+    expect(html).toContain("a tip still settling");
+  });
+
+  it("splits the receipt, not the smaller charge", () => {
+    expect(html).toContain("Splitting the $90.00 receipt");
+  });
+
+  it("offers matching the charge as a choice, not a demand", () => {
+    expect(html).toContain("Split $83.64 instead");
+  });
+
+  it("never offers to add the difference as tip in this direction", () => {
+    // "Add as tip" belongs to the opposite case — a receipt short of the charge.
+    expect(html).not.toContain("Add as tip");
+    expect(html).not.toContain("isn’t on the receipt");
+  });
 });
 
 describe("ReceiptSplit — the empty state", () => {

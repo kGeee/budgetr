@@ -152,35 +152,51 @@ export function receiptTotal(receipt: ParsedReceipt): number {
 }
 
 /**
- * Close the gap between the receipt and the amount actually charged.
+ * Reconcile a scanned receipt against the amount the card was charged.
  *
- * **Tip is usually not on the receipt.** You're handed a printed check, you write
- * a tip on the slip or tap a percentage on the terminal, and the card is charged
- * more than anything the paper ever said. A $60.00 receipt against a $66.13
- * charge isn't a bad scan — it's a 10% tip, and treating it as an error is the
- * tool being wrong about the world.
+ * The two disagree constantly, in both directions, and they mean opposite
+ * things:
  *
- * So a shortfall becomes tip by default, and the caller says so rather than
- * asking. An overshoot is different: the charge being *less* than the printed
- * lines means a discount, a voided item or a misread, and there's no honest
- * default for that — it's returned as `overshoot` for the UI to surface.
+ *  - **The receipt is short.** You were handed a $60.00 check, tapped 10% on the
+ *    terminal, and $66.13 was charged. The tip was never printed. Fold the
+ *    difference into tip — the receipt was incomplete and the charge knows more.
+ *
+ *  - **The receipt is over.** The check already shows a $6.36 tip, but only the
+ *    pre-tip $83.64 has been authorised; the tip settles a day or two later.
+ *    Here the *receipt* knows more. Your friends owe their share of the full
+ *    $90.00 — that is what will land on the statement — so the receipt is left
+ *    exactly as printed and the shortfall is reported as a pending charge.
+ *
+ * The asymmetry is the point: whichever document was written last is the one
+ * telling the truth, and for a tip that is the terminal on the way in and the
+ * paper on the way out.
  */
 export function reconcileToCharge(
   receipt: ParsedReceipt,
   charged: number,
-): { receipt: ParsedReceipt; addedTip: number; overshoot: number } {
+): {
+  receipt: ParsedReceipt;
+  /** Tip folded in to cover a receipt that came up short of the charge. */
+  addedTip: number;
+  /** How far the charge still trails the receipt — a tip yet to settle. */
+  pendingCharge: number;
+} {
   const target = Math.abs(round2(charged));
-  const current = receiptTotal(receipt);
-  const gap = round2(target - current);
+  const gap = round2(target - receiptTotal(receipt));
 
-  if (Math.abs(gap) < 0.01) return { receipt, addedTip: 0, overshoot: 0 };
-  if (gap < 0) return { receipt, addedTip: 0, overshoot: Math.abs(gap) };
+  if (Math.abs(gap) < 0.01) return { receipt, addedTip: 0, pendingCharge: 0 };
 
-  return {
-    receipt: { ...receipt, tip: round2((receipt.tip ?? 0) + gap), total: target },
-    addedTip: gap,
-    overshoot: 0,
-  };
+  if (gap > 0) {
+    return {
+      receipt: { ...receipt, tip: round2((receipt.tip ?? 0) + gap), total: target },
+      addedTip: gap,
+      pendingCharge: 0,
+    };
+  }
+
+  // Charged less than the paper says. Never edit the receipt down — the money is
+  // owed whether or not the bank has caught up.
+  return { receipt, addedTip: 0, pendingCharge: round2(-gap) };
 }
 
 /** How far the receipt is from the charge. Positive = receipt is short. */

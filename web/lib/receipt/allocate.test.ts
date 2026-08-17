@@ -199,10 +199,10 @@ describe("reconcileToCharge — the tip that was not on the receipt", () => {
   ]);
 
   it("treats a shortfall as tip added at the terminal", () => {
-    // The reported case: receipt says $60.00, card was charged $66.13.
-    const { receipt, addedTip, overshoot } = reconcileToCharge(printed, 66.13);
+    // Receipt says $60.00, card was charged $66.13 — the tip was never printed.
+    const { receipt, addedTip, pendingCharge } = reconcileToCharge(printed, 66.13);
     expect(addedTip).toBe(6.13);
-    expect(overshoot).toBe(0);
+    expect(pendingCharge).toBe(0);
     expect(receipt.tip).toBe(6.13);
     expect(receiptTotal(receipt)).toBe(66.13);
   });
@@ -220,13 +220,27 @@ describe("reconcileToCharge — the tip that was not on the receipt", () => {
     expect(receipt).toBe(printed);
   });
 
-  it("refuses to invent a negative tip when the charge is lower", () => {
-    // Less charged than printed means a discount or a misread. There is no
-    // honest default, so it is reported rather than silently absorbed.
-    const { receipt, addedTip, overshoot } = reconcileToCharge(printed, 50);
+  it("leaves the receipt alone when the charge trails it", () => {
+    // The real case: an $90.00 check with a $6.36 tip line, authorised at
+    // $83.64 because the tip has not settled. The friends still owe the tip, so
+    // editing the receipt down to match the bank would under-collect.
+    const tipped = parseReceiptRows([
+      "RAMEN $77.00",
+      "Purchase Subtotal $77.00",
+      "Sales Tax $6.64",
+      "Tip $6.36",
+      "Total $90.00",
+    ]);
+    const { receipt, addedTip, pendingCharge } = reconcileToCharge(tipped, 83.64);
     expect(addedTip).toBe(0);
-    expect(overshoot).toBe(10);
-    // The receipt is handed back untouched — this one printed a $0 tip line.
+    expect(pendingCharge).toBe(6.36);
+    expect(receipt).toBe(tipped);
+    expect(receiptTotal(receipt)).toBe(90);
+  });
+
+  it("reports a pending charge even when there is no tip line to blame", () => {
+    const { receipt, pendingCharge } = reconcileToCharge(printed, 50);
+    expect(pendingCharge).toBe(10);
     expect(receipt).toBe(printed);
   });
 
