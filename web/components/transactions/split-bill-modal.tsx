@@ -355,7 +355,12 @@ function SplitModal({
         role="dialog"
         aria-modal="true"
         aria-label="Split this bill"
-        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)]"
+        className={`max-h-[90dvh] w-full overflow-y-auto rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)] ${
+          // The itemized editor is a table in disguise — a name, who's on it, a
+          // price and four controls per row. At the dialog's usual width the
+          // name column collapses to nothing.
+          mode === "items" ? "max-w-3xl" : "max-w-lg"
+        }`}
       >
         <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">

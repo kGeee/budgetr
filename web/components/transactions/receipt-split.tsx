@@ -401,8 +401,20 @@ function ReceiptEditor({
                     : "border-line"
               }`}
             >
-              {/* The whole row is the tap target for the current brush. */}
-              <div className="flex items-center gap-2 px-3 py-2">
+              {/*
+                The row is the tap target for the brush, EXCEPT over the inputs
+                and buttons inside it — otherwise the line name stops being
+                editable, which is exactly what happened when the label itself
+                was the button.
+              */}
+              <div
+                className="flex items-center gap-2 px-3 py-2"
+                onClick={(e) => {
+                  if (disabled) return;
+                  if ((e.target as HTMLElement).closest("input,button,textarea,select")) return;
+                  toggleBrush(item.id);
+                }}
+              >
                 <button
                   type="button"
                   onClick={() => toggleBrush(item.id)}
@@ -411,10 +423,10 @@ function ReceiptEditor({
                   aria-label={`${brushOn ? "Remove" : "Add"} ${
                     activeBrush === ME ? "you" : meta.get(activeBrush)?.name ?? "person"
                   } ${brushOn ? "from" : "to"} ${item.label || "this line"}`}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded"
                 >
                   <span
-                    className="grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors"
+                    className="grid h-4 w-4 place-items-center rounded border transition-colors"
                     style={{
                       borderColor: brushOn
                         ? meta.get(activeBrush)?.color ?? "var(--brass)"
@@ -426,15 +438,21 @@ function ReceiptEditor({
                   >
                     {brushOn && <Check size={10} className="text-[var(--ink)]" />}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {item.label || <span className="text-[var(--faint)]">Untitled line</span>}
-                    {item.quantity > 1 && (
-                      <span className="mono ml-1.5 text-[11px] text-[var(--faint)]">
-                        ×{item.quantity}
-                      </span>
-                    )}
-                  </span>
                 </button>
+
+                <input
+                  value={item.label}
+                  onChange={(e) => editItem(item.id, { label: e.target.value })}
+                  placeholder="Untitled line"
+                  disabled={disabled}
+                  aria-label="Line name"
+                  className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm outline-none placeholder:text-[var(--faint)] hover:border-line focus:border-[var(--brass-dim)] focus:bg-[var(--ink)]"
+                />
+                {item.quantity > 1 && (
+                  <span className="mono shrink-0 text-[11px] text-[var(--faint)]">
+                    ×{item.quantity}
+                  </span>
+                )}
 
                 {/* Who's on this line. Each initial removes that person. */}
                 <span className="flex shrink-0 items-center -space-x-1">

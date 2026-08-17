@@ -11,6 +11,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts"],
+    // Component tests render to static markup with react-dom/server — no DOM
+    // needed, and enough to catch a control that stopped being a control (a line
+    // name that is no longer an <input>, a missing tax field). Behaviour still
+    // belongs in the pure lib/ tests.
+    include: ["lib/**/*.test.ts", "components/**/*.test.tsx"],
   },
 });
