@@ -1,8 +1,8 @@
 {
   "name": "budgetr",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
-  "description": "budgetr \u2014 personal finance, self-hosted",
+  "description": "budgetr — personal finance, self-hosted",
   "author": "budgetr",
   "main": "desktop/electron/main.js",
   "scripts": {
