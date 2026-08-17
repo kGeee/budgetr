@@ -7,6 +7,99 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-08-17
+
+Two pieces of work and three fixes. Bill splitting finally does the thing it was
+always supposed to do — photograph the receipt, tap who ate what — and the
+Portfolio desk stops describing your holdings and starts answering the question
+you opened it with. The receipt scanner is built entirely on-device, because
+shipping one that uploaded your receipts would have quietly retired the promise
+printed on every page of this app.
+
+### Added
+
+- **Split a bill by item, from a photograph.** A fourth mode on the bill
+  splitter: scan the receipt, and each line is listed with a tap-target for
+  whoever ate it. One gesture does the whole job — pick whose turn it is, then
+  tap down the receipt — because people claim their own food, and hunting for
+  one person's chip on every row is what a grid turns into with three people and
+  ten lines. A shared plate is just everyone at weight 1, so there's no
+  shared-vs-individual switch to explain; uneven portions ("I had two of the
+  three buns") sit behind a per-line control.
+- **Nothing is uploaded.** Recognition runs through Apple's Vision framework on
+  this machine, via a small Swift helper compiled on first use — no model, no API
+  key, no network call. Parsing is rule-based: two-column observations are
+  grouped into visual rows by vertical overlap, quantities and per-unit prices
+  are read off the line, and unpriced options are attached to the item above. A
+  bracketed price is a modifier upcharge rather than a new line, which is the
+  difference between a $77 subtotal and an $83 one. Where on-device recognition
+  isn't available the editor falls back to typing the lines in.
+- **Tax and tip follow the food.** They're never assignable, and they prorate by
+  what each person actually ate — order the $48 ramen and you carry more of the
+  tax than someone who shared the $13 plate. Every stage allocates whole cents by
+  largest remainder, so three-way splits land on the total exactly rather than a
+  penny off.
+- **The receipt outranks a charge that hasn't caught up.** A $90.00 check
+  authorised at $83.64 is a tip still settling, not a bad scan, so the split
+  follows the paper and says why. The reverse — a receipt short of the charge —
+  is a tip tapped on the terminal after printing, and folds into the tip field
+  automatically. Whichever document was written last wins.
+- **Disconnect a linked institution.** Connecting a bank was one click;
+  disconnecting one was a SQL statement, which sits badly with an app whose whole
+  argument is that the data is yours. Revokes at Plaid first — once the row is
+  gone the access token is too, and the link would live on upstream, still
+  billable — then deletes locally, and doesn't let a Plaid failure trap rows in
+  the database. Type-to-confirm, with the reversible hide toggle offered
+  alongside, since that's what most people reaching for it actually want.
+
+### Changed
+
+- **The Portfolio desk leads with how you're doing, not what you hold.** Market
+  value rises whenever you deposit, so it can't answer the question; it drops to
+  a tile. In its place: the time-weighted return against the benchmark, in
+  percentage *points*, over the longest window with data. Every figure was
+  already computed on each page load and rendered only as a buried table row.
+- **The holdings table is grouped by what a row actually is** — funds, stocks,
+  crypto, options, cash — each with a subtotal, weight and P&L. Sorting is on
+  magnitude, so a short-dominant spread worth −$1,538 stops filing below $2.27 of
+  dust; those rows now say `liability`. The sub-1% tail folds into one line with
+  its subtotal, and three `CUR:USD` balances merge into the one cash row they
+  always were.
+- **The options desk moved to the options desk.** An expiration calendar, payoff
+  cards, a Greeks table and full option chains were rendering inline for
+  positions worth 0.1% of the portfolio, while `/investments/options` already
+  showed the identical panel. What's left is a three-number summary that leads
+  with the only urgent thing — legs expiring inside a week. The Portfolio page
+  went from 1.61 MB and 1.55s to 1.01 MB and 0.22s, and stopped re-fetching a
+  7.3 MB option chain on every single render.
+- **One allocation panel instead of two that disagreed.** Asset class said cash
+  11.3%, sector said 12.5%, both labelled with the same total and nothing on the
+  page able to explain the difference. Asset class, sector and region are now
+  tabs of one card.
+- **Dividends count payers that pay.** Four of "28 payers" last paid in 2024 and
+  showed `$0.00 ×0` — history, not income. They move behind a toggle, each payer
+  carries a share bar, and the ex-dividend calendar renders only when there are
+  dates. An empty state that appears on every load is a permanent fixture, not an
+  empty state.
+- **The mark on the web is the app's own.** The logo was a `₿` glyph, which reads
+  as "Bitcoin app" and matched nothing you'd already seen — the Dock icon, the
+  DMG, the favicon and the install prompt all show the italic serif `b.`
+
+### Fixed
+
+- **The live demo was returning 500 on every dashboard route.** Migration 0021
+  added `recurring_streams.user_label`; the DDL bundled for the demo's in-memory
+  database was never regenerated, so seeding threw during the instrumentation
+  hook and took the server start down with it.
+- **Never render a computed zero as a measurement.** Before quotes arrived, day
+  change summed to a confident `+$0.00 · 0% of value has a live quote` —
+  indistinguishable from a flat market. It now says it's still pricing. The
+  no-cost-basis caveat, which silently qualifies two headline numbers, is stated
+  outright rather than left in tile fine print.
+- The Accounts page grouped by institution *name*, so two links to the same bank
+  merged into one card — and, once disconnect existed, one delete button that
+  couldn't say which connection it meant.
+
 ## [0.10.0] — 2026-08-15
 
 The release is mostly about one thing: pages that say how much they know. The
@@ -330,6 +423,8 @@ and the LEAPS desk lands as the release's one new tool.
   cold start (in `instrumentation.register()`) instead of racing parallel page
   renders, so pages no longer render blank on first load.
 
+[0.11.0]: https://github.com/kGeee/budgetr/releases/tag/v0.11.0
+[0.10.0]: https://github.com/kGeee/budgetr/releases/tag/v0.10.0
 [0.9.0]: https://github.com/kGeee/budgetr/releases/tag/v0.9.0
 [0.8.0]: https://github.com/kGeee/budgetr/releases/tag/v0.8.0
 [0.7.2]: https://github.com/kGeee/budgetr/releases/tag/v0.7.2
