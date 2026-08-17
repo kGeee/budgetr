@@ -15,8 +15,16 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
-    # Set your Apple Developer Team ID here (or in Xcode > Signing & Capabilities).
-    DEVELOPMENT_TEAM: "68YAY3V65J"  # Replace with your 10-char Team ID from developer.apple.com/account
+    # The real team — same one the Expo companion signs with (mobile/app.json),
+    # so both apps belong to one account. This was a placeholder matching no
+    # certificate on this machine, which is why the project would only build
+    # with signing switched off entirely.
+    #
+    # Automatic signing needs Xcode to be signed in (Xcode > Settings >
+    # Accounts). Until it is, build with scripts/build-mac.sh, which signs
+    # ad-hoc — enough to run locally, since the entitlements are sandbox +
+    # network only.
+    DEVELOPMENT_TEAM: "B9UFFWUAD8"
 
 targets:
   Budgetr:

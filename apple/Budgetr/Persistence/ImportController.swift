@@ -86,14 +86,19 @@ final class ImportController {
 
     private func importItems(db: OpaquePointer?) throws {
         let sql = """
-            SELECT id, access_token_enc, plaid_env, institution_id, institution_name,
+            SELECT id, access_token, plaid_env, institution_id, institution_name,
                    transactions_cursor, status, error, created_at, updated_at
             FROM items
             """
         try query(db: db, sql: sql) { stmt in
             let obj = findOrCreate(CDItem.self, id: str(stmt, 0))
             obj.id                  = str(stmt, 0)
-            obj.accessTokenEnc      = blob(stmt, 1)
+            // The web app stores the encrypted token as TEXT (an AES-GCM blob
+            // rendered to a string by lib/crypto.ts), in a column called
+            // `access_token` — not `access_token_enc`, which is what this read
+            // for and which made every items row fail. Items are the root of
+            // the cascade, so that took accounts and transactions with it.
+            obj.accessTokenEnc      = str(stmt, 1)?.data(using: .utf8)
             obj.plaidEnv            = str(stmt, 2)
             obj.institutionId       = str(stmt, 3)
             obj.institutionName     = str(stmt, 4)
