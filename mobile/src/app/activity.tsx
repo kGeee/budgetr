@@ -6,7 +6,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, { useReducedMotion, LinearTransition } from "react-native-reanimated";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
-import type { CategoryInfo, SparkPoint, TxnSummary } from "@budgetr/core";
+import { MAX_RECENT_TXNS, type CategoryInfo, type SparkPoint, type TxnSummary } from "@budgetr/core";
 import { dayLabel, money } from "@/format";
 import { CategoryIcon, catName, categoryIndex, pickerCategories } from "@/categories";
 import * as haptics from "@/haptics";
@@ -159,6 +159,15 @@ function TxnSheet({
   );
 }
 
+type Filter = "all" | "week" | "pending" | "uncategorized";
+
+const FILTERS: { label: string; value: Filter }[] = [
+  { label: "All", value: "all" },
+  { label: "This week", value: "week" },
+  { label: "Pending", value: "pending" },
+  { label: "Uncategorized", value: "uncategorized" },
+];
+
 export default function Activity() {
   const { summary, refresh, refreshing, recategorize, pendingOps } = useCompanion();
   const entering = useEntering();
@@ -174,6 +183,40 @@ export default function Activity() {
   const categories = useMemo(() => pickerCategories(summary), [summary]);
   const catIndex = useMemo(() => categoryIndex(summary), [summary]);
 
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const all = useMemo(() => summary?.recent ?? [], [summary]);
+
+  /**
+   * Filtering happens on the phone over the forty rows it already has — no
+   * contract change, and no pretence that it is searching your ledger.
+   */
+  const visible = useMemo(() => {
+    if (filter === "pending") return all.filter((t) => t.pending);
+    if (filter === "uncategorized") return all.filter((t) => !t.category || t.category === "cat_uncategorized");
+    if (filter === "week") {
+      const cutoff = Date.now() / 1000 - 7 * 86400;
+      return all.filter((t) => t.ts >= cutoff);
+    }
+    return all;
+  }, [all, filter]);
+
+  /**
+   * Grouped by day. Forty flat rows each restating their own date is the layout
+   * you write when you do not know how many rows there are; a header per day
+   * reads faster and shortens every row underneath it.
+   */
+  const days = useMemo(() => {
+    const out: { key: string; label: string; txns: TxnSummary[] }[] = [];
+    for (const t of visible) {
+      const label = dayLabel(t.ts);
+      const last = out[out.length - 1];
+      if (last && last.key === label) last.txns.push(t);
+      else out.push({ key: label, label, txns: [t] });
+    }
+    return out;
+  }, [visible]);
+
   return (
     <>
       <Screen title="Activity" refreshing={refreshing} onRefresh={() => void refresh({ manual: true })}>
@@ -181,9 +224,42 @@ export default function Activity() {
         <Animated.View entering={entering(0)}>
           <SpendChart points={summary?.spendByDay ?? []} />
         </Animated.View>
+        {/* What this list actually is. The contract caps `recent` at 40 across
+            every category, and the screen used to present that window as "your
+            activity" — with no older, no search, and no way to know. */}
+        <View style={s.capRow}>
+          <Text style={s.capText}>
+            Last {all.length} transactions{all.length >= MAX_RECENT_TXNS ? " · older ones live on your Mac" : ""}
+          </Text>
+        </View>
+
+        <View style={s.filters}>
+          {FILTERS.map((f) => {
+            const on = filter === f.value;
+            return (
+              <Pressable
+                key={f.value}
+                onPress={() => {
+                  haptics.tick();
+                  setFilter(f.value);
+                }}
+                style={[s.filterChip, on && s.filterChipOn]}
+              >
+                <Text style={[s.filterText, on && s.filterTextOn]}>{f.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <Animated.View entering={entering(1)}>
           <Card>
-            {(summary?.recent ?? []).map((t, i) => (
+            {visible.length === 0 && (
+              <Text style={s.filterEmpty}>Nothing matches that filter in the last {all.length}.</Text>
+            )}
+            {days.map((day) => (
+              <View key={day.key}>
+                <Text style={s.dayHead}>{day.label}</Text>
+                {day.txns.map((t, i) => (
               <Animated.View
                 key={t.id}
                 layout={reduced ? undefined : LinearTransition.springify().stiffness(320).damping(42)}
@@ -216,8 +292,10 @@ export default function Activity() {
                         {t.merchant}
                         {t.pending ? <Text style={s.pendingTag}>  pending</Text> : null}
                       </Text>
+                      {/* The date moved to the day header above; repeating it on
+                          every row was the cost of not having one. */}
                       <Text style={s.meta}>
-                        {dayLabel(t.ts)} · {catName(catIndex, t.category)}
+                        {catName(catIndex, t.category)}
                         {pendingTxnIds.has(t.id) ? <Text style={{ color: T.brass }}> · syncing…</Text> : null}
                       </Text>
                     </View>
@@ -225,6 +303,8 @@ export default function Activity() {
                   </Pressable>
                 </ReanimatedSwipeable>
               </Animated.View>
+                ))}
+              </View>
             ))}
           </Card>
         </Animated.View>
@@ -285,6 +365,29 @@ const tx = StyleSheet.create({
 });
 
 const s = StyleSheet.create({
+  capRow: { paddingTop: 12, paddingBottom: 2 },
+  capText: { color: T.faint, fontSize: 10, fontFamily: F.mono, letterSpacing: 0.4 },
+  filters: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingTop: 8, paddingBottom: 2 },
+  filterChip: {
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.line,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  filterChipOn: { borderColor: T.brass, backgroundColor: "rgba(203,176,124,0.16)" },
+  filterText: { color: T.muted, fontSize: 11, fontFamily: F.sans },
+  filterTextOn: { color: T.paper },
+  filterEmpty: { color: T.muted, fontSize: 12.5, fontFamily: F.sans, paddingVertical: 18, textAlign: "center" },
+  dayHead: {
+    color: T.faint,
+    fontSize: 9.5,
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
+    fontFamily: F.mono,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
   swipeZone: {
     width: 92,
     marginLeft: 6,

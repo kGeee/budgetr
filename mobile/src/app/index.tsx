@@ -364,7 +364,7 @@ function widgetLabel(w: ReturnType<typeof useCompanion>["widget"]): { text: stri
 // ── Page ─────────────────────────────────────────────────────────────
 
 export default function Spending() {
-  const { summary, refresh, refreshing } = useCompanion();
+  const { summary, refresh, refreshing, lastSyncAt } = useCompanion();
   const entering = useEntering();
   const [mode, setMode] = useState<ChartMode>("daily");
   const [openCat, setOpenCat] = useState<CategorySpend | null>(null);
@@ -385,6 +385,7 @@ export default function Spending() {
     [summary],
   );
 
+  const leftToSpend = totalLimit - totals.spentCents;
   const up = (totals.deltaPct ?? 0) > 0;
   const hasAlerts = (summary?.alerts.length ?? 0) > 0;
 
@@ -405,7 +406,16 @@ export default function Spending() {
         {/* head — title, wallet chip, settings */}
         <View style={s.head}>
           <View style={{ flex: 1 }}>
-            <Eyebrow>{`${win.label} · day ${win.dayOfMonth} of ${win.daysInMonth}`}</Eyebrow>
+            {/* The other three screens render <SyncBanner/>; this one never did
+                — and it is the screen the app opens on, where a stale figure is
+                read as today's. The date line already exists, so the sync age
+                costs no vertical space on a page that deliberately never
+                scrolls. */}
+            <Eyebrow>
+              {`${win.label} · day ${win.dayOfMonth} of ${win.daysInMonth}${
+                lastSyncAt ? ` · synced ${agoLabel(lastSyncAt)}` : ""
+              }`}
+            </Eyebrow>
             <Text style={s.title}>Spending</Text>
           </View>
           <PressableScale
@@ -442,6 +452,63 @@ export default function Spending() {
             ) : null}
             <Text style={s.heroSub}>
               {totals.deltaPct !== null ? `vs ${moneyCompact(totals.priorCents)} by this day last month` : "this month"}
+            </Text>
+          </View>
+        </Animated.View>
+
+        {/* The worst alert, stated. A dot on an icon is not a way to tell
+            someone a bank connection has been dead for seven weeks — the
+            desktop learned this; the phone had not. The rest stay in the wallet
+            sheet, which is still where you go to dismiss them. */}
+        {hasAlerts && (
+          <Animated.View entering={entering(0)} exiting={FadeOut.duration(140)}>
+            <Pressable
+              onPress={() => {
+                haptics.tap();
+                setWalletOpen(true);
+              }}
+              style={s.alertBanner}
+            >
+              <View style={s.alertDot} />
+              <Text style={s.alertText} numberOfLines={2}>
+                {summary.alerts[0]!.text}
+              </Text>
+              {summary.alerts.length > 1 && (
+                <Text style={s.alertMore}>+{summary.alerts.length - 1}</Text>
+              )}
+            </Pressable>
+          </Animated.View>
+        )}
+
+        {/* What the wallet glyph was hiding. Net worth is the number people open
+            a finance app for; it was behind an unlabelled icon. */}
+        <Animated.View entering={entering(0)} style={s.tiles}>
+          <Pressable
+            style={s.tile}
+            onPress={() => {
+              haptics.tap();
+              setWalletOpen(true);
+            }}
+          >
+            <Text style={s.tileKey}>Net worth</Text>
+            <Text style={s.tileValue} numberOfLines={1} adjustsFontSizeToFit>
+              {moneyCompact(summary.netWorth.cents)}
+            </Text>
+            <Text style={s.tileNote} numberOfLines={1}>
+              {summary.accounts.length} accounts
+            </Text>
+          </Pressable>
+          <View style={s.tile}>
+            <Text style={s.tileKey}>{leftToSpend < 0 ? "Over budget" : "Left to spend"}</Text>
+            <Text
+              style={[s.tileValue, leftToSpend < 0 && { color: T.coral }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {moneyCompact(Math.abs(leftToSpend))}
+            </Text>
+            <Text style={s.tileNote} numberOfLines={1}>
+              {totalLimit > 0 ? `of ${moneyCompact(totalLimit)}` : "no budgets set"}
             </Text>
           </View>
         </Animated.View>
@@ -572,6 +639,34 @@ const s = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: T.panel,
   },
+  alertBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.coral,
+    backgroundColor: "rgba(240,137,123,0.10)",
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  alertDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: T.coral },
+  alertText: { flex: 1, color: T.paper, fontSize: 12, lineHeight: 16, fontFamily: F.sans },
+  alertMore: { color: T.coral, fontSize: 11, fontFamily: F.monoSemiBold },
+  tiles: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  tile: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.line,
+    backgroundColor: T.panel,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+  },
+  tileKey: { color: T.muted, fontSize: 9, letterSpacing: 0.8, textTransform: "uppercase", fontFamily: F.mono },
+  tileValue: { color: T.paper, fontSize: 17, fontFamily: F.monoSemiBold, marginTop: 3 },
+  tileNote: { color: T.faint, fontSize: 9, fontFamily: F.mono, marginTop: 1 },
   hero: { paddingTop: 4, paddingBottom: 14 },
   heroValue: { color: T.paper, fontSize: 44, fontFamily: F.display, letterSpacing: -1 },
   heroMeta: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },

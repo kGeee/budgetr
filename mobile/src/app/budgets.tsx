@@ -216,6 +216,11 @@ export default function Budgets() {
           <PaceChart spendByDay={summary?.spendByDay ?? []} budgets={budgets} />
         </Animated.View>
         {budgets.length === 0 && <Text style={s.emptyText}>No budgets set — add limits on your Mac.</Text>}
+        {budgets.length > 0 && (
+          <Text style={s.monthNote}>
+            {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+          </Text>
+        )}
 
         {budgets.map((b) => {
           const pct = b.limitCents > 0 ? Math.min(1, b.spentCents / b.limitCents) : 1;
@@ -254,16 +259,26 @@ export default function Budgets() {
                 {open && (
                   <Animated.View entering={FadeIn.duration(180)} style={s.txns}>
                     {txns.length === 0 ? (
-                      <Text style={s.txnEmpty}>No recent transactions in this category.</Text>
+                      <Text style={s.txnEmpty}>No transactions on the recent tape for this category.</Text>
                     ) : (
-                      txns.map((t) => (
-                        <View key={t.id} style={s.txnRow}>
-                          <Text style={s.txnName} numberOfLines={1}>
-                            {t.merchant}
-                          </Text>
-                          <Text style={s.txnAmt}>{money(t.cents)}</Text>
-                        </View>
-                      ))
+                      <>
+                        {txns.map((t) => (
+                          <View key={t.id} style={s.txnRow}>
+                            <Text style={s.txnName} numberOfLines={1}>
+                              {t.merchant}
+                            </Text>
+                            <Text style={s.txnAmt}>{money(t.cents)}</Text>
+                          </View>
+                        ))}
+                        {/* The spent figure above comes from the desktop and covers
+                            the whole month; this list is drawn from the synced
+                            recent tape, which is capped. Implying they are the
+                            same list is how a budget looks wrong. */}
+                        <Text style={s.txnNote}>
+                          {txns.length} from the recent tape · the {money(b.spentCents)} above is the
+                          full month
+                        </Text>
+                      </>
                     )}
                   </Animated.View>
                 )}
@@ -278,6 +293,16 @@ export default function Budgets() {
 
 const s = StyleSheet.create({
   emptyText: { color: T.muted, textAlign: "center", marginTop: 60, fontSize: 14, fontFamily: F.sans },
+  monthNote: {
+    color: T.faint,
+    fontSize: 10,
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
+    fontFamily: F.mono,
+    marginTop: 14,
+    marginBottom: -2,
+  },
+  txnNote: { color: T.faint, fontSize: 10, fontFamily: F.mono, marginTop: 8 },
   head: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
   name: { color: T.paper, fontSize: 15.5, fontFamily: F.sansSemiBold, flexShrink: 1 },
