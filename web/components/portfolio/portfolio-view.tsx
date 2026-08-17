@@ -7,9 +7,7 @@ import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } f
 import { Card } from "@/components/ui/card";
 import { PayoffDiagram } from "@/components/payoff-diagram";
 import {
-  AllocationDonut,
   PIE_COLORS,
-  SectorBarChart,
   Sparkline,
   TickerPriceChart,
   type SectorSlice,
@@ -40,7 +38,7 @@ import type { DividendSummary } from "@/lib/dividends";
 import type { DividendCalendarEntry, PricePoint as YahooPricePoint } from "@/lib/yahoo";
 import type { BenchmarkKey, ComparisonRow } from "@/lib/benchmark";
 import { classifyHolding, isCashLike, KIND_LABEL, KIND_ORDER, type HoldingKind } from "@/lib/portfolio/classify";
-import { computeStanding, standingDetail, standingHeadline } from "@/lib/portfolio/standing";
+import { computeStanding, standingDetail, standingHeadline, WINDOW_LABEL } from "@/lib/portfolio/standing";
 
 const UNASSIGNED = "Unassigned";
 import {
@@ -578,7 +576,6 @@ function PortfolioInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holdings, quotes, sectorEdits, sectorColor]);
 
-  const allocationTotal = allocation.reduce((s, d) => s + d.value, 0);
   // Suggestions for the sector editor: known sectors from the DB plus any added
   // optimistically this session, deduped.
   const sectorOptions = useMemo(
@@ -876,9 +873,9 @@ function PortfolioInner({
         </div>
       </Card>
 
-      <BenchmarkComparison comparison={comparison} />
+      <BenchmarkComparison comparison={comparison} standing={standing} />
 
-      <div id="allocation" className="scroll-mt-28 space-y-7">
+      <div id="allocation" className="scroll-mt-28">
         <AssetAllocation
           rows={allocRows}
           total={total}
@@ -886,13 +883,9 @@ function PortfolioInner({
           assetClassOverrides={assetClassOverrides}
           geographyOverrides={geographyOverrides}
           knownSectors={sectorOptions}
-        />
-
-        <SectorAllocation
-          allocation={allocation}
-          total={allocationTotal}
+          sectorSlices={allocation}
           activeSector={sectorFilter}
-          onSelect={setSectorFilter}
+          onSelectSector={setSectorFilter}
         />
       </div>
 
@@ -2110,101 +2103,6 @@ function SectorEditor({
   );
 }
 
-/**
- * Allocation-by-sector panel: a labelled donut, a value-ranked bar chart, and a
- * breakdown table (value, % of portfolio, # holdings). Selecting any sector in
- * any of the three drives the shared drill-down filter on the holdings table.
- * All three recompute live from the same `allocation` (prices + sector edits).
- */
-function SectorAllocation({
-  allocation,
-  total,
-  activeSector,
-  onSelect,
-}: {
-  allocation: SectorSlice[];
-  total: number;
-  activeSector: string | null;
-  onSelect: (sector: string | null) => void;
-}) {
-  if (allocation.length === 0) return null;
-
-  return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Allocation by sector</span>
-        {activeSector && (
-          <button
-            onClick={() => onSelect(null)}
-            className="inline-flex items-center gap-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
-          >
-            <Check size={11} /> {activeSector} <X size={11} />
-          </button>
-        )}
-      </div>
-      <div className="grid gap-8 px-6 py-6 lg:grid-cols-2">
-        <AllocationDonut
-          data={allocation}
-          total={total}
-          activeSector={activeSector}
-          onSelect={onSelect}
-        />
-        <div className="min-w-0">
-          <p className="eyebrow mb-3">Ranked by value</p>
-          <SectorBarChart data={allocation} activeSector={activeSector} onSelect={onSelect} />
-        </div>
-      </div>
-      <div className="overflow-x-auto border-t border-line">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-line text-left">
-              {["Sector", "Value", "% of portfolio", "Holdings"].map((h, i) => (
-                <th
-                  key={h}
-                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {allocation.map((d) => {
-              const pct = total ? (d.value / total) * 100 : 0;
-              const active = d.sector === activeSector;
-              return (
-                <tr
-                  key={d.sector}
-                  onClick={() => onSelect(active ? null : d.sector)}
-                  className={`cursor-pointer border-b border-line/60 last:border-0 transition-colors hover:bg-[var(--panel-2)] ${
-                    active ? "bg-[var(--panel-2)]" : ""
-                  }`}
-                >
-                  <td className="px-6 py-2.5">
-                    <span className="inline-flex items-center gap-2.5">
-                      <span
-                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
-                        style={{ background: d.color }}
-                      />
-                      <span className={active ? "text-[var(--paper)]" : "text-[var(--muted)]"}>
-                        {d.sector}
-                      </span>
-                    </span>
-                  </td>
-                  <td className="mono px-6 py-2.5 text-right">{formatCurrency(d.value)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
-                    {pct.toFixed(1)}%
-                  </td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{d.count}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}
 
 /**
  * Compact out/under-performance table: one row per time window comparing the
@@ -2212,36 +2110,67 @@ function SectorAllocation({
  * portfolio outperformed and coral when it lagged. Hidden until there's at
  * least one window's worth of comparison data.
  */
-function BenchmarkComparison({ comparison }: { comparison: ComparisonRow[] }) {
+function BenchmarkComparison({
+  comparison,
+  standing,
+}: {
+  comparison: ComparisonRow[];
+  standing: ReturnType<typeof computeStanding>;
+}) {
   if (comparison.length === 0) return null;
 
   const pct = (v: number | null) =>
     v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}%`;
 
-  const WINDOW_LABEL: Record<ComparisonRow["window"], string> = {
-    "1M": "1 month",
-    "3M": "3 months",
-    "6M": "6 months",
-    "1Y": "1 year",
-    YTD: "Year to date",
-  };
+  /**
+   * The gap between two percentages is measured in percentage POINTS. Printing
+   * it as "−25.7%" invites reading it as a 25.7% loss, which is a different and
+   * much scarier number than "25.7 points behind the index".
+   */
+  const points = (v: number | null) =>
+    v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)} pts`;
+
+  const benchmark = standing.benchmark;
+  const gapFor = (r: ComparisonRow) => (benchmark === "SPY" ? r.deltaVsSpy : r.deltaVsQqq);
 
   return (
     <Card className="p-0">
       <div className="flex items-center justify-between border-b border-line px-6 py-4">
         <span className="eyebrow">Return vs benchmarks</span>
-        <span
-          className="text-xs text-[var(--faint)]"
-          title="Time-weighted return: deposits and withdrawals are backed out so the portfolio compares fairly to an index that has no cash flows."
-        >
-          time-weighted return · deposits excluded
-        </span>
+        <span className="text-xs text-[var(--faint)]">deposits excluded</span>
       </div>
+
+      {/* The table already contained this sentence; it just never said it. */}
+      {standing.state !== "unknown" && (
+        <div className="border-b border-line px-6 py-4">
+          <p className="font-display text-lg leading-snug">
+            <span
+              className={
+                standing.state === "behind" ? "text-[var(--coral)]" : "text-[var(--jade)]"
+              }
+            >
+              {standing.behindEverywhere
+                ? `Behind ${benchmark} in every window.`
+                : `${standingHeadline(standing)} over ${standing.windowLabel.toLowerCase()}.`}
+            </span>{" "}
+            <span className="text-[var(--muted)]">
+              {standing.behindEverywhere
+                ? `The gap widens the further back you look — a year out it is ${Math.abs(standing.gapPoints!).toFixed(1)} points.`
+                : "Measured against the index over the same days."}
+            </span>
+          </p>
+          <p className="mt-1.5 text-xs text-[var(--muted)]">
+            Your deposits are removed before comparing, so this measures the picks, not the
+            paycheque.
+          </p>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm">
           <thead>
             <tr className="border-b border-line text-left">
-              {["Window", "Portfolio", "SPY", "QQQ", "Δ vs SPY", "Δ vs QQQ"].map((h, i) => (
+              {["Window", "You", "SPY", "QQQ", `Gap vs ${benchmark}`].map((h, i) => (
                 <th
                   key={h}
                   className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
@@ -2259,27 +2188,32 @@ function BenchmarkComparison({ comparison }: { comparison: ComparisonRow[] }) {
                   : r.portfolioPct >= 0
                     ? "text-[var(--jade)]"
                     : "text-[var(--coral)]";
-              const delta = (v: number | null) => (
-                <td
-                  className={`mono px-6 py-2.5 text-right ${
-                    v == null
-                      ? "text-[var(--faint)]"
-                      : v >= 0
-                        ? "text-[var(--jade)]"
-                        : "text-[var(--coral)]"
+              const gap = gapFor(r);
+              // The window the page leads with is marked, so the headline and the
+              // table visibly agree rather than making you find the row.
+              const lead = r.window === standing.window;
+              return (
+                <tr
+                  key={r.window}
+                  className={`border-b border-line/60 last:border-0 ${
+                    lead ? "bg-[var(--panel-2)]/50" : ""
                   }`}
                 >
-                  {pct(v)}
-                </td>
-              );
-              return (
-                <tr key={r.window} className="border-b border-line/60 last:border-0">
                   <td className="px-6 py-2.5 text-[var(--muted)]">{WINDOW_LABEL[r.window]}</td>
                   <td className={`mono px-6 py-2.5 text-right ${pColor}`}>{pct(r.portfolioPct)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{pct(r.spyPct)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{pct(r.qqqPct)}</td>
-                  {delta(r.deltaVsSpy)}
-                  {delta(r.deltaVsQqq)}
+                  <td className="mono px-6 py-2.5 text-right text-[var(--faint)]">{pct(r.spyPct)}</td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--faint)]">{pct(r.qqqPct)}</td>
+                  <td
+                    className={`mono px-6 py-2.5 text-right ${
+                      gap == null
+                        ? "text-[var(--faint)]"
+                        : gap >= 0
+                          ? "text-[var(--jade)]"
+                          : "text-[var(--coral)]"
+                    } ${lead ? "font-semibold" : ""}`}
+                  >
+                    {points(gap)}
+                  </td>
                 </tr>
               );
             })}
