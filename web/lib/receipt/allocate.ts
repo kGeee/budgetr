@@ -111,7 +111,7 @@ export function allocateReceipt({
   const allocated = round2(people.reduce((a, p) => a + p.total, 0));
 
   // What's unassigned is the untouched items PLUS the tax/tip that rode on them.
-  const taxTipCents = toCents(receipt.tax) + toCents(receipt.tip);
+  const taxTipCents = toCents(receipt.tax ?? 0) + toCents(receipt.tip ?? 0);
   const allocatedTaxTip = taxParts.reduce((a, n) => a + n, 0) + tipParts.reduce((a, n) => a + n, 0);
 
   return {

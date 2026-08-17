@@ -98,6 +98,13 @@ export type SharedExpenseRow = {
   note: string | null;
   currency: string | null;
   shares: { personId: string; personName: string; amount: number }[];
+  /**
+   * Receipt line items and their per-person assignment, when the split was made
+   * from a scanned receipt. Opaque JSON (see shared_expenses.items_json) so the
+   * itemized splitter can reopen exactly what you built; the authoritative
+   * per-person numbers are always `shares`.
+   */
+  itemsJson: string | null;
 };
 
 /**
@@ -118,9 +125,11 @@ export function getSharedExpenses(
     myShare: number;
     note: string | null;
     currency: string | null;
+    itemsJson: string | null;
   }>(sql`
     SELECT se.id, se.transaction_id AS transactionId, t.date, t.name, t.merchant_name AS merchant,
-           t.amount AS total, se.my_share AS myShare, se.note, t.iso_currency_code AS currency
+           t.amount AS total, se.my_share AS myShare, se.note, t.iso_currency_code AS currency,
+           se.items_json AS itemsJson
     FROM shared_expenses se
     JOIN transactions t ON t.id = se.transaction_id
     WHERE 1 = 1
@@ -166,6 +175,7 @@ export function getSharedExpenses(
     note: r.note,
     currency: r.currency,
     shares: byExpense.get(r.id) ?? [],
+    itemsJson: r.itemsJson,
   }));
 }
 

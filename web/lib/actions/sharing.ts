@@ -128,6 +128,12 @@ export type SaveSplitInput = {
   /** Category your own share reports under. Defaults to the txn's current one. */
   myCategoryId?: string | null;
   note?: string | null;
+  /**
+   * Receipt line items + their assignment, serialized. Round-tripped verbatim so
+   * reopening an itemized split restores exactly what you built. Never read for
+   * money — `participants` is still what determines who owes what.
+   */
+  itemsJson?: string | null;
 };
 
 /**
@@ -171,7 +177,7 @@ export async function saveSharedExpense(
         transactionId: input.txnId,
         myShare,
         note: input.note?.trim() || null,
-        itemsJson: null,
+        itemsJson: input.itemsJson ?? null,
         createdAt: new Date(),
       })
       .run();
