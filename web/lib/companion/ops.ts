@@ -15,10 +15,22 @@
 // edits are the same human; revisit if transactions ever grow updatedAt.
 
 import { db } from "@/db";
-import { categories, dismissedAlerts, transactions } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import {
+  categories,
+  dismissedAlerts,
+  expenseShares,
+  people,
+  settlements,
+  sharedExpenses,
+  transactionSplits,
+  transactions,
+} from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import type { Op } from "@budgetr/core";
+import { REIMBURSABLE_CATEGORY_ID, seedReimbursableCategory } from "@/lib/seed-categories-data";
 import { appendAppliedOpIds, getAppliedOpIds } from "./store";
+
+const newId = (prefix: string) => `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
 
 export function applyOps(ops: Op[]): { mutated: number } {
   const already = new Set(getAppliedOpIds());
@@ -54,7 +66,115 @@ export function applyOps(ops: Op[]): { mutated: number } {
           })
           .run();
         mutated += 1;
+      } else if (op.kind === "splitBill") {
+        const txn = tx
+          .select({ id: transactions.id, amount: transactions.amount, cat: transactions.userCategoryId })
+          .from(transactions)
+          .where(eq(transactions.id, op.txnId))
+          .get();
+        if (!txn) continue; // deleted since the phone saw it
+
+        // Every person must still exist. A share pointing at a deleted person
+        // would silently vanish from the balances while still leaving the
+        // transaction marked as split.
+        const known = op.shares.filter(
+          (sh) => tx.select({ id: people.id }).from(people).where(eq(people.id, sh.personId)).get() != null,
+        );
+        if (known.length === 0) continue;
+
+        seedReimbursableCategory();
+
+        const sign = txn.amount < 0 ? -1 : 1;
+        // The phone computed these cents with the shared allocator; the desktop
+        // stores them rather than re-deriving, so the two can never disagree.
+        const shares = known.map((sh) => ({ personId: sh.personId, amount: (sh.cents / 100) * sign }));
+        const owed = shares.reduce((a, sh) => a + sh.amount, 0);
+        // A pending tip means the split can be computed over more than the
+        // transaction currently records — see SplitBillOp.basisCents.
+        const basis = op.basisCents != null ? (Math.abs(op.basisCents) / 100) * sign : txn.amount;
+        const myShare = Math.round((basis - owed) * 100) / 100;
+
+        tx.delete(sharedExpenses).where(eq(sharedExpenses.transactionId, op.txnId)).run();
+        tx.delete(transactionSplits).where(eq(transactionSplits.transactionId, op.txnId)).run();
+
+        const expenseId = newId("shexp");
+        tx.insert(sharedExpenses)
+          .values({
+            id: expenseId,
+            transactionId: op.txnId,
+            myShare,
+            note: op.note?.trim() || null,
+            itemsJson: op.itemsJson ?? null,
+            createdAt: new Date(),
+          })
+          .run();
+        for (const sh of shares) {
+          tx.insert(expenseShares)
+            .values({ id: newId("share"), sharedExpenseId: expenseId, personId: sh.personId, amount: sh.amount })
+            .run();
+        }
+
+        // The reporting overlay reconciles to the TRANSACTION, never the basis —
+        // splits that don't sum to their parent corrupt every spend query.
+        const scale = Math.abs(basis) > 0.004 ? txn.amount / basis : 1;
+        const myOverlay = Math.round(myShare * scale * 100) / 100;
+        const owedOverlay = Math.round((txn.amount - myOverlay) * 100) / 100;
+        if (Math.abs(myOverlay) >= 0.005) {
+          tx.insert(transactionSplits)
+            .values({
+              id: newId("split"),
+              transactionId: op.txnId,
+              categoryId: txn.cat ?? null,
+              amount: myOverlay,
+              note: "Your share",
+            })
+            .run();
+        }
+        tx.insert(transactionSplits)
+          .values({
+            id: newId("split"),
+            transactionId: op.txnId,
+            categoryId: REIMBURSABLE_CATEGORY_ID,
+            amount: owedOverlay,
+            note: `Owed by ${shares.length} ${shares.length === 1 ? "person" : "people"}`,
+          })
+          .run();
+        mutated += 1;
+      } else if (op.kind === "recordSettlement") {
+        const person = tx.select({ id: people.id }).from(people).where(eq(people.id, op.personId)).get();
+        if (!person) continue;
+        // One repayment per inflow. Re-confirming a suggestion the desktop
+        // already recorded must not double-credit the balance.
+        if (op.txnId) {
+          const taken = tx
+            .select({ id: settlements.id })
+            .from(settlements)
+            .where(eq(settlements.transactionId, op.txnId))
+            .get();
+          if (taken) continue;
+        }
+        seedReimbursableCategory();
+        tx.insert(settlements)
+          .values({
+            id: newId("settle"),
+            personId: op.personId,
+            transactionId: op.txnId ?? null,
+            amount: op.cents / 100,
+            date: new Date(op.ts * 1000).toISOString().slice(0, 10),
+            note: null,
+            createdAt: new Date(),
+          })
+          .run();
+        if (op.txnId) {
+          tx.update(transactions)
+            .set({ userCategoryId: REIMBURSABLE_CATEGORY_ID, reviewed: true })
+            .where(eq(transactions.id, op.txnId))
+            .run();
+        }
+        mutated += 1;
       }
+      // scanReceipt is handled outside this transaction — it needs to shell out
+      // to the OCR helper, which cannot happen inside a SQLite write.
       // Unknown kinds can't reach here: assertValidOutbox rejects them upstream.
     }
 

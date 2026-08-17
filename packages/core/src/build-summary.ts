@@ -8,6 +8,9 @@
 import {
   MAX_APPLIED_OP_IDS,
   MAX_CATEGORIES,
+  MAX_PEOPLE,
+  MAX_SETTLE_SUGGESTIONS,
+  MAX_SHARED,
   MAX_CURVE_POINTS,
   MAX_RECENT_TXNS,
   MAX_SECTOR_SLICES,
@@ -57,6 +60,35 @@ export interface DesktopReadModel {
   spendByDay?: Array<{ d: number; cents: number }>;
   // Active categories in display order. Optional.
   categories?: Array<{ id: string; name: string; icon?: string | null; group: 'income' | 'spending' | 'transfer' }>;
+  // Optional shared-expense detail (contract v2). Absent on installs that have
+  // never split a bill, which is why every field below is optional.
+  people?: Array<{
+    id: string;
+    name: string;
+    color?: string | null;
+    cents: number;
+    openCount: number;
+    lastSettledAt?: number | null;
+  }>;
+  shared?: Array<{
+    id: string;
+    txnId: string;
+    ts: number;
+    merchant: string;
+    cents: number;
+    myCents: number;
+    shares: Array<{ personId: string; cents: number }>;
+    itemized?: boolean;
+    note?: string | null;
+    [extra: string]: unknown;
+  }>;
+  settleSuggestions?: Array<{
+    txnId: string;
+    personId: string;
+    ts: number;
+    cents: number;
+    detail: string;
+  }>;
   // Optional investments detail. Strategy inputs may carry extra fields
   // (maxProfit, payoffLegs, …) — buildSummary strips to the contract shape.
   investments?: {
@@ -222,6 +254,58 @@ export function buildSummary(model: DesktopReadModel): Summary {
     alerts,
     ...(model.investments ? { investments: buildInvestments(model.investments) } : {}),
     ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
+    // Sorted and bounded like everything else, so an unchanged desktop state
+    // still produces byte-identical JSON and never churns the relay blob.
+    ...(model.people
+      ? {
+          people: [...model.people]
+            .sort((a, b) => Math.abs(b.cents) - Math.abs(a.cents) || (a.id < b.id ? -1 : 1))
+            .slice(0, MAX_PEOPLE)
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              ...(p.color ? { color: p.color } : {}),
+              cents: cents(p.cents, `person ${p.id}`),
+              openCount: Math.max(0, Math.trunc(p.openCount)),
+              ...(p.lastSettledAt ? { lastSettledAt: seconds(p.lastSettledAt, `person ${p.id} settled`) } : {}),
+            })),
+        }
+      : {}),
+    ...(model.shared
+      ? {
+          shared: [...model.shared]
+            .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : 1))
+            .slice(0, MAX_SHARED)
+            .map((e) => ({
+              id: e.id,
+              txnId: e.txnId,
+              ts: seconds(e.ts, `shared ${e.id} ts`),
+              merchant: e.merchant,
+              cents: cents(e.cents, `shared ${e.id}`),
+              myCents: cents(e.myCents, `shared ${e.id} mine`),
+              shares: e.shares.map((sh) => ({
+                personId: sh.personId,
+                cents: cents(sh.cents, `shared ${e.id} share ${sh.personId}`),
+              })),
+              itemized: Boolean(e.itemized),
+              ...(e.note ? { note: e.note } : {}),
+            })),
+        }
+      : {}),
+    ...(model.settleSuggestions
+      ? {
+          settleSuggestions: [...model.settleSuggestions]
+            .sort((a, b) => b.ts - a.ts || (a.txnId < b.txnId ? -1 : 1))
+            .slice(0, MAX_SETTLE_SUGGESTIONS)
+            .map((sg) => ({
+              txnId: sg.txnId,
+              personId: sg.personId,
+              ts: seconds(sg.ts, `suggestion ${sg.txnId} ts`),
+              cents: cents(sg.cents, `suggestion ${sg.txnId}`),
+              detail: sg.detail,
+            })),
+        }
+      : {}),
     ...(model.categories
       ? {
           categories: model.categories.slice(0, MAX_CATEGORIES).map((c) => ({

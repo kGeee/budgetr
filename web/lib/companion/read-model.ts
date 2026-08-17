@@ -27,6 +27,7 @@ import {
   getRecentTransactions,
   sectorKeyFor,
 } from "@/lib/queries";
+import { getPeopleBalances, getSharedExpenses, suggestSettlements } from "@/lib/sharing";
 import { detectAnomalies, type Alert } from "@/lib/anomalies";
 import { classifyOptionLegs, parseOccSymbol, type OptionLegInput, type ParsedOption } from "@/lib/options";
 import { payoffCurve } from "@/lib/payoff";
@@ -159,6 +160,37 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
     alerts,
     investments,
     spendByDay: getDailySpend(92).map((r) => ({ d: dayToUnix(r.date), cents: cents(r.spent) })),
+    // ── Shared expenses (contract v2) ────────────────────────────────
+    // Balances are netted here, on the desktop, and the phone renders the
+    // result — it never has the ledger to recompute one from.
+    people: getPeopleBalances()
+      .filter((p) => !p.archived || Math.abs(p.balance) > 0.005)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        cents: cents(p.balance),
+        openCount: p.expenseCount,
+      })),
+    shared: getSharedExpenses({ limit: 40 }).map((e) => ({
+      id: e.id,
+      txnId: e.transactionId,
+      ts: dayToUnix(e.date),
+      merchant: e.displayName,
+      cents: cents(Math.abs(e.total)),
+      myCents: cents(Math.abs(e.myShare)),
+      shares: e.shares.map((sh) => ({ personId: sh.personId, cents: cents(Math.abs(sh.amount)) })),
+      // Set when the split was built from a receipt, so the phone can label it
+      // without parsing the blob it deliberately doesn't read.
+      itemized: Boolean(e.itemsJson),
+    })),
+    settleSuggestions: suggestSettlements(10).map((sg) => ({
+      txnId: sg.txnId,
+      personId: sg.personId,
+      ts: dayToUnix(sg.date),
+      cents: cents(Math.abs(sg.amount)),
+      detail: sg.reason,
+    })),
     // The category vocabulary, in the desktop's display order — the phone
     // shows these exact names/icons instead of prettifying keys.
     categories: getCategories().map((c) => ({
