@@ -135,14 +135,55 @@ export function assignAllEvenly(
   return Object.fromEntries(receipt.items.map((it) => [it.id, { ...even }]));
 }
 
+/** What the item lines add up to, ignoring anything the receipt printed. */
+export function itemsTotal(receipt: ParsedReceipt): number {
+  return round2(receipt.items.reduce((a, it) => a + it.total, 0));
+}
+
 /**
- * The receipt total we're splitting toward. Prefers the printed total, falls
- * back to subtotal + tax + tip, then to the item lines alone — so a partial scan
- * still reconciles against something real.
+ * The amount this receipt currently describes: items + tax + tip.
+ *
+ * Deliberately computed from the lines rather than trusting a printed `total`.
+ * Once the user edits a line, adds one, or types a tip, the printed total is
+ * stale — and it's the sum of the parts that has to match what was charged.
  */
 export function receiptTotal(receipt: ParsedReceipt): number {
-  if (receipt.total != null) return receipt.total;
-  const items = receipt.items.reduce((a, it) => a + it.total, 0);
-  const base = receipt.subtotal ?? items;
-  return round2(base + (receipt.tax ?? 0) + (receipt.tip ?? 0));
+  return round2(itemsTotal(receipt) + (receipt.tax ?? 0) + (receipt.tip ?? 0));
+}
+
+/**
+ * Close the gap between the receipt and the amount actually charged.
+ *
+ * **Tip is usually not on the receipt.** You're handed a printed check, you write
+ * a tip on the slip or tap a percentage on the terminal, and the card is charged
+ * more than anything the paper ever said. A $60.00 receipt against a $66.13
+ * charge isn't a bad scan — it's a 10% tip, and treating it as an error is the
+ * tool being wrong about the world.
+ *
+ * So a shortfall becomes tip by default, and the caller says so rather than
+ * asking. An overshoot is different: the charge being *less* than the printed
+ * lines means a discount, a voided item or a misread, and there's no honest
+ * default for that — it's returned as `overshoot` for the UI to surface.
+ */
+export function reconcileToCharge(
+  receipt: ParsedReceipt,
+  charged: number,
+): { receipt: ParsedReceipt; addedTip: number; overshoot: number } {
+  const target = Math.abs(round2(charged));
+  const current = receiptTotal(receipt);
+  const gap = round2(target - current);
+
+  if (Math.abs(gap) < 0.01) return { receipt, addedTip: 0, overshoot: 0 };
+  if (gap < 0) return { receipt, addedTip: 0, overshoot: Math.abs(gap) };
+
+  return {
+    receipt: { ...receipt, tip: round2((receipt.tip ?? 0) + gap), total: target },
+    addedTip: gap,
+    overshoot: 0,
+  };
+}
+
+/** How far the receipt is from the charge. Positive = receipt is short. */
+export function chargeGap(receipt: ParsedReceipt, charged: number): number {
+  return round2(Math.abs(round2(charged)) - receiptTotal(receipt));
 }

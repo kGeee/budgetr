@@ -222,20 +222,27 @@ function SplitModal({
   );
 
   /**
-   * An itemized split can't be saved until the receipt reconciles: every line
-   * assigned, and the lines adding up to the amount actually charged. Splitting
-   * a bill that doesn't add up produces numbers people will argue about later.
+   * What still stops an itemized split from being saved.
+   *
+   * Deliberately narrow. The first version also blocked whenever the receipt
+   * total differed from the charge, which fires on almost every restaurant bill:
+   * tip is added at the terminal *after* the paper prints, so a $60 receipt
+   * against a $66.13 charge is normal. That gap is now closed automatically on
+   * scan and editable in the totals block, and the only thing left worth
+   * refusing is a split that doesn't add up to what was actually charged —
+   * because those numbers are what someone gets asked to pay.
    */
   const itemsBlocker: string | null = useMemo(() => {
     if (mode !== "items") return null;
     if (!receipt) return "Scan the receipt or add its lines.";
     if (receipt.items.length === 0) return "Add at least one line from the receipt.";
     if (itemized && itemized.unassignedItemIds.length > 0) {
-      return `${itemized.unassignedItemIds.length} line(s) still need someone.`;
+      const n = itemized.unassignedItemIds.length;
+      return `${n} ${n === 1 ? "line still needs" : "lines still need"} someone on it.`;
     }
-    const diff = Math.abs(receiptTotal(receipt) - Math.abs(total));
-    if (diff >= 0.01) {
-      return `The receipt adds up to ${fmt(receiptTotal(receipt), currency)}, but this transaction is ${fmt(Math.abs(total), currency)}.`;
+    const gap = Math.abs(receiptTotal(receipt) - Math.abs(total));
+    if (gap >= 0.01) {
+      return `Items, tax and tip come to ${fmt(receiptTotal(receipt), currency)} — ${fmt(gap, currency)} off the ${fmt(Math.abs(total), currency)} charged. Adjust tip or a line.`;
     }
     return null;
   }, [mode, receipt, itemized, total, currency]);
@@ -456,6 +463,7 @@ function SplitModal({
             <ReceiptSplit
               transactionId={transaction.id}
               currency={currency}
+              charged={Math.abs(total)}
               participants={itemParticipants}
               scanAvailable={scanAvailable}
               receipt={receipt}

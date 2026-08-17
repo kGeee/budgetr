@@ -1,34 +1,64 @@
 "use client";
 
 import { useMemo, useRef, useState, useTransition } from "react";
-import { Camera, Check, Loader2, Minus, Plus, RotateCcw, ScanLine, Trash2 } from "lucide-react";
+import { Camera, Check, Loader2, Minus, Plus, RotateCcw, ScanLine, Scale, Trash2 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { scanReceipt } from "@/lib/actions-receipt";
-import { allocateReceipt, assignAllEvenly, receiptTotal } from "@/lib/receipt/allocate";
+import {
+  allocateReceipt,
+  assignAllEvenly,
+  chargeGap,
+  itemsTotal,
+  receiptTotal,
+  reconcileToCharge,
+} from "@/lib/receipt/allocate";
 import { ME, type ItemAssignment, type ParsedReceipt, type ReceiptItem } from "@/lib/receipt/types";
 
 /**
  * Split a bill by item.
  *
- * The interaction is one gesture repeated: for each line, tap the people who ate
- * it. Tapping again removes them; the +/− beside a selected person handles "I
- * had two of the three buns". That single control covers shared plates and
- * uneven portions, which is why there's no mode switch — a shared plate is just
- * everyone at weight 1.
+ * Two things drive the design.
  *
- * Tax and tip are never shown as something to assign. They follow the food
- * automatically, prorated by what each person ate, because that's the answer
- * everyone actually wants and arguing about it at the table is the thing this
- * screen exists to end.
+ * **The charge is the truth, the receipt is evidence.** Tip is usually added
+ * after the paper prints — you tap a percentage on the terminal — so the printed
+ * total and the amount on your card routinely disagree. A $60 receipt against a
+ * $66.13 charge is a 10% tip, not a bad scan, and the first version treating it
+ * as an error to be fixed was the tool being wrong about the world. The gap now
+ * lands in the tip field automatically, and tax and tip are editable.
+ *
+ * **Assigning should cost one tap per line.** People claim their own food, so
+ * you pick whose turn it is once and then tap down the receipt. That beats
+ * hunting for one person's chip on every row, which is what a chip-per-person
+ * grid turns into with three people and ten lines.
  */
 
 export type Participant = { id: string; name: string };
 
 const fmt = (n: number, currency: string | null) => formatCurrency(n, currency ?? undefined);
 
+/** Stable per-person colour so a line's initials are scannable at a glance. */
+const PERSON_COLORS = [
+  "var(--brass)",
+  "var(--jade)",
+  "var(--blue, #7fb2e0)",
+  "#c98bd0",
+  "#e0a26b",
+  "#7fd0c4",
+];
+
+const colorFor = (index: number) => PERSON_COLORS[index % PERSON_COLORS.length];
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
 export function ReceiptSplit({
   transactionId,
   currency,
+  charged,
   participants,
   scanAvailable,
   receipt,
@@ -39,6 +69,8 @@ export function ReceiptSplit({
 }: {
   transactionId: string;
   currency: string | null;
+  /** What the card was actually charged. The number everything reconciles to. */
+  charged: number;
   participants: Participant[];
   scanAvailable: boolean;
   receipt: ParsedReceipt | null;
@@ -50,9 +82,11 @@ export function ReceiptSplit({
   const fileRef = useRef<HTMLInputElement>(null);
   const [scanning, startScan] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [tipNote, setTipNote] = useState<number | null>(null);
 
   function pick(file: File) {
     setError(null);
+    setTipNote(null);
     startScan(async () => {
       const form = new FormData();
       form.set("transactionId", transactionId);
@@ -62,9 +96,11 @@ export function ReceiptSplit({
         setError(res.error);
         return;
       }
-      // Open with everyone on everything — one tap from the common case where a
-      // table shares most of the food, and never a screen of empty rows.
-      onReceipt(res.receipt, assignAllEvenly(res.receipt, participants.map((p) => p.id)));
+      // Close the gap to the charge before showing anything, so the first thing
+      // you see already adds up. Nine times out of ten the difference is tip.
+      const { receipt: reconciled, addedTip } = reconcileToCharge(res.receipt, charged);
+      if (addedTip > 0) setTipNote(addedTip);
+      onReceipt(reconciled, assignAllEvenly(reconciled, participants.map((p) => p.id)));
     });
   }
 
@@ -76,7 +112,7 @@ export function ReceiptSplit({
           <p className="mt-2.5 text-sm">Split it by item</p>
           <p className="mx-auto mt-1 max-w-xs text-xs text-[var(--muted)]">
             {scanAvailable
-              ? "Photograph the receipt and assign each line to whoever ate it. Tax and tip follow automatically."
+              ? "Photograph the receipt and tap who ate what. Tax and tip follow automatically."
               : "Receipt scanning needs macOS on-device text recognition. Add the lines by hand instead."}
           </p>
 
@@ -132,7 +168,10 @@ export function ReceiptSplit({
       assignments={assignments}
       participants={participants}
       currency={currency}
+      charged={charged}
       disabled={disabled}
+      tipNote={tipNote}
+      onDismissTipNote={() => setTipNote(null)}
       onAssignments={onAssignments}
       onReceipt={onReceipt}
     />
@@ -157,7 +196,10 @@ function ReceiptEditor({
   assignments,
   participants,
   currency,
+  charged,
   disabled,
+  tipNote,
+  onDismissTipNote,
   onAssignments,
   onReceipt,
 }: {
@@ -165,16 +207,36 @@ function ReceiptEditor({
   assignments: Record<string, ItemAssignment>;
   participants: Participant[];
   currency: string | null;
+  charged: number;
   disabled?: boolean;
+  tipNote: number | null;
+  onDismissTipNote: () => void;
   onAssignments: (a: Record<string, ItemAssignment>) => void;
   onReceipt: (r: ParsedReceipt | null, a: Record<string, ItemAssignment>) => void;
 }) {
   const ids = useMemo(() => participants.map((p) => p.id), [participants]);
+
+  /** Whose turn it is. Tapping a line puts this person on (or takes them off). */
+  const [brush, setBrush] = useState<string>(ids[0] ?? ME);
+  /** Lines showing their per-person portion steppers. Rare, so opt-in. */
+  const [portionsFor, setPortionsFor] = useState<string | null>(null);
+
+  const activeBrush = ids.includes(brush) ? brush : (ids[0] ?? ME);
+
   const split = useMemo(
     () => allocateReceipt({ receipt, assignments, participantIds: ids }),
     [receipt, assignments, ids],
   );
-  const nameOf = (id: string) => participants.find((p) => p.id === id)?.name ?? "—";
+
+  const meta = useMemo(() => {
+    const byId = new Map(participants.map((p, i) => [p.id, { ...p, color: colorFor(i) }]));
+    return byId;
+  }, [participants]);
+
+  const items = itemsTotal(receipt);
+  const total = receiptTotal(receipt);
+  const gap = chargeGap(receipt, charged);
+  const balanced = Math.abs(gap) < 0.01;
 
   function setWeight(itemId: string, personId: string, weight: number) {
     const next = { ...(assignments[itemId] ?? {}) };
@@ -183,11 +245,18 @@ function ReceiptEditor({
     onAssignments({ ...assignments, [itemId]: next });
   }
 
-  function everyone(itemId: string) {
-    onAssignments({
-      ...assignments,
-      [itemId]: Object.fromEntries(ids.map((id) => [id, 1])),
-    });
+  /** Tapping a line toggles the current brush person on it. */
+  function toggleBrush(itemId: string) {
+    const on = (assignments[itemId] ?? {})[activeBrush] ?? 0;
+    setWeight(itemId, activeBrush, on > 0 ? 0 : 1);
+  }
+
+  function everyoneOn(itemId: string) {
+    onAssignments({ ...assignments, [itemId]: Object.fromEntries(ids.map((id) => [id, 1])) });
+  }
+
+  function patchReceipt(patch: Partial<ParsedReceipt>) {
+    onReceipt({ ...receipt, ...patch }, assignments);
   }
 
   function editItem(itemId: string, patch: Partial<ReceiptItem>) {
@@ -195,7 +264,6 @@ function ReceiptEditor({
       {
         ...receipt,
         items: receipt.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)),
-        // The parse-time reconciliation no longer describes hand-edited lines.
         discrepancy: null,
       },
       assignments,
@@ -212,7 +280,7 @@ function ReceiptEditor({
           { id, label: "", quantity: 1, unitPrice: null, total: 0, modifiers: [] },
         ],
       },
-      { ...assignments, [id]: Object.fromEntries(ids.map((p) => [p, 1])) },
+      { ...assignments, [id]: { [activeBrush]: 1 } },
     );
   }
 
@@ -226,67 +294,170 @@ function ReceiptEditor({
 
   return (
     <div className="space-y-4">
-      {/* What the scan read, and whether it adds up. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
-        <span className="eyebrow">Receipt</span>
-        <span className="mono">
-          {receipt.items.length} {receipt.items.length === 1 ? "line" : "lines"}
-        </span>
-        {receipt.tax != null && (
-          <span className="mono">
-            tax {fmt(receipt.tax, currency)}
-            {receipt.taxRatePct != null && ` · ${receipt.taxRatePct}%`}
+      {/* ── Who am I assigning? ─────────────────────────────────────────── */}
+      <div className="rounded-[var(--radius)] border border-line px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="eyebrow">Tap lines to assign</p>
+          <button
+            type="button"
+            onClick={() => onReceipt(null, {})}
+            disabled={disabled}
+            title="Start over"
+            className="rounded p-1 text-[var(--faint)] transition hover:text-[var(--paper)]"
+          >
+            <RotateCcw size={12} />
+          </button>
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {participants.map((p) => {
+            const on = p.id === activeBrush;
+            const color = meta.get(p.id)?.color ?? "var(--brass)";
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setBrush(p.id)}
+                aria-pressed={on}
+                disabled={disabled}
+                className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition"
+                style={{
+                  borderColor: on ? color : "var(--line)",
+                  background: on ? `color-mix(in srgb, ${color} 18%, transparent)` : "transparent",
+                  color: on ? "var(--paper)" : "var(--muted)",
+                }}
+              >
+                <span
+                  className="mono grid h-4 w-4 place-items-center rounded-full text-[9px] font-semibold"
+                  style={{ background: color, color: "var(--ink)" }}
+                >
+                  {initials(p.id === ME ? "You" : p.name)}
+                </span>
+                {p.id === ME ? "You" : p.name}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]">
+          <button
+            type="button"
+            onClick={() => onAssignments(assignAllEvenly(receipt, ids))}
+            disabled={disabled}
+            className="text-[var(--brass)] transition hover:text-[var(--paper)]"
+          >
+            Everyone on everything
+          </button>
+          <button
+            type="button"
+            onClick={() => onAssignments({})}
+            disabled={disabled}
+            className="text-[var(--muted)] transition hover:text-[var(--paper)]"
+          >
+            Clear
+          </button>
+          <span className="ml-auto text-[var(--faint)]">
+            {receipt.items.length - needsAssignment}/{receipt.items.length} assigned
           </span>
-        )}
-        {receipt.tip != null && <span className="mono">tip {fmt(receipt.tip, currency)}</span>}
-        <span className="mono ml-auto text-[var(--paper)]">
-          {fmt(receiptTotal(receipt), currency)}
-        </span>
-        <button
-          type="button"
-          onClick={() => onReceipt(null, {})}
-          disabled={disabled}
-          title="Start over"
-          className="rounded p-1 text-[var(--faint)] transition hover:text-[var(--paper)]"
-        >
-          <RotateCcw size={12} />
-        </button>
+        </div>
       </div>
 
-      {receipt.discrepancy && (
-        <p className="rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_10%,transparent)] px-3 py-2 text-xs text-[var(--brass)]">
-          The lines add up to {fmt(receipt.discrepancy.itemsTotal, currency)} but the receipt says{" "}
-          {fmt(receipt.discrepancy.subtotal, currency)} — off by{" "}
-          {fmt(Math.abs(receipt.discrepancy.difference), currency)}. Fix a line before saving.
+      {tipNote != null && (
+        <p className="flex items-start gap-2 rounded-lg border border-[var(--jade)]/40 bg-[color-mix(in_srgb,var(--jade)_10%,transparent)] px-3 py-2 text-xs text-[var(--paper)]">
+          <Check size={13} className="mt-0.5 shrink-0 text-[var(--jade)]" />
+          <span>
+            The receipt was {fmt(tipNote, currency)} short of the{" "}
+            {fmt(Math.abs(charged), currency)} charged, so{" "}
+            <b>{fmt(tipNote, currency)} was added as tip</b>. Change it below if that&rsquo;s not
+            right.
+          </span>
+          <button
+            type="button"
+            onClick={onDismissTipNote}
+            className="ml-auto shrink-0 text-[var(--faint)] hover:text-[var(--paper)]"
+          >
+            ×
+          </button>
         </p>
       )}
 
-      {/* The lines. */}
-      <ul className="space-y-2">
+      {/* ── The lines ───────────────────────────────────────────────────── */}
+      <ul className="space-y-1.5">
         {receipt.items.map((item) => {
           const weights = assignments[item.id] ?? {};
           const on = ids.filter((id) => (weights[id] ?? 0) > 0);
           const orphan = on.length === 0;
+          const brushOn = (weights[activeBrush] ?? 0) > 0;
+          const showPortions = portionsFor === item.id;
+
           return (
             <li
               key={item.id}
-              className={`rounded-[var(--radius)] border px-3 py-2.5 ${
-                orphan ? "border-[var(--coral)]/50" : "border-line"
+              className={`rounded-[var(--radius)] border transition-colors ${
+                orphan
+                  ? "border-[var(--coral)]/45"
+                  : brushOn
+                    ? "border-[var(--brass-dim)] bg-[var(--panel-2)]/40"
+                    : "border-line"
               }`}
             >
-              <div className="flex items-center gap-2">
-                <input
-                  value={item.label}
-                  onChange={(e) => editItem(item.id, { label: e.target.value })}
-                  placeholder="Item"
+              {/* The whole row is the tap target for the current brush. */}
+              <div className="flex items-center gap-2 px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => toggleBrush(item.id)}
                   disabled={disabled}
-                  className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-sm outline-none placeholder:text-[var(--faint)]"
-                />
-                {item.quantity > 1 && (
-                  <span className="mono shrink-0 text-[11px] text-[var(--faint)]">
-                    ×{item.quantity}
+                  aria-pressed={brushOn}
+                  aria-label={`${brushOn ? "Remove" : "Add"} ${
+                    activeBrush === ME ? "you" : meta.get(activeBrush)?.name ?? "person"
+                  } ${brushOn ? "from" : "to"} ${item.label || "this line"}`}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  <span
+                    className="grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors"
+                    style={{
+                      borderColor: brushOn
+                        ? meta.get(activeBrush)?.color ?? "var(--brass)"
+                        : "var(--line-strong)",
+                      background: brushOn
+                        ? meta.get(activeBrush)?.color ?? "var(--brass)"
+                        : "transparent",
+                    }}
+                  >
+                    {brushOn && <Check size={10} className="text-[var(--ink)]" />}
                   </span>
-                )}
+                  <span className="min-w-0 flex-1 truncate text-sm">
+                    {item.label || <span className="text-[var(--faint)]">Untitled line</span>}
+                    {item.quantity > 1 && (
+                      <span className="mono ml-1.5 text-[11px] text-[var(--faint)]">
+                        ×{item.quantity}
+                      </span>
+                    )}
+                  </span>
+                </button>
+
+                {/* Who's on this line. Each initial removes that person. */}
+                <span className="flex shrink-0 items-center -space-x-1">
+                  {on.map((id) => {
+                    const p = meta.get(id);
+                    const w = weights[id] ?? 1;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setWeight(item.id, id, 0)}
+                        disabled={disabled}
+                        title={`${p?.id === ME ? "You" : p?.name} — tap to remove`}
+                        className="mono grid h-5 min-w-5 place-items-center rounded-full border border-[var(--panel)] px-1 text-[9px] font-semibold"
+                        style={{ background: p?.color ?? "var(--muted)", color: "var(--ink)" }}
+                      >
+                        {initials(id === ME ? "You" : p?.name ?? "?")}
+                        {w > 1 && <span className="ml-0.5">×{w}</span>}
+                      </button>
+                    );
+                  })}
+                </span>
+
                 <span className="shrink-0 text-xs text-[var(--faint)]">$</span>
                 <input
                   value={item.total === 0 ? "" : String(item.total)}
@@ -294,85 +465,84 @@ function ReceiptEditor({
                   placeholder="0.00"
                   disabled={disabled}
                   onChange={(e) => editItem(item.id, { total: Number(e.target.value) || 0 })}
-                  className="mono w-20 shrink-0 rounded-md border border-line bg-[var(--ink)] px-2 py-1 text-right text-sm outline-none focus:border-[var(--brass-dim)]"
+                  className="mono w-[4.5rem] shrink-0 rounded-md border border-line bg-[var(--ink)] px-2 py-1 text-right text-sm outline-none focus:border-[var(--brass-dim)]"
                 />
+
+                <button
+                  type="button"
+                  onClick={() => everyoneOn(item.id)}
+                  disabled={disabled}
+                  title="Everyone shared this"
+                  className="shrink-0 rounded p-1 text-[var(--faint)] transition hover:text-[var(--brass)]"
+                >
+                  <Plus size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortionsFor(showPortions ? null : item.id)}
+                  disabled={disabled || on.length === 0}
+                  title="Uneven portions"
+                  aria-expanded={showPortions}
+                  className="shrink-0 rounded p-1 text-[var(--faint)] transition hover:text-[var(--brass)] disabled:opacity-30"
+                >
+                  <Scale size={12} />
+                </button>
                 <button
                   type="button"
                   onClick={() => removeItem(item.id)}
-                  aria-label={`Remove ${item.label || "item"}`}
                   disabled={disabled}
+                  aria-label={`Remove ${item.label || "line"}`}
                   className="shrink-0 rounded p-1 text-[var(--faint)] transition hover:text-[var(--coral)]"
                 >
                   <Trash2 size={12} />
                 </button>
               </div>
 
+              {/* Portions, opt-in: "I had two of the three buns". */}
+              {showPortions && on.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
+                  <span className="text-[11px] text-[var(--muted)]">Portions</span>
+                  {on.map((id) => {
+                    const w = weights[id] ?? 1;
+                    const p = meta.get(id);
+                    return (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 rounded-full border border-line px-1.5 py-0.5 text-[11px]"
+                      >
+                        <span className="text-[var(--muted)]">{id === ME ? "You" : p?.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setWeight(item.id, id, w - 1)}
+                          disabled={disabled}
+                          aria-label={`Fewer for ${id === ME ? "you" : p?.name}`}
+                          className="px-1 text-[var(--faint)] hover:text-[var(--paper)]"
+                        >
+                          <Minus size={9} />
+                        </button>
+                        <span className="mono min-w-3 text-center tabular-nums">{w}</span>
+                        <button
+                          type="button"
+                          onClick={() => setWeight(item.id, id, w + 1)}
+                          disabled={disabled}
+                          aria-label={`More for ${id === ME ? "you" : p?.name}`}
+                          className="px-1 text-[var(--faint)] hover:text-[var(--paper)]"
+                        >
+                          <Plus size={9} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
               {item.modifiers.length > 0 && (
-                <p className="mt-0.5 truncate text-[11px] text-[var(--faint)]">
+                <p className="truncate px-3 pb-2 text-[11px] text-[var(--faint)]">
                   {item.modifiers
                     .map((m) => m.label + (m.price != null ? ` (${fmt(m.price, currency)})` : ""))
                     .join(" · ")}
                 </p>
               )}
-
-              {/* Who ate it. */}
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                {participants.map((p) => {
-                  const w = weights[p.id] ?? 0;
-                  const active = w > 0;
-                  return (
-                    <span
-                      key={p.id}
-                      className={`inline-flex items-center overflow-hidden rounded-full border text-[11px] transition ${
-                        active
-                          ? "border-[var(--brass)] bg-[color-mix(in_srgb,var(--brass)_16%,transparent)] text-[var(--paper)]"
-                          : "border-line text-[var(--muted)]"
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setWeight(item.id, p.id, active ? 0 : 1)}
-                        aria-pressed={active}
-                        disabled={disabled}
-                        className="px-2.5 py-1 transition hover:text-[var(--paper)]"
-                      >
-                        {p.id === ME ? "You" : p.name}
-                      </button>
-                      {active && (
-                        <span className="flex items-center border-l border-[var(--brass-dim)]/50">
-                          <button
-                            type="button"
-                            onClick={() => setWeight(item.id, p.id, w - 1)}
-                            aria-label={`Fewer for ${p.id === ME ? "you" : p.name}`}
-                            disabled={disabled}
-                            className="px-1.5 py-1 text-[var(--muted)] hover:text-[var(--paper)]"
-                          >
-                            <Minus size={9} />
-                          </button>
-                          <span className="mono min-w-3 text-center tabular-nums">{w}</span>
-                          <button
-                            type="button"
-                            onClick={() => setWeight(item.id, p.id, w + 1)}
-                            aria-label={`More for ${p.id === ME ? "you" : p.name}`}
-                            disabled={disabled}
-                            className="px-1.5 py-1 text-[var(--muted)] hover:text-[var(--paper)]"
-                          >
-                            <Plus size={9} />
-                          </button>
-                        </span>
-                      )}
-                    </span>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() => everyone(item.id)}
-                  disabled={disabled}
-                  className="ml-auto rounded-full px-2 py-1 text-[11px] text-[var(--faint)] transition hover:text-[var(--brass)]"
-                >
-                  Everyone
-                </button>
-              </div>
             </li>
           );
         })}
@@ -389,48 +559,178 @@ function ReceiptEditor({
         </button>
         {needsAssignment > 0 && (
           <p className="text-xs text-[var(--coral)]">
-            {needsAssignment} {needsAssignment === 1 ? "line needs" : "lines need"} someone —{" "}
-            {fmt(split.unassigned, currency)} unassigned.
+            {needsAssignment} {needsAssignment === 1 ? "line needs" : "lines need"} someone
           </p>
         )}
       </div>
 
-      {/* What each person owes. */}
+      {/* ── Tax, tip, and the reconciliation ────────────────────────────── */}
+      <div className="rounded-[var(--radius)] border border-line">
+        <ul className="divide-y divide-line/60 text-sm">
+          <li className="flex items-center justify-between gap-3 px-3 py-2">
+            <span className="text-[var(--muted)]">Items</span>
+            <span className="mono">{fmt(items, currency)}</span>
+          </li>
+          <MoneyRow
+            label="Tax"
+            hint={receipt.taxRatePct != null ? `${receipt.taxRatePct}%` : undefined}
+            value={receipt.tax}
+            disabled={disabled}
+            onChange={(v) => patchReceipt({ tax: v })}
+          />
+          <MoneyRow
+            label="Tip"
+            hint={
+              items > 0 && (receipt.tip ?? 0) > 0
+                ? `${Math.round(((receipt.tip ?? 0) / items) * 100)}% of items`
+                : undefined
+            }
+            value={receipt.tip}
+            disabled={disabled}
+            onChange={(v) => patchReceipt({ tip: v })}
+            quick={[0.15, 0.18, 0.2, 0.22].map((r) => ({
+              label: `${Math.round(r * 100)}%`,
+              value: Math.round(items * r * 100) / 100,
+            }))}
+          />
+          <li className="flex items-center justify-between gap-3 px-3 py-2">
+            <span>Receipt total</span>
+            <span className="mono">{fmt(total, currency)}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 px-3 py-2">
+            <span className="text-[var(--muted)]">Charged</span>
+            <span className="mono text-[var(--muted)]">{fmt(Math.abs(charged), currency)}</span>
+          </li>
+        </ul>
+
+        {!balanced && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2.5">
+            <span className="text-xs text-[var(--coral)]">
+              {gap > 0
+                ? `${fmt(gap, currency)} of the charge isn't on the receipt.`
+                : `The receipt is ${fmt(Math.abs(gap), currency)} more than was charged.`}
+            </span>
+            {gap > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => patchReceipt({ tip: Math.round(((receipt.tip ?? 0) + gap) * 100) / 100 })}
+                  disabled={disabled}
+                  className="rounded-full bg-[var(--brass)] px-2.5 py-1 text-[11px] font-medium text-[var(--on-brass)] transition hover:brightness-105"
+                >
+                  Add as tip
+                </button>
+                <button
+                  type="button"
+                  onClick={() => patchReceipt({ tax: Math.round(((receipt.tax ?? 0) + gap) * 100) / 100 })}
+                  disabled={disabled}
+                  className="rounded-full border border-line px-2.5 py-1 text-[11px] text-[var(--muted)] transition hover:text-[var(--paper)]"
+                >
+                  Add as tax
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── What each person owes ───────────────────────────────────────── */}
       <div className="rounded-[var(--radius)] border border-line">
         <div className="flex items-center justify-between border-b border-line px-3 py-2">
           <span className="eyebrow">Each person owes</span>
           <span
-            className={`mono text-xs ${
-              split.unassigned > 0.004 ? "text-[var(--coral)]" : "text-[var(--jade)]"
+            className={`mono inline-flex items-center gap-1 text-xs ${
+              balanced && split.unassigned <= 0.004
+                ? "text-[var(--jade)]"
+                : "text-[var(--coral)]"
             }`}
           >
-            {fmt(split.allocated, currency)} of {fmt(receiptTotal(receipt), currency)}
-            {split.unassigned <= 0.004 && <Check size={11} className="ml-1 inline" />}
+            {fmt(split.allocated, currency)}
+            {balanced && split.unassigned <= 0.004 && <Check size={11} />}
           </span>
         </div>
         <ul className="divide-y divide-line/60">
-          {split.people.map((p) => (
-            <li key={p.participantId} className="flex items-baseline gap-3 px-3 py-2">
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {p.participantId === ME ? "You" : nameOf(p.participantId)}
-                {p.lines.length > 0 && (
-                  <span className="ml-2 text-[11px] text-[var(--faint)]">
-                    {p.lines
-                      .map((l) => (l.of > 1 ? `${l.label} (${l.weight}/${l.of})` : l.label))
-                      .join(", ")}
-                  </span>
-                )}
-              </span>
-              <span className="mono shrink-0 text-[11px] text-[var(--faint)]">
-                {fmt(p.items, currency)} + {fmt(p.tax + p.tip, currency)} tax &amp; tip
-              </span>
-              <span className="mono w-20 shrink-0 text-right text-sm">
-                {fmt(p.total, currency)}
-              </span>
-            </li>
-          ))}
+          {split.people.map((p) => {
+            const person = meta.get(p.participantId);
+            return (
+              <li key={p.participantId} className="flex items-baseline gap-3 px-3 py-2">
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {p.participantId === ME ? "You" : person?.name ?? "—"}
+                  {p.lines.length > 0 && (
+                    <span className="ml-2 text-[11px] text-[var(--faint)]">
+                      {p.lines
+                        .map((l) => (l.of > 1 ? `${l.label} (${l.weight}/${l.of})` : l.label))
+                        .join(", ")}
+                    </span>
+                  )}
+                </span>
+                <span className="mono shrink-0 text-[11px] text-[var(--faint)]">
+                  {fmt(p.items, currency)} + {fmt(p.tax + p.tip, currency)}
+                </span>
+                <span className="mono w-20 shrink-0 text-right text-sm">
+                  {fmt(p.total, currency)}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>
+  );
+}
+
+/** An editable money line in the totals block, with optional quick presets. */
+function MoneyRow({
+  label,
+  hint,
+  value,
+  disabled,
+  onChange,
+  quick,
+}: {
+  label: string;
+  hint?: string;
+  value: number | null;
+  disabled?: boolean;
+  onChange: (v: number | null) => void;
+  quick?: { label: string; value: number }[];
+}) {
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2">
+      <span className="text-[var(--muted)]">{label}</span>
+      {hint && <span className="mono text-[11px] text-[var(--faint)]">{hint}</span>}
+
+      {quick && quick.length > 0 && (
+        <span className="flex items-center gap-1">
+          {quick.map((q) => (
+            <button
+              key={q.label}
+              type="button"
+              onClick={() => onChange(q.value)}
+              disabled={disabled}
+              title={`${q.label} of items`}
+              className="rounded-full border border-line px-1.5 py-0.5 text-[10px] text-[var(--muted)] transition hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+            >
+              {q.label}
+            </button>
+          ))}
+        </span>
+      )}
+
+      <span className="ml-auto flex items-center gap-1">
+        <span className="text-xs text-[var(--faint)]">$</span>
+        <input
+          value={value == null ? "" : String(value)}
+          inputMode="decimal"
+          placeholder="0.00"
+          disabled={disabled}
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            onChange(raw === "" ? null : Number(raw) || 0);
+          }}
+          className="mono w-[4.5rem] rounded-md border border-line bg-[var(--ink)] px-2 py-1 text-right text-sm outline-none focus:border-[var(--brass-dim)]"
+        />
+      </span>
+    </li>
   );
 }
