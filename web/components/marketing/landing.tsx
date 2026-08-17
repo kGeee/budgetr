@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Wallet,
 } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { Card } from "@/components/ui/card";
 import { BuyLink } from "@/components/marketing/marketing-shell";
 import { HeroShot, ScreenshotShowcase } from "@/components/marketing/screenshots";
@@ -22,9 +23,7 @@ export function MarketingLanding() {
     <main>
       {/* Hero */}
       <section className="mx-auto max-w-6xl px-5 pb-10 pt-12 text-center sm:px-8 sm:pt-16">
-        <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-3xl text-[var(--brass)] shadow-[var(--elev-1)]">
-          ₿
-        </span>
+        <BrandMark size={64} className="mx-auto" />
         <p className="eyebrow mt-8">Private personal finance for macOS</p>
         <h1 className="display-1 mx-auto mt-4 max-w-3xl font-display text-5xl leading-[1.05] sm:text-6xl">
           {SITE.tagline}

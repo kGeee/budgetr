@@ -70,6 +70,9 @@ export function AssetAllocation({
   assetClassOverrides,
   geographyOverrides,
   knownSectors,
+  sectorSlices,
+  activeSector,
+  onSelectSector,
 }: {
   rows: AllocRow[];
   total: number;
@@ -77,7 +80,22 @@ export function AssetAllocation({
   assetClassOverrides: Record<string, string>;
   geographyOverrides: Record<string, string>;
   knownSectors: string[];
+  /** Live sector allocation, folded in from the panel that used to sit below. */
+  sectorSlices: SectorSlice[];
+  activeSector: string | null;
+  onSelectSector: (sector: string | null) => void;
 }) {
+  /**
+   * One panel, three views.
+   *
+   * There used to be two allocation cards stacked on this page, both labelled
+   * with the same total, both answering "what is this portfolio made of" — and
+   * disagreeing: asset class said cash 11.3% and crypto 10.6%, sector said cash
+   * 12.5% and crypto 11.3%. Nothing on the page explained the difference, and
+   * nothing could, because they were separately derived. Tabs put one
+   * denominator on screen at a time.
+   */
+  const [view, setView] = useState<"class" | "sector" | "region">("class");
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -265,8 +283,8 @@ export function AssetAllocation({
   return (
     <Card className="p-0">
       <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Asset allocation &amp; targets</span>
-        <span className="text-xs text-[var(--faint)]">drift vs. your target mix</span>
+        <span className="eyebrow">Allocation</span>
+        <span className="text-xs text-[var(--faint)]">vs. your target mix</span>
       </div>
 
       {concentration.length > 0 && (
@@ -292,51 +310,114 @@ export function AssetAllocation({
         </div>
       )}
 
-      <div className="grid gap-8 px-6 py-6 lg:grid-cols-2">
-        <div className="min-w-0">
-          <p className="eyebrow mb-3">By asset class</p>
-          <AllocationDonut data={assetChartData} total={assetTotal} />
-          <ul className="mt-4 space-y-1.5 text-sm">
-            {assetChartData.map((d) => (
-              <li key={d.sector} className="flex items-center justify-between gap-3">
-                <span className="flex min-w-0 items-center gap-2.5 text-[var(--muted)]">
-                  <span
-                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
-                    style={{ background: d.color }}
-                  />
-                  <span className="truncate">{d.sector}</span>
-                </span>
-                <span className="mono shrink-0 text-[var(--muted)]">
-                  {assetTotal ? ((d.value / assetTotal) * 100).toFixed(1) : "0.0"}%
-                </span>
-              </li>
-            ))}
-          </ul>
+      <div className="border-b border-line px-6 pt-4">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              { id: "class", label: "Asset class" },
+              { id: "sector", label: "Sector" },
+              { id: "region", label: "Region" },
+            ] as const
+          ).map((t) => {
+            const on = view === t.id;
+            // A view with nothing in it is offered but explains itself rather
+            // than rendering an empty chart on every single load.
+            const empty =
+              (t.id === "sector" && sectorSlices.length === 0) ||
+              (t.id === "region" && !geoClassified);
+            return (
+              <button
+                key={t.id}
+                onClick={() => setView(t.id)}
+                aria-current={on ? "true" : undefined}
+                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                  on
+                    ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
+                    : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+                }`}
+              >
+                {t.label}
+                {empty && <span className="ml-1.5 text-[var(--faint)]">·</span>}
+              </button>
+            );
+          })}
+          {activeSector && (
+            <button
+              onClick={() => onSelectSector(null)}
+              className="ml-auto inline-flex items-center gap-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
+            >
+              <Tag size={11} /> {activeSector} <X size={11} />
+            </button>
+          )}
         </div>
+        <div className="h-4" />
+      </div>
 
-        <div className="min-w-0">
-          <p className="eyebrow mb-3">By geography</p>
+      {view === "class" && (
+        <div className="grid gap-8 px-6 py-6 lg:grid-cols-2">
+          <div className="min-w-0">
+            <AllocationDonut data={assetChartData} total={assetTotal} />
+          </div>
+          <div className="min-w-0">
+            <p className="eyebrow mb-3">Ranked by value</p>
+            <ul className="space-y-1.5 text-sm">
+              {assetChartData.map((d) => (
+                <li key={d.sector} className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-2.5 text-[var(--muted)]">
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ background: d.color }}
+                    />
+                    <span className="truncate">{d.sector}</span>
+                  </span>
+                  <span className="mono shrink-0 text-[var(--muted)]">
+                    {assetTotal ? ((d.value / assetTotal) * 100).toFixed(1) : "0.0"}%
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {view === "sector" &&
+        (sectorSlices.length > 0 ? (
+          <SectorView
+            slices={sectorSlices}
+            activeSector={activeSector}
+            onSelect={onSelectSector}
+          />
+        ) : (
+          <p className="px-6 py-10 text-center text-sm text-[var(--muted)]">
+            No sectors assigned yet. Tag a holding on the table below to start.
+          </p>
+        ))}
+
+      {view === "region" && (
+        <div className="px-6 py-6">
           {geoClassified ? (
-            <SectorBarChart data={geoChartData.filter((d) => d.sector !== UNCLASSIFIED_REGION)} />
+            <>
+              <SectorBarChart
+                data={geoChartData.filter((d) => d.sector !== UNCLASSIFIED_REGION)}
+              />
+              <p className="mt-3 text-xs text-[var(--faint)]">
+                {geoChartData.find((d) => d.sector === UNCLASSIFIED_REGION)
+                  ? `${formatCurrency(
+                      geoChartData.find((d) => d.sector === UNCLASSIFIED_REGION)!.value,
+                    )} still unclassified.`
+                  : "Every position has a region."}
+              </p>
+            </>
           ) : (
-            <div className="flex h-[180px] flex-col items-center justify-center gap-1 text-center">
-              <p className="font-display text-base text-[var(--paper)]">No geography yet</p>
+            <div className="flex flex-col items-center justify-center gap-1 py-8 text-center">
+              <p className="font-display text-base text-[var(--paper)]">No regions assigned yet</p>
               <p className="text-sm text-[var(--muted)]">
-                Assign a region below to chart your geographic exposure.
+                Assign a region in “Classify positions” below to chart geographic exposure.
               </p>
             </div>
           )}
-          {geoClassified && (
-            <p className="mt-3 text-xs text-[var(--faint)]">
-              {geoChartData.find((d) => d.sector === UNCLASSIFIED_REGION)
-                ? `${formatCurrency(
-                    geoChartData.find((d) => d.sector === UNCLASSIFIED_REGION)!.value,
-                  )} still unclassified.`
-                : "Every position has a region."}
-            </p>
-          )}
         </div>
-      </div>
+      )}
 
       {/* ── Targets & drift ─────────────────────────────────────────────── */}
       <div className="border-t border-line">
@@ -886,5 +967,89 @@ function AddTargetRow({
         <X size={14} />
       </button>
     </div>
+  );
+}
+
+
+/**
+ * Sector allocation — donut, ranked bars, and a table you can drill into.
+ *
+ * Moved here from its own card. It was a second panel labelled with the same
+ * total as the one above it, and the two disagreed; as a tab it shares the
+ * page's single denominator and the drill-down still filters the holdings table.
+ */
+function SectorView({
+  slices,
+  activeSector,
+  onSelect,
+}: {
+  slices: SectorSlice[];
+  activeSector: string | null;
+  onSelect: (sector: string | null) => void;
+}) {
+  const total = slices.reduce((s, d) => s + d.value, 0);
+  return (
+    <>
+      <div className="grid gap-8 px-6 py-6 lg:grid-cols-2">
+        <AllocationDonut
+          data={slices}
+          total={total}
+          activeSector={activeSector}
+          onSelect={onSelect}
+        />
+        <div className="min-w-0">
+          <p className="eyebrow mb-3">Ranked by value</p>
+          <SectorBarChart data={slices} activeSector={activeSector} onSelect={onSelect} />
+        </div>
+      </div>
+      <div className="overflow-x-auto border-t border-line">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-line text-left">
+              {["Sector", "Value", "% of portfolio", "Holdings"].map((h, i) => (
+                <th
+                  key={h}
+                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {slices.map((d) => {
+              const pct = total ? (d.value / total) * 100 : 0;
+              const active = d.sector === activeSector;
+              return (
+                <tr
+                  key={d.sector}
+                  onClick={() => onSelect(active ? null : d.sector)}
+                  className={`cursor-pointer border-b border-line/60 last:border-0 transition-colors hover:bg-[var(--panel-2)] ${
+                    active ? "bg-[var(--panel-2)]" : ""
+                  }`}
+                >
+                  <td className="px-6 py-2.5">
+                    <span className="inline-flex items-center gap-2.5">
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                        style={{ background: d.color }}
+                      />
+                      <span className={active ? "text-[var(--paper)]" : "text-[var(--muted)]"}>
+                        {d.sector}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="mono px-6 py-2.5 text-right">{formatCurrency(d.value)}</td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
+                    {pct.toFixed(1)}%
+                  </td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{d.count}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

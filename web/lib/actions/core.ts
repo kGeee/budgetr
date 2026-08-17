@@ -14,6 +14,7 @@ import {
   investmentAssetClasses,
   investmentGeographies,
   investmentSectors,
+  items,
   manualHoldings,
   savedFilters,
   tagBudgets,
@@ -28,6 +29,8 @@ import {
   vendorGroups,
   wallets,
 } from "@/db/schema";
+import { decrypt } from "@/lib/crypto";
+import { getPlaidClient } from "@/lib/plaid";
 import { isValidAddress, type Chain } from "@/lib/onchain";
 import { syncWallet, type WalletSyncResult } from "@/lib/wallet-sync";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -81,6 +84,65 @@ function revalidateAll() {
 export async function setAccountExcluded(id: string, excluded: boolean) {
   await db.update(accounts).set({ excluded }).where(eq(accounts.id, id));
   revalidateAll();
+}
+
+export type DisconnectResult = {
+  /** Institution name (or id) that was removed, for the confirmation copy. */
+  institution: string;
+  /** Accounts, transactions and holdings dropped with it. */
+  accountsRemoved: number;
+  /**
+   * Whether Plaid's /item/remove succeeded. False means the local rows are gone
+   * but the link is still live on Plaid's side — worth telling the user, since
+   * they'd otherwise keep being billed for an item they think they deleted.
+   */
+  revokedAtPlaid: boolean;
+  /** Present when the revoke failed; the reason, for the toast. */
+  revokeError?: string;
+};
+
+/**
+ * Disconnect an institution: revoke the Plaid link, then delete the item.
+ *
+ * Deleting the item cascades to its accounts and from there to transactions,
+ * holdings, investment transactions and recurring streams (see db/schema.ts) —
+ * so this is a full erase of everything that connection brought in, not a hide.
+ * `setAccountExcluded` is the reversible option and stays the right one for
+ * "stop counting this"; this is for "I closed the account / linked the wrong
+ * bank / I'm done with this app touching my data".
+ *
+ * Order matters. Plaid is called FIRST, because if the local row is gone we no
+ * longer have the access token needed to revoke, and the item would linger on
+ * Plaid's side forever (still billable, still syncable by anyone holding the
+ * token). But a Plaid failure does NOT block the local delete: the user asked to
+ * remove their data, and a network error or an already-revoked token must not
+ * trap rows in the database. The result says which half happened.
+ */
+export async function disconnectItem(itemId: string): Promise<DisconnectResult> {
+  const item = db.select().from(items).where(eq(items.id, itemId)).get();
+  if (!item) throw new Error("That connection no longer exists.");
+
+  const owned = db.select({ id: accounts.id }).from(accounts).where(eq(accounts.itemId, itemId)).all();
+  const institution = item.institutionName ?? item.id;
+
+  // The 'manual' container holds imported/hand-entered accounts and has no real
+  // access token — there is nothing at Plaid to revoke.
+  let revokedAtPlaid = item.source !== "plaid";
+  let revokeError: string | undefined;
+
+  if (item.source === "plaid") {
+    try {
+      await getPlaidClient().itemRemove({ access_token: decrypt(item.accessToken) });
+      revokedAtPlaid = true;
+    } catch (err) {
+      revokeError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  db.delete(items).where(eq(items.id, itemId)).run();
+
+  revalidateAll();
+  return { institution, accountsRemoved: owned.length, revokedAtPlaid, revokeError };
 }
 
 // ── Categories ──────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import { BrandMark } from "@/components/brand-mark";
 import { PlaidLink } from "@/components/plaid-link";
 import { DashboardView, type ResolvedWidget } from "@/components/dashboard-view";
 import { DataFreshnessBanner } from "@/components/data-freshness";
@@ -66,9 +67,7 @@ export default async function Overview() {
 function EmptyState() {
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-lg flex-col items-center justify-center text-center">
-      <span className="grid h-14 w-14 place-items-center rounded-2xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-2xl text-[var(--brass)]">
-        ₿
-      </span>
+      <BrandMark size={56} />
       <h1 className="mt-6 font-display text-4xl tracking-tight">Open your ledger</h1>
       <p className="mt-3 text-[var(--muted)]">
         Connect your card, brokerage, and bank to track net worth, spending, and income — all

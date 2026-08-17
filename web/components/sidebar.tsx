@@ -28,6 +28,7 @@ import {
   Settings,
   type LucideIcon,
 } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { formatCurrency } from "@/lib/utils";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
@@ -166,9 +167,7 @@ export function Sidebar({ accounts, webDemo = false }: { accounts: SidebarAccoun
           href="/overview"
           className="group mb-9 flex items-center gap-3 px-2 transition-opacity hover:opacity-90"
         >
-          <span className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-lg text-[var(--brass)] shadow-[var(--elev-1)] transition-colors duration-200 group-hover:border-[var(--brass)]">
-            ₿
-          </span>
+          <BrandMark size={36} />
           <span className="font-display text-2xl tracking-tight">budgetr</span>
         </Link>
 
@@ -295,9 +294,7 @@ export function MobileNav({ webDemo = false }: { webDemo?: boolean }) {
             onClick={() => setOpen(false)}
             className="flex items-center gap-3"
           >
-            <span className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--brass-dim)] bg-[var(--panel)] font-display text-lg text-[var(--brass)]">
-              ₿
-            </span>
+            <BrandMark size={36} />
             <span className="font-display text-2xl tracking-tight">budgetr</span>
           </Link>
           <button

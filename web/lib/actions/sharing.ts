@@ -128,6 +128,22 @@ export type SaveSplitInput = {
   /** Category your own share reports under. Defaults to the txn's current one. */
   myCategoryId?: string | null;
   note?: string | null;
+  /**
+   * Receipt line items + their assignment, serialized. Round-tripped verbatim so
+   * reopening an itemized split restores exactly what you built. Never read for
+   * money — `participants` is still what determines who owes what.
+   */
+  itemsJson?: string | null;
+  /**
+   * Amount the split is computed over, when it isn't the transaction's own.
+   *
+   * Exists for one real case: a restaurant authorises the pre-tip amount and
+   * settles the tip a day later, so a $90.00 receipt sits against an $83.64
+   * transaction. Your friends owe their share of the $90 — that is what will
+   * land on the statement — so the receipt is the basis and the bank is simply
+   * behind. Positive magnitude; the transaction's sign is applied.
+   */
+  basis?: number | null;
 };
 
 /**
@@ -148,7 +164,15 @@ export async function saveSharedExpense(
     .get();
   if (!txn) return { ok: false, error: "Transaction not found." };
 
-  const computed = computeSplit(txn.amount, input.mode, input.participants);
+  // The split is computed over the basis (usually the transaction amount). See
+  // SaveSplitInput.basis for the pending-tip case where they differ.
+  const sign = txn.amount < 0 ? -1 : 1;
+  const basis =
+    input.basis != null && Math.abs(input.basis) > 0.004
+      ? Math.abs(input.basis) * sign
+      : txn.amount;
+
+  const computed = computeSplit(basis, input.mode, input.participants);
   if (!computed.ok) return { ok: false, error: computed.error };
   const { myShare, shares } = computed.split;
 
@@ -156,7 +180,6 @@ export async function saveSharedExpense(
   // it — an install that predates the splitter won't have been re-seeded.
   seedReimbursableCategory();
 
-  const owedTotal = Math.round(shares.reduce((a, s) => a + s.amount, 0) * 100) / 100;
   const myCategoryId =
     input.myCategoryId !== undefined ? input.myCategoryId : (txn.userCategoryId ?? null);
 
@@ -171,7 +194,7 @@ export async function saveSharedExpense(
         transactionId: input.txnId,
         myShare,
         note: input.note?.trim() || null,
-        itemsJson: null,
+        itemsJson: input.itemsJson ?? null,
         createdAt: new Date(),
       })
       .run();
@@ -189,15 +212,24 @@ export async function saveSharedExpense(
 
     // Reporting overlay. Your share keeps its real category; the reimbursable
     // remainder goes to the transfer-group category so it leaves spend totals.
-    // A zero share (you paid but didn't partake) contributes no row — splits
-    // must be non-zero, and the reimbursable row alone still reconciles.
-    if (Math.abs(myShare) >= 0.005) {
+    //
+    // The overlay must reconcile to the TRANSACTION, not the basis — splits that
+    // don't sum to their parent corrupt every spend query that reads them. When
+    // the two differ (a tip still settling) your share is scaled into the
+    // recorded amount and the reimbursable row takes the remainder, so the
+    // ledger stays exact while the amounts people owe stay true. Re-saving after
+    // the charge settles brings the two back into line.
+    const scale = Math.abs(basis) > 0.004 ? txn.amount / basis : 1;
+    const myOverlay = Math.round(myShare * scale * 100) / 100;
+    const owedOverlay = Math.round((txn.amount - myOverlay) * 100) / 100;
+
+    if (Math.abs(myOverlay) >= 0.005) {
       t.insert(transactionSplits)
         .values({
           id: id("split"),
           transactionId: input.txnId,
           categoryId: myCategoryId,
-          amount: myShare,
+          amount: myOverlay,
           note: "Your share",
         })
         .run();
@@ -207,7 +239,7 @@ export async function saveSharedExpense(
         id: id("split"),
         transactionId: input.txnId,
         categoryId: REIMBURSABLE_CATEGORY_ID,
-        amount: owedTotal,
+        amount: owedOverlay,
         note: `Owed by ${shares.length} ${shares.length === 1 ? "person" : "people"}`,
       })
       .run();

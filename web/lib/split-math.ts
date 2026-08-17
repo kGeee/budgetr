@@ -28,7 +28,7 @@ export type ComputedSplit = {
  * at a time to the largest fractional remainders (largest-remainder method).
  * Ties break toward the earlier participant, so the result is deterministic.
  */
-function allocateCents(totalCents: number, weights: number[]): number[] {
+export function allocateCents(totalCents: number, weights: number[]): number[] {
   const totalWeight = weights.reduce((a, w) => a + w, 0);
   if (totalWeight <= 0) return weights.map(() => 0);
 

@@ -1,15 +1,13 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { PayoffDiagram } from "@/components/payoff-diagram";
 import {
-  AllocationDonut,
   PIE_COLORS,
-  SectorBarChart,
   Sparkline,
   TickerPriceChart,
   type SectorSlice,
@@ -33,13 +31,14 @@ import {
   parseOccSymbol,
   riskLevel,
 } from "@/lib/options";
-import { OptionsAnalytics } from "@/components/options-analytics";
 import { AssetAllocation, type AllocRow } from "@/components/asset-allocation";
 import { DividendPanel } from "@/components/dividend-panel";
 import type { InvestmentTxnRow } from "@/lib/queries";
 import type { DividendSummary } from "@/lib/dividends";
-import type { DividendCalendarEntry, OptionQuote, PricePoint as YahooPricePoint } from "@/lib/yahoo";
+import type { DividendCalendarEntry, PricePoint as YahooPricePoint } from "@/lib/yahoo";
 import type { BenchmarkKey, ComparisonRow } from "@/lib/benchmark";
+import { classifyHolding, isCashLike, KIND_LABEL, KIND_ORDER, type HoldingKind } from "@/lib/portfolio/classify";
+import { computeStanding, standingDetail, standingHeadline, WINDOW_LABEL } from "@/lib/portfolio/standing";
 
 const UNASSIGNED = "Unassigned";
 import {
@@ -90,9 +89,6 @@ export function PortfolioView({
   comparison = [],
   transactions = [],
   knownSectors = [],
-  ivByOcc = {},
-  underlyingPrices = {},
-  chainByUnderlying = {},
   allocationTargets = {},
   assetClassOverrides = {},
   geographyOverrides = {},
@@ -114,12 +110,6 @@ export function PortfolioView({
   comparison?: ComparisonRow[];
   transactions?: InvestmentTxnRow[];
   knownSectors?: string[];
-  /** Live implied volatility by OCC symbol (from the Yahoo option chains). */
-  ivByOcc?: Record<string, number>;
-  /** Underlying spot price by symbol (Yahoo chain quote fallback). */
-  underlyingPrices?: Record<string, number>;
-  /** Full option-chain quotes by underlying (Yahoo), for the chain browser. */
-  chainByUnderlying?: Record<string, OptionQuote[]>;
   /** User-set target allocation percentages, keyed by dimension (see targetKeyFor). */
   allocationTargets?: Record<string, number>;
   /** Per-position asset-class overrides, keyed by sectorKey. */
@@ -133,14 +123,20 @@ export function PortfolioView({
 }) {
   // Exclude option (OCC-symbol) legs — Finnhub can't quote them, so skip the
   // wasted live-price subscriptions; they're valued from Plaid instead.
-  const symbols = useMemo(
-    () =>
-      holdings
-        .filter((h) => !parseOccSymbol(h.ticker))
-        .map((h) => h.ticker)
-        .filter((t): t is string => Boolean(t)),
-    [holdings],
-  );
+  const symbols = useMemo(() => {
+    const plain = holdings
+      .filter((h) => !parseOccSymbol(h.ticker))
+      .map((h) => h.ticker)
+      .filter((t): t is string => Boolean(t));
+    // Option legs can't be quoted, but their UNDERLYINGS can — and the option
+    // rows need a spot price for their in-the-money and assignment flags. They
+    // used to come from the full option chains this page fetched; a Finnhub
+    // quote is the same number for a fraction of the bytes.
+    const underlyings = holdings
+      .map((h) => parseOccSymbol(h.ticker)?.underlying)
+      .filter((u): u is string => Boolean(u));
+    return [...new Set([...plain, ...underlyings])];
+  }, [holdings]);
 
   return (
     <LivePricesProvider symbols={symbols}>
@@ -153,9 +149,6 @@ export function PortfolioView({
         comparison={comparison}
         transactions={transactions}
         knownSectors={knownSectors}
-        ivByOcc={ivByOcc}
-        underlyingPrices={underlyingPrices}
-        chainByUnderlying={chainByUnderlying}
         allocationTargets={allocationTargets}
         assetClassOverrides={assetClassOverrides}
         geographyOverrides={geographyOverrides}
@@ -316,6 +309,71 @@ function optionMetrics(
   };
 }
 
+/**
+ * Positions below this share of the portfolio fold into one line. On the account
+ * this was written against, 16 of 36 holdings sat under 1% each — half the table
+ * for 4.5% of the money.
+ */
+const TAIL_WEIGHT_PCT = 1;
+
+/**
+ * Sort on magnitude, not signed value.
+ *
+ * An option structure whose short leg dominates carries a negative market value
+ * (the MU bull put spread nets −$1,538). Sorted signed, it lands below a $2.27
+ * dust position — the largest thing on the screen by exposure, filed last.
+ */
+function metricForSort(it: RowItem, key: Exclude<SortKey, "name">): number {
+  const v = it.m[key];
+  if (v == null) return Number.NEGATIVE_INFINITY;
+  return key === "value" || key === "weight" ? Math.abs(v) : v;
+}
+
+/**
+ * Collapse a brokerage's currency balances into one row per symbol.
+ *
+ * Three separate `CUR:USD` lines — one per account, $17.5k between them — read
+ * as three positions you chose. They're one balance shown three ways, and the
+ * per-account detail is on the Accounts page where it belongs.
+ */
+function mergeCashRows(rows: HoldingRow[], quotes: Record<string, LiveQuote>): HoldingRow[] {
+  const cash = rows.filter(isCashLike);
+  if (cash.length < 2) return rows;
+
+  const bySymbol = new Map<string, HoldingRow[]>();
+  for (const h of cash) {
+    const key = (h.ticker ?? "cash").toUpperCase();
+    const arr = bySymbol.get(key);
+    if (arr) arr.push(h);
+    else bySymbol.set(key, [h]);
+  }
+
+  const merged: HoldingRow[] = [];
+  for (const [, group] of bySymbol) {
+    if (group.length === 1) {
+      merged.push(group[0]);
+      continue;
+    }
+    const value = group.reduce((a, h) => a + effectiveValue(h, quotes), 0);
+    const accounts = new Set(group.map((h) => h.accountName).filter(Boolean));
+    merged.push({
+      ...group[0],
+      id: `cash:${(group[0].ticker ?? "cash").toUpperCase()}`,
+      quantity: group.reduce((a, h) => a + (h.quantity ?? 0), 0),
+      // Value is carried directly so the merged row never re-multiplies a
+      // per-unit price against a summed quantity.
+      value,
+      price: null,
+      closePrice: null,
+      costBasis: null,
+      accountName: `${accounts.size} accounts`,
+      securityName: group[0].securityName,
+    });
+  }
+
+  return [...rows.filter((h) => !isCashLike(h)), ...merged];
+}
+
 /** Sortable metric keys (Security sorts by `name`, handled separately). */
 type SortKey =
   | "name"
@@ -355,7 +413,10 @@ type ColumnDef = {
 
 const COLUMNS: ColumnDef[] = [
   { key: "account", label: "Account", align: "left", sortable: false, defaultVisible: true },
-  { key: "trend", label: "Trend", align: "left", sortable: false, defaultVisible: true },
+  // Trend is off by default: at this row height the sparkline is four glyphs
+  // wide and reads as texture, while it costs a column that Day — the figure
+  // people actually scan for — was competing with.
+  { key: "trend", label: "Trend", align: "left", sortable: false, defaultVisible: false },
   { key: "qty", label: "Qty", align: "right", sortable: true, defaultVisible: true },
   { key: "price", label: "Price", align: "right", sortable: true, defaultVisible: true },
   { key: "day", label: "Day", align: "right", sortable: true, defaultVisible: true },
@@ -367,7 +428,9 @@ const COLUMNS: ColumnDef[] = [
   { key: "pnl", label: "P&L", align: "right", sortable: true, defaultVisible: true },
 ];
 
-const COLS_STORAGE_KEY = "budgetr.holdings.columns.v1";
+// v2: Trend dropped from the defaults. Bumping the key re-seeds saved layouts
+// once rather than leaving every existing user on the old column set forever.
+const COLS_STORAGE_KEY = "budgetr.holdings.columns.v2";
 
 function defaultVisibleColumns(): ColumnKey[] {
   return COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key);
@@ -430,9 +493,6 @@ function PortfolioInner({
   comparison,
   transactions,
   knownSectors,
-  ivByOcc,
-  underlyingPrices,
-  chainByUnderlying,
   allocationTargets,
   assetClassOverrides,
   geographyOverrides,
@@ -447,9 +507,6 @@ function PortfolioInner({
   comparison: ComparisonRow[];
   transactions: InvestmentTxnRow[];
   knownSectors: string[];
-  ivByOcc: Record<string, number>;
-  underlyingPrices: Record<string, number>;
-  chainByUnderlying: Record<string, OptionQuote[]>;
   allocationTargets: Record<string, number>;
   assetClassOverrides: Record<string, string>;
   geographyOverrides: Record<string, string>;
@@ -467,6 +524,8 @@ function PortfolioInner({
   // persists in the background and a refresh reconciles).
   const [sectorEdits, setSectorEdits] = useState<Record<string, string | null>>({});
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
+  /** Un-folds the sub-1% tail. Off by default; the money is never hidden, only the rows. */
+  const [showAll, setShowAll] = useState(false);
   const { visible: visibleCols, toggle: toggleColumn, reset: resetColumns } = useColumnPrefs();
   const orderedCols = useMemo(
     () => COLUMNS.filter((c) => visibleCols.includes(c.key)),
@@ -517,7 +576,6 @@ function PortfolioInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holdings, quotes, sectorEdits, sectorColor]);
 
-  const allocationTotal = allocation.reduce((s, d) => s + d.value, 0);
   // Suggestions for the sector editor: known sectors from the DB plus any added
   // optimistically this session, deduped.
   const sectorOptions = useMemo(
@@ -582,7 +640,7 @@ function PortfolioInner({
   // normalized metrics and are sorted together by the chosen column, with rows
   // missing that metric sinking to the bottom in both directions.
   const items = useMemo(() => {
-    const singles = visible.filter((h) => !parseOccSymbol(h.ticker));
+    const singles = mergeCashRows(visible.filter((h) => !parseOccSymbol(h.ticker)), quotes);
     const optionLegs = visible.filter((h) => parseOccSymbol(h.ticker) != null);
 
     const byUnderlying = new Map<string, HoldingRow[]>();
@@ -614,14 +672,68 @@ function PortfolioInner({
       if (sortKey === "name") {
         return a.name.localeCompare(b.name) * (sortDir === "asc" ? 1 : -1);
       }
-      const av = a.m[sortKey] ?? Number.NEGATIVE_INFINITY;
-      const bv = b.m[sortKey] ?? Number.NEGATIVE_INFINITY;
+      // A short-dominant spread has negative value. Ranking it against long
+      // positions files a −$1,538 liability below $2.27 of dust, so rows sort on
+      // magnitude and the sign is carried by the row's own liability label.
+      const av = metricForSort(a, sortKey);
+      const bv = metricForSort(b, sortKey);
       if (av === bv) return 0;
       if (av === Number.NEGATIVE_INFINITY) return 1;
       if (bv === Number.NEGATIVE_INFINITY) return -1;
       return (av - bv) * dir;
     });
   }, [visible, quotes, sortKey, sortDir, total]);
+
+  /**
+   * The table's real shape: one section per kind of thing, each with its own
+   * subtotal, plus a single fold for the long tail of sub-1% positions.
+   *
+   * Grouping is what makes the columns honest. `Qty · Price · Day · P&L` fits an
+   * equity; it does not fit brokerage cash or a two-leg spread, and a flat list
+   * forced all three through the same header.
+   */
+  const groups = useMemo(() => {
+    const kindOf = (it: RowItem): HoldingKind =>
+      it.kind === "options" ? "option" : classifyHolding(it.h);
+
+    const tail: RowItem[] = [];
+    const byKind = new Map<HoldingKind, RowItem[]>();
+
+    for (const it of items) {
+      const kind = kindOf(it);
+      // Options never fold: a near-worthless leg is exactly the row you need to
+      // see, and its small weight is the reason it would have been hidden.
+      const foldable = !showAll && kind !== "option" && Math.abs(it.m.weight) < TAIL_WEIGHT_PCT;
+      if (foldable) {
+        tail.push(it);
+        continue;
+      }
+      const arr = byKind.get(kind);
+      if (arr) arr.push(it);
+      else byKind.set(kind, [it]);
+    }
+
+    const sections = KIND_ORDER.filter((k) => byKind.has(k)).map((kind) => {
+      const rows = byKind.get(kind)!;
+      return {
+        kind,
+        label: KIND_LABEL[kind],
+        rows,
+        value: rows.reduce((a, r) => a + r.m.value, 0),
+        weight: rows.reduce((a, r) => a + r.m.weight, 0),
+        pnl: rows.some((r) => r.m.pnl != null)
+          ? rows.reduce((a, r) => a + (r.m.pnl ?? 0), 0)
+          : null,
+      };
+    });
+
+    return {
+      sections,
+      tail,
+      tailValue: tail.reduce((a, r) => a + r.m.value, 0),
+      tailWeight: tail.reduce((a, r) => a + r.m.weight, 0),
+    };
+  }, [items, showAll]);
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -650,6 +762,16 @@ function PortfolioInner({
     ? (dayPriced.reduce((sum, row) => sum + Math.abs(row.value), 0) / Math.abs(total)) * 100
     : 0;
 
+  // How much of the "portfolio" is money rather than an investment. On the
+  // account this was built against that's $22.8k across three CUR:USD balances
+  // and a sweep fund — a twelfth of the headline, invested in nothing.
+  const cashValue = useMemo(
+    () => holdings.filter(isCashLike).reduce((s, h) => s + effectiveValue(h, quotes), 0),
+    [holdings, quotes],
+  );
+
+  const standing = useMemo(() => computeStanding(comparison), [comparison]);
+
   return (
     <div className="space-y-7">
       <SectionJump
@@ -657,37 +779,72 @@ function PortfolioInner({
         hasDividends={Boolean(dividendSummary && dividendSummary.payments.length > 0)}
       />
 
-      <div id="value" className="grid scroll-mt-28 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Market value" value={total} big />
-        <Stat
-          label="Day change"
-          value={dayChange}
-          signed
-          pct={dayChangePctTotal}
-          detail={`${Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote`}
-          detailTitle={
-            "Day change is computed only from holdings with a live intraday quote " +
-            "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
-            "funds, and untracked symbols are excluded, so this share is below 100%."
-          }
+      <div id="value" className="scroll-mt-28 space-y-4">
+        <StandingHeader
+          standing={standing}
+          total={total}
+          cashValue={cashValue}
+          positions={holdings.length}
         />
-        <Stat
-          label="Unrealized gain"
-          value={gain}
-          signed
-          pct={gainPct}
-          hint="View breakdown"
-          onClick={() => setShowBreakdown(true)}
-        />
-        <Stat
-          label="Cost basis"
-          value={totalCost}
-          detail={
-            uncostedValue > 0.005
-              ? `${formatCurrency(uncostedValue)} has no basis`
-              : "All positions costed"
-          }
-        />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat
+            label="Market value"
+            value={total}
+            detail={
+              cashValue > 0.005
+                ? `${formatCurrency(cashValue)} of it cash`
+                : "all of it invested"
+            }
+          />
+          {/* Never render a computed zero as a measurement. Before quotes land,
+              every holding's day change is null, which summed to a confident
+              "+$0.00 · 0% of value has a live quote" — indistinguishable from a
+              genuinely flat market. Say we're still pricing instead. */}
+          {dayPriced.length === 0 ? (
+            <PendingStat label="Day change" note={`pricing ${holdings.length} positions…`} />
+          ) : (
+            <Stat
+              label="Day change"
+              value={dayChange}
+              signed
+              pct={dayChangePctTotal}
+              detail={`${Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote`}
+              detailTitle={
+                "Day change is computed only from holdings with a live intraday quote " +
+                "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
+                "funds, and untracked symbols are excluded, so this share is below 100%."
+              }
+            />
+          )}
+          <Stat
+            label="Unrealized gain"
+            value={gain}
+            signed
+            pct={gainPct}
+            hint="View breakdown"
+            onClick={() => setShowBreakdown(true)}
+          />
+          <Stat
+            label="Cost basis"
+            value={totalCost}
+            detail={
+              uncostedValue > 0.005
+                ? `${formatCurrency(uncostedValue)} has no basis`
+                : "All positions costed"
+            }
+          />
+        </div>
+
+        {/* The no-basis caveat silently qualifies two headline numbers, so it
+            gets said out loud rather than living in tile fine print. */}
+        {uncostedValue > 0.005 && (
+          <p className="rounded-[var(--radius)] border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_9%,transparent)] px-4 py-2.5 text-xs text-[var(--brass)]">
+            {formatCurrency(uncostedValue)} of value has no cost basis. Unrealized gain and
+            yield-on-cost are computed over the remaining {formatCurrency(costedValue)} — not the
+            whole portfolio.
+          </p>
+        )}
       </div>
 
       {showBreakdown && (
@@ -716,9 +873,9 @@ function PortfolioInner({
         </div>
       </Card>
 
-      <BenchmarkComparison comparison={comparison} />
+      <BenchmarkComparison comparison={comparison} standing={standing} />
 
-      <div id="allocation" className="scroll-mt-28 space-y-7">
+      <div id="allocation" className="scroll-mt-28">
         <AssetAllocation
           rows={allocRows}
           total={total}
@@ -726,13 +883,9 @@ function PortfolioInner({
           assetClassOverrides={assetClassOverrides}
           geographyOverrides={geographyOverrides}
           knownSectors={sectorOptions}
-        />
-
-        <SectorAllocation
-          allocation={allocation}
-          total={allocationTotal}
+          sectorSlices={allocation}
           activeSector={sectorFilter}
-          onSelect={setSectorFilter}
+          onSelectSector={setSectorFilter}
         />
       </div>
 
@@ -808,31 +961,74 @@ function PortfolioInner({
             </tr>
           </thead>
           <tbody>
-            {items.map((it) =>
-              it.kind === "holding" ? (
-                <HoldingRowView
-                  key={it.h.id}
-                  h={it.h}
-                  m={it.m}
-                  columns={orderedCols}
-                  history={it.h.ticker ? histories[it.h.ticker.toUpperCase()] : undefined}
-                  txns={it.h.ticker ? txnsByTicker[it.h.ticker.toUpperCase()] ?? [] : []}
-                  sector={sectorOf(it.h)}
-                  sectorOptions={sectorOptions}
-                  onSetSector={(name) => setSector(it.h.sectorKey, name)}
-                  sectorColor={sectorColor}
+            {groups.sections.map((section) => (
+              <Fragment key={section.kind}>
+                <GroupHeaderRow
+                  section={section}
+                  span={orderedCols.length + 2}
+                  currency={holdings[0]?.currency ?? "USD"}
                 />
-              ) : (
-                <OptionGroupRow
-                  key={`opt:${it.underlying}`}
-                  underlying={it.underlying}
-                  legs={it.legs}
-                  m={it.m}
-                  columns={orderedCols}
-                  quotes={quotes}
-                  underlyingPrices={underlyingPrices}
-                />
-              ),
+                {section.rows.map((it) =>
+                  it.kind === "holding" ? (
+                    <HoldingRowView
+                      key={it.h.id}
+                      h={it.h}
+                      m={it.m}
+                      columns={orderedCols}
+                      history={it.h.ticker ? histories[it.h.ticker.toUpperCase()] : undefined}
+                      txns={it.h.ticker ? txnsByTicker[it.h.ticker.toUpperCase()] ?? [] : []}
+                      sector={sectorOf(it.h)}
+                      sectorOptions={sectorOptions}
+                      onSetSector={(name) => setSector(it.h.sectorKey, name)}
+                      sectorColor={sectorColor}
+                    />
+                  ) : (
+                    <OptionGroupRow
+                      key={`opt:${it.underlying}`}
+                      underlying={it.underlying}
+                      legs={it.legs}
+                      m={it.m}
+                      columns={orderedCols}
+                      quotes={quotes}
+                    />
+                  ),
+                )}
+              </Fragment>
+            ))}
+
+            {/* The long tail, folded. The money is counted in the line — only
+                the rows are hidden, and one click brings them back. */}
+            {groups.tail.length > 0 && (
+              <tr className="border-b border-line/60 last:border-0">
+                <td colSpan={orderedCols.length + 2} className="px-3 py-2.5">
+                  <button
+                    onClick={() => setShowAll(true)}
+                    className="flex w-full items-center gap-3 text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+                  >
+                    <ChevronDown size={13} className="text-[var(--faint)]" />
+                    <span>
+                      {groups.tail.length} positions under {TAIL_WEIGHT_PCT}% each
+                    </span>
+                    <span className="mono ml-auto text-[var(--faint)]">
+                      {formatMoney(groups.tailValue, holdings[0]?.currency ?? "USD")} ·{" "}
+                      {groups.tailWeight.toFixed(1)}%
+                    </span>
+                    <span className="text-[var(--brass)]">Show</span>
+                  </button>
+                </td>
+              </tr>
+            )}
+            {showAll && (
+              <tr className="border-b border-line/60 last:border-0">
+                <td colSpan={orderedCols.length + 2} className="px-3 py-2">
+                  <button
+                    onClick={() => setShowAll(false)}
+                    className="text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+                  >
+                    Fold small positions again
+                  </button>
+                </td>
+              </tr>
             )}
             {holdings.length === 0 && (
               <tr>
@@ -861,14 +1057,7 @@ function PortfolioInner({
 
       {optionLegs.length > 0 && (
         <div id="options" className="scroll-mt-28">
-          <OptionsAnalytics
-            legs={optionLegs}
-            quotes={quotes}
-            ivByOcc={ivByOcc}
-            underlyingPrices={underlyingPrices}
-            chainByUnderlying={chainByUnderlying}
-            currency={optionLegs[0]?.currency ?? "USD"}
-          />
+          <OptionsSummaryCard legs={optionLegs} quotes={quotes} />
         </div>
       )}
 
@@ -940,6 +1129,163 @@ function SectionJump({ hasOptions, hasDividends }: { hasOptions: boolean; hasDiv
         </a>
       ))}
     </nav>
+  );
+}
+
+/**
+ * What the Portfolio desk says about options now: the three numbers that matter
+ * and a door to the desk that owns the subject.
+ *
+ * This replaces an entire options desk rendered inline — expiration calendar,
+ * per-structure payoff cards, a live Greeks table, and the full CBOE chain for
+ * every underlying held. Hundreds of rows and three multi-megabyte chain fetches
+ * (MU's is 7.3 MB, over Next's data-cache ceiling, so it was re-fetched on every
+ * single render) sat below the fold on a page most visits never scroll to the
+ * end of — for positions worth 0.1% of the portfolio. All of it already exists,
+ * unchanged, at /investments/options.
+ */
+function OptionsSummaryCard({
+  legs,
+  quotes,
+}: {
+  legs: HoldingRow[];
+  quotes: Record<string, LiveQuote>;
+}) {
+  const currency = legs[0]?.currency ?? "USD";
+  const value = legs.reduce((a, h) => a + effectiveValue(h, quotes), 0);
+  const costed = legs.filter((h) => h.costBasis != null);
+  const pnl = costed.length
+    ? costed.reduce((a, h) => a + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
+    : null;
+
+  const structures = new Set(
+    legs.map((h) => {
+      const p = parseOccSymbol(h.ticker)!;
+      return `${p.underlying}:${p.expiry}`;
+    }),
+  );
+
+  const dtes = legs
+    .map((h) => daysToExpiry(parseOccSymbol(h.ticker)!.expiry))
+    .filter((d) => Number.isFinite(d));
+  const soonest = dtes.length ? Math.min(...dtes) : null;
+  const expiringSoon = soonest != null ? dtes.filter((d) => d === soonest).length : 0;
+  const urgent = soonest != null && soonest <= 7;
+
+  return (
+    <Card className="p-0">
+      <div className="flex items-center justify-between border-b border-line px-6 py-4">
+        <span className="eyebrow">Options</span>
+        <span className="text-xs text-[var(--faint)]">
+          {structures.size} {structures.size === 1 ? "structure" : "structures"} · {legs.length}{" "}
+          {legs.length === 1 ? "leg" : "legs"}
+        </span>
+      </div>
+
+      <div className="px-6 py-5">
+        {urgent && (
+          <p className="mb-4 font-display text-lg leading-snug">
+            <span className="text-[var(--coral)]">
+              {expiringSoon} {expiringSoon === 1 ? "leg expires" : "legs expire"} in{" "}
+              {soonest === 0 ? "under a day" : `${soonest} ${soonest === 1 ? "day" : "days"}`}.
+            </span>{" "}
+            <span className="text-[var(--muted)]">Check them before the close.</span>
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <p className="eyebrow">Net value</p>
+            <p className="mono mt-1.5 text-lg">{formatMoney(value, currency)}</p>
+            {value < 0 && <p className="mt-0.5 text-xs text-[var(--coral)]">net short — a liability</p>}
+          </div>
+          <div>
+            <p className="eyebrow">Open P&amp;L</p>
+            <p
+              className={`mono mt-1.5 text-lg ${
+                pnl == null
+                  ? "text-[var(--faint)]"
+                  : pnl >= 0
+                    ? "text-[var(--jade)]"
+                    : "text-[var(--coral)]"
+              }`}
+            >
+              {pnl == null
+                ? "—"
+                : `${pnl >= 0 ? "+" : "−"}${formatMoney(Math.abs(pnl), currency)}`}
+            </p>
+          </div>
+          <div>
+            <p className="eyebrow">Next expiry</p>
+            <p className={`mono mt-1.5 text-lg ${urgent ? "text-[var(--coral)]" : ""}`}>
+              {soonest == null ? "—" : soonest < 0 ? "expired" : `${soonest}d`}
+            </p>
+          </div>
+        </div>
+
+        <Link
+          href="/investments/options"
+          className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-xs text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+        >
+          Open the options desk
+          <ArrowUpRight size={12} />
+        </Link>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * A section heading inside the holdings table: what these rows are, how many,
+ * and what they add up to.
+ *
+ * The subtotal is the point. "Funds & ETFs · $90,676 · 49.9%" is a fact about
+ * the portfolio that a flat list of 41 rows never states, and it's the one most
+ * people are actually scanning for.
+ */
+function GroupHeaderRow({
+  section,
+  span,
+  currency,
+}: {
+  section: {
+    kind: HoldingKind;
+    label: string;
+    rows: unknown[];
+    value: number;
+    weight: number;
+    pnl: number | null;
+  };
+  span: number;
+  currency: string;
+}) {
+  const n = section.rows.length;
+  return (
+    <tr className="bg-[var(--panel-2)]/60">
+      <td colSpan={span} className="px-3 py-2">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="eyebrow">{section.label}</span>
+          <span className="text-[11px] text-[var(--faint)]">
+            {n} {section.kind === "option" ? (n === 1 ? "structure" : "structures") : n === 1 ? "position" : "positions"}
+          </span>
+          <span className="mono ml-auto text-xs text-[var(--muted)]">
+            {formatMoney(section.value, currency)} · {section.weight.toFixed(1)}%
+            {section.pnl != null && (
+              <span className={section.pnl >= 0 ? " text-[var(--jade)]" : " text-[var(--coral)]"}>
+                {" · "}
+                {section.pnl >= 0 ? "+" : "−"}
+                {formatMoney(Math.abs(section.pnl), currency)}
+              </span>
+            )}
+            {/* Cash is in the total but it isn't a bet — say so once, here,
+                rather than letting it pad the "invested" figure silently. */}
+            {section.kind === "cash" && (
+              <span className="text-[var(--faint)]"> · not invested</span>
+            )}
+          </span>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -1304,14 +1650,12 @@ function OptionGroupRow({
   m,
   columns,
   quotes,
-  underlyingPrices,
 }: {
   underlying: string;
   legs: HoldingRow[];
   m: RowMetrics;
   columns: ColumnDef[];
   quotes: Record<string, LiveQuote>;
-  underlyingPrices: Record<string, number>;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1322,7 +1666,7 @@ function OptionGroupRow({
   const currency = m.currency;
 
   const underlyingPrice =
-    quotes[underlying.toUpperCase()]?.price ?? underlyingPrices[underlying] ?? null;
+    quotes[underlying.toUpperCase()]?.price ?? null;
 
   // Soonest expiry across this underlying's legs drives the group's DTE chip.
   const soonestDte = Math.min(...parsed.map(({ p }) => daysToExpiry(p.expiry)));
@@ -1354,6 +1698,17 @@ function OptionGroupRow({
           <span className="inline-flex flex-wrap items-center gap-2.5">
             <span className="mono font-semibold tracking-tight text-[var(--brass)]">{underlying}</span>
             <span className="text-[var(--muted)]">{summary}</span>
+            {/* A short-dominant spread is worth negative money: closing it costs
+                cash. Calling that "small" — which is what an unlabelled −$1,538
+                in a Value column reads as — is the opposite of the truth. */}
+            {m.value < -0.005 && (
+              <span
+                title="Net short: this position is a liability, not an asset"
+                className="mono rounded bg-[var(--coral)]/15 px-1.5 py-0.5 text-[10px] text-[var(--coral)]"
+              >
+                liability
+              </span>
+            )}
             <Link
               href={`/investments/options/chain?ticker=${encodeURIComponent(underlying)}`}
               onClick={(e) => e.stopPropagation()}
@@ -1456,7 +1811,7 @@ function OptionGroupRow({
                         </div>
                         <PayoffDiagram
                           legs={st.payoffLegs}
-                          currentPrice={underlyingPrices[underlying] ?? null}
+                          currentPrice={underlyingPrice}
                           breakevens={st.breakevens}
                           className="w-full"
                         />
@@ -1748,101 +2103,6 @@ function SectorEditor({
   );
 }
 
-/**
- * Allocation-by-sector panel: a labelled donut, a value-ranked bar chart, and a
- * breakdown table (value, % of portfolio, # holdings). Selecting any sector in
- * any of the three drives the shared drill-down filter on the holdings table.
- * All three recompute live from the same `allocation` (prices + sector edits).
- */
-function SectorAllocation({
-  allocation,
-  total,
-  activeSector,
-  onSelect,
-}: {
-  allocation: SectorSlice[];
-  total: number;
-  activeSector: string | null;
-  onSelect: (sector: string | null) => void;
-}) {
-  if (allocation.length === 0) return null;
-
-  return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Allocation by sector</span>
-        {activeSector && (
-          <button
-            onClick={() => onSelect(null)}
-            className="inline-flex items-center gap-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
-          >
-            <Check size={11} /> {activeSector} <X size={11} />
-          </button>
-        )}
-      </div>
-      <div className="grid gap-8 px-6 py-6 lg:grid-cols-2">
-        <AllocationDonut
-          data={allocation}
-          total={total}
-          activeSector={activeSector}
-          onSelect={onSelect}
-        />
-        <div className="min-w-0">
-          <p className="eyebrow mb-3">Ranked by value</p>
-          <SectorBarChart data={allocation} activeSector={activeSector} onSelect={onSelect} />
-        </div>
-      </div>
-      <div className="overflow-x-auto border-t border-line">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-line text-left">
-              {["Sector", "Value", "% of portfolio", "Holdings"].map((h, i) => (
-                <th
-                  key={h}
-                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {allocation.map((d) => {
-              const pct = total ? (d.value / total) * 100 : 0;
-              const active = d.sector === activeSector;
-              return (
-                <tr
-                  key={d.sector}
-                  onClick={() => onSelect(active ? null : d.sector)}
-                  className={`cursor-pointer border-b border-line/60 last:border-0 transition-colors hover:bg-[var(--panel-2)] ${
-                    active ? "bg-[var(--panel-2)]" : ""
-                  }`}
-                >
-                  <td className="px-6 py-2.5">
-                    <span className="inline-flex items-center gap-2.5">
-                      <span
-                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
-                        style={{ background: d.color }}
-                      />
-                      <span className={active ? "text-[var(--paper)]" : "text-[var(--muted)]"}>
-                        {d.sector}
-                      </span>
-                    </span>
-                  </td>
-                  <td className="mono px-6 py-2.5 text-right">{formatCurrency(d.value)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
-                    {pct.toFixed(1)}%
-                  </td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{d.count}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}
 
 /**
  * Compact out/under-performance table: one row per time window comparing the
@@ -1850,36 +2110,67 @@ function SectorAllocation({
  * portfolio outperformed and coral when it lagged. Hidden until there's at
  * least one window's worth of comparison data.
  */
-function BenchmarkComparison({ comparison }: { comparison: ComparisonRow[] }) {
+function BenchmarkComparison({
+  comparison,
+  standing,
+}: {
+  comparison: ComparisonRow[];
+  standing: ReturnType<typeof computeStanding>;
+}) {
   if (comparison.length === 0) return null;
 
   const pct = (v: number | null) =>
     v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}%`;
 
-  const WINDOW_LABEL: Record<ComparisonRow["window"], string> = {
-    "1M": "1 month",
-    "3M": "3 months",
-    "6M": "6 months",
-    "1Y": "1 year",
-    YTD: "Year to date",
-  };
+  /**
+   * The gap between two percentages is measured in percentage POINTS. Printing
+   * it as "−25.7%" invites reading it as a 25.7% loss, which is a different and
+   * much scarier number than "25.7 points behind the index".
+   */
+  const points = (v: number | null) =>
+    v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)} pts`;
+
+  const benchmark = standing.benchmark;
+  const gapFor = (r: ComparisonRow) => (benchmark === "SPY" ? r.deltaVsSpy : r.deltaVsQqq);
 
   return (
     <Card className="p-0">
       <div className="flex items-center justify-between border-b border-line px-6 py-4">
         <span className="eyebrow">Return vs benchmarks</span>
-        <span
-          className="text-xs text-[var(--faint)]"
-          title="Time-weighted return: deposits and withdrawals are backed out so the portfolio compares fairly to an index that has no cash flows."
-        >
-          time-weighted return · deposits excluded
-        </span>
+        <span className="text-xs text-[var(--faint)]">deposits excluded</span>
       </div>
+
+      {/* The table already contained this sentence; it just never said it. */}
+      {standing.state !== "unknown" && (
+        <div className="border-b border-line px-6 py-4">
+          <p className="font-display text-lg leading-snug">
+            <span
+              className={
+                standing.state === "behind" ? "text-[var(--coral)]" : "text-[var(--jade)]"
+              }
+            >
+              {standing.behindEverywhere
+                ? `Behind ${benchmark} in every window.`
+                : `${standingHeadline(standing)} over ${standing.windowLabel.toLowerCase()}.`}
+            </span>{" "}
+            <span className="text-[var(--muted)]">
+              {standing.behindEverywhere
+                ? `The gap widens the further back you look — a year out it is ${Math.abs(standing.gapPoints!).toFixed(1)} points.`
+                : "Measured against the index over the same days."}
+            </span>
+          </p>
+          <p className="mt-1.5 text-xs text-[var(--muted)]">
+            Your deposits are removed before comparing, so this measures the picks, not the
+            paycheque.
+          </p>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm">
           <thead>
             <tr className="border-b border-line text-left">
-              {["Window", "Portfolio", "SPY", "QQQ", "Δ vs SPY", "Δ vs QQQ"].map((h, i) => (
+              {["Window", "You", "SPY", "QQQ", `Gap vs ${benchmark}`].map((h, i) => (
                 <th
                   key={h}
                   className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
@@ -1897,27 +2188,32 @@ function BenchmarkComparison({ comparison }: { comparison: ComparisonRow[] }) {
                   : r.portfolioPct >= 0
                     ? "text-[var(--jade)]"
                     : "text-[var(--coral)]";
-              const delta = (v: number | null) => (
-                <td
-                  className={`mono px-6 py-2.5 text-right ${
-                    v == null
-                      ? "text-[var(--faint)]"
-                      : v >= 0
-                        ? "text-[var(--jade)]"
-                        : "text-[var(--coral)]"
+              const gap = gapFor(r);
+              // The window the page leads with is marked, so the headline and the
+              // table visibly agree rather than making you find the row.
+              const lead = r.window === standing.window;
+              return (
+                <tr
+                  key={r.window}
+                  className={`border-b border-line/60 last:border-0 ${
+                    lead ? "bg-[var(--panel-2)]/50" : ""
                   }`}
                 >
-                  {pct(v)}
-                </td>
-              );
-              return (
-                <tr key={r.window} className="border-b border-line/60 last:border-0">
                   <td className="px-6 py-2.5 text-[var(--muted)]">{WINDOW_LABEL[r.window]}</td>
                   <td className={`mono px-6 py-2.5 text-right ${pColor}`}>{pct(r.portfolioPct)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{pct(r.spyPct)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{pct(r.qqqPct)}</td>
-                  {delta(r.deltaVsSpy)}
-                  {delta(r.deltaVsQqq)}
+                  <td className="mono px-6 py-2.5 text-right text-[var(--faint)]">{pct(r.spyPct)}</td>
+                  <td className="mono px-6 py-2.5 text-right text-[var(--faint)]">{pct(r.qqqPct)}</td>
+                  <td
+                    className={`mono px-6 py-2.5 text-right ${
+                      gap == null
+                        ? "text-[var(--faint)]"
+                        : gap >= 0
+                          ? "text-[var(--jade)]"
+                          : "text-[var(--coral)]"
+                    } ${lead ? "font-semibold" : ""}`}
+                  >
+                    {points(gap)}
+                  </td>
                 </tr>
               );
             })}
@@ -2244,6 +2540,82 @@ function StatusBadge({ status }: { status: LiveStatus }) {
       />
       {c.label}
     </span>
+  );
+}
+
+/**
+ * The desk's opening line: what the portfolio actually returned, against the
+ * market, in points.
+ *
+ * This replaces a headline market value — a number that rises whenever you
+ * deposit and therefore cannot answer "is this working?". The comparison it
+ * shows was already being computed on every load and rendered only as a buried
+ * table row.
+ */
+function StandingHeader({
+  standing,
+  total,
+  cashValue,
+  positions,
+}: {
+  standing: ReturnType<typeof computeStanding>;
+  total: number;
+  cashValue: number;
+  positions: number;
+}) {
+  const unknown = standing.state === "unknown";
+  const behind = standing.state === "behind";
+  const tone = unknown
+    ? "text-[var(--muted)]"
+    : behind
+      ? "text-[var(--coral)]"
+      : "text-[var(--jade)]";
+
+  return (
+    <Card>
+      <p className="eyebrow">
+        Portfolio · {positions} {positions === 1 ? "position" : "positions"}
+        {standing.window ? ` · ${standing.windowLabel.toLowerCase()}` : ""}
+      </p>
+
+      {unknown ? (
+        <>
+          <p className="mt-2 font-display tabular text-4xl">{formatCurrency(total)}</p>
+          <p className="mt-2 max-w-xl text-sm text-[var(--muted)]">{standing.reason}</p>
+        </>
+      ) : (
+        <>
+          <p className={`mt-2 font-display tabular text-4xl ${tone}`}>
+            {standing.returnPct! >= 0 ? "+" : "−"}
+            {Math.abs(standing.returnPct!).toFixed(1)}%
+          </p>
+          <p className="mt-2 max-w-xl font-display text-lg leading-snug">
+            <span className={tone}>{standingHeadline(standing)}.</span>{" "}
+            <span className="text-[var(--muted)]">{standingDetail(standing)}</span>
+          </p>
+        </>
+      )}
+
+      <p className="mono mt-3 text-xs text-[var(--faint)]">
+        {formatCurrency(total)} market value
+        {cashValue > 0.005 && ` · ${formatCurrency(cashValue)} of it cash`}
+      </p>
+    </Card>
+  );
+}
+
+/**
+ * A stat that has nothing to say yet. Distinct from a zero on purpose — "we
+ * haven't priced this" and "it didn't move" are different facts, and the tile
+ * used to render both as +$0.00.
+ */
+function PendingStat({ label, note }: { label: string; note: string }) {
+  return (
+    <Card>
+      <p className="eyebrow">{label}</p>
+      <p className="mt-2 font-display tabular text-3xl text-[var(--muted)]">—</p>
+      <p className="mono mt-1 text-xs text-[var(--faint)]">{note}</p>
+    </Card>
   );
 }
 

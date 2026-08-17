@@ -12,6 +12,10 @@ import {
   removeSharedExpense,
   saveSharedExpense,
 } from "@/lib/actions-sharing";
+import { receiptScanAvailable } from "@/lib/actions-receipt";
+import { ReceiptSplit } from "@/components/transactions/receipt-split";
+import { allocateReceipt, receiptTotal } from "@/lib/receipt/allocate";
+import { ME as ITEM_ME, type ItemAssignment, type ParsedReceipt } from "@/lib/receipt/types";
 import type { PersonBalance } from "@/lib/sharing";
 
 /**
@@ -32,8 +36,16 @@ type Txn = {
   splitCount: number;
 };
 
-const MODES: { id: SplitMode; label: string }[] = [
+/**
+ * "By item" is a UI mode, not a storage mode: it resolves to exact per-person
+ * amounts and saves as `amounts`, so everything downstream — expense_shares, the
+ * reimbursable overlay, the balances page — stays one code path.
+ */
+type UiMode = SplitMode | "items";
+
+const MODES: { id: UiMode; label: string }[] = [
   { id: "even", label: "Evenly" },
+  { id: "items", label: "By item" },
   { id: "amounts", label: "Amounts" },
   { id: "percent", label: "Percent" },
 ];
@@ -102,7 +114,10 @@ function SplitModal({
   const [people, setPeople] = useState<PersonBalance[] | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [includeMe, setIncludeMe] = useState(true);
-  const [mode, setMode] = useState<SplitMode>("even");
+  const [mode, setMode] = useState<UiMode>("even");
+  const [receipt, setReceipt] = useState<ParsedReceipt | null>(null);
+  const [assignments, setAssignments] = useState<Record<string, ItemAssignment>>({});
+  const [scanAvailable, setScanAvailable] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [myCategoryId, setMyCategoryId] = useState<string | null>(transaction.categoryId);
   const [note, setNote] = useState("");
@@ -114,20 +129,35 @@ function SplitModal({
   const total = transaction.amount;
   const currency = transaction.currency;
 
-  // Load the roster and any split already on this transaction.
+  // Load the roster, any split already on this transaction, and whether this
+  // machine can scan a receipt at all.
   useEffect(() => {
     let live = true;
-    Promise.all([loadPeopleBalances(), loadSharedExpense(transaction.id)]).then(([ppl, ex]) => {
+    Promise.all([
+      loadPeopleBalances(),
+      loadSharedExpense(transaction.id),
+      receiptScanAvailable(),
+    ]).then(([ppl, ex, canScan]) => {
       if (!live) return;
       setPeople(ppl);
+      setScanAvailable(canScan);
       if (ex) {
         setExisting(true);
         setSelected(ex.shares.map((s) => s.personId));
         setIncludeMe(Math.abs(ex.myShare) >= 0.005);
         setNote(ex.note ?? "");
-        // Re-open in Amounts: the stored figures are authoritative, and we can't
-        // know whether they originally came from an even or percentage split.
-        setMode("amounts");
+        // An itemized split round-trips: restore the receipt and who was on what
+        // so editing means adjusting the meal, not retyping the numbers.
+        const saved = parseItemsJson(ex.itemsJson);
+        if (saved) {
+          setReceipt(saved.receipt);
+          setAssignments(saved.assignments);
+          setMode("items");
+        } else {
+          // Re-open in Amounts: the stored figures are authoritative, and we
+          // can't know whether they came from an even or percentage split.
+          setMode("amounts");
+        }
         setValues(
           Object.fromEntries(ex.shares.map((s) => [s.personId, Math.abs(s.amount).toFixed(2)])),
         );
@@ -152,19 +182,94 @@ function SplitModal({
     return rows;
   }, [selected, values, includeMe]);
 
-  const preview = useMemo(
-    () => computeSplit(total, mode, participants),
-    [total, mode, participants],
+  /** Roster for the itemized editor: you (when included) plus everyone selected. */
+  const itemParticipants = useMemo(
+    () => [
+      ...(includeMe ? [{ id: ITEM_ME, name: "You" }] : []),
+      ...selected.map((id) => ({ id, name: roster.find((p) => p.id === id)?.name ?? "—" })),
+    ],
+    [includeMe, selected, roster],
   );
+
+  const itemized = useMemo(
+    () =>
+      receipt
+        ? allocateReceipt({
+            receipt,
+            assignments,
+            participantIds: itemParticipants.map((p) => p.id),
+          })
+        : null,
+    [receipt, assignments, itemParticipants],
+  );
+
+  /**
+   * In "By item" the per-person amounts come from the receipt, so the shared
+   * allocator is driven with those figures rather than the manual inputs. The
+   * server recomputes from the same participants, so the two always agree.
+   */
+  const effectiveMode: SplitMode = mode === "items" ? "amounts" : mode;
+  const effectiveParticipants: SplitParticipant[] = useMemo(() => {
+    if (mode !== "items" || !itemized) return participants;
+    return itemized.people
+      .filter((p) => p.participantId !== ITEM_ME && p.total > 0.004)
+      .map((p) => ({ personId: p.participantId, value: p.total }));
+  }, [mode, itemized, participants]);
+
+  /**
+   * What the split is computed over. For an itemized split that's the receipt,
+   * not the transaction — when a tip is still settling the bank is simply behind
+   * the paper, and people owe what the paper says.
+   */
+  const basis = mode === "items" && receipt ? receiptTotal(receipt) : Math.abs(total);
+  const basisSigned = total < 0 ? -basis : basis;
+
+  const preview = useMemo(
+    () => computeSplit(basisSigned, effectiveMode, effectiveParticipants),
+    [basisSigned, effectiveMode, effectiveParticipants],
+  );
+
+  /**
+   * What still stops an itemized split from being saved.
+   *
+   * Deliberately narrow. The first version also blocked whenever the receipt
+   * total differed from the charge, which fires on almost every restaurant bill:
+   * tip is added at the terminal *after* the paper prints, so a $60 receipt
+   * against a $66.13 charge is normal. That gap is now closed automatically on
+   * scan and editable in the totals block, and the only thing left worth
+   * refusing is a split that doesn't add up to what was actually charged —
+   * because those numbers are what someone gets asked to pay.
+   */
+  const itemsBlocker: string | null = useMemo(() => {
+    if (mode !== "items") return null;
+    if (!receipt) return "Scan the receipt or add its lines.";
+    if (receipt.items.length === 0) return "Add at least one line from the receipt.";
+    if (itemized && itemized.unassignedItemIds.length > 0) {
+      const n = itemized.unassignedItemIds.length;
+      return `${n} ${n === 1 ? "line still needs" : "lines still need"} someone on it.`;
+    }
+    return null;
+  }, [mode, receipt, itemized]);
+
+  /**
+   * Not a blocker — a note. A receipt that runs ahead of the charge is the
+   * ordinary pending-tip case, and the split should still go through.
+   */
+  const pendingNote: string | null = useMemo(() => {
+    if (mode !== "items" || !receipt) return null;
+    const diff = Math.round((receiptTotal(receipt) - Math.abs(total)) * 100) / 100;
+    if (diff <= 0.004) return null;
+    return `Splitting the ${fmt(receiptTotal(receipt), currency)} receipt. ${fmt(Math.abs(total), currency)} has posted so far — the remaining ${fmt(diff, currency)} is a tip still settling.`;
+  }, [mode, receipt, total, currency]);
 
   /**
    * Switching modes seeds the new inputs from an even split, so Amounts and
    * Percent open on something sensible instead of empty boxes.
    */
-  function changeMode(next: SplitMode) {
+  function changeMode(next: UiMode) {
     setMode(next);
     setError(null);
-    if (next === "even") return;
+    if (next === "even" || next === "items") return;
     const even = computeSplit(total, "even", participants);
     if (!even.ok) return;
     const seeded: Record<string, string> = {};
@@ -207,6 +312,10 @@ function SplitModal({
   }
 
   function save() {
+    if (itemsBlocker) {
+      setError(itemsBlocker);
+      return;
+    }
     if (!preview.ok) {
       setError(preview.error);
       return;
@@ -214,10 +323,16 @@ function SplitModal({
     start(async () => {
       const res = await saveSharedExpense({
         txnId: transaction.id,
-        mode,
-        participants,
+        mode: effectiveMode,
+        participants: effectiveParticipants,
         myCategoryId,
         note,
+        // Kept so reopening restores the meal, not just the numbers. Cleared
+        // when the split is no longer itemized, or it would describe a split
+        // that no longer exists.
+        itemsJson:
+          mode === "items" && receipt ? JSON.stringify({ v: 1, receipt, assignments }) : null,
+        basis: mode === "items" ? basis : null,
       });
       if (!res.ok) {
         setError(res.error ?? "Could not save the split.");
@@ -256,7 +371,12 @@ function SplitModal({
         role="dialog"
         aria-modal="true"
         aria-label="Split this bill"
-        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)]"
+        className={`max-h-[90dvh] w-full overflow-y-auto rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)] ${
+          // The itemized editor is a table in disguise — a name, who's on it, a
+          // price and four controls per row. At the dialog's usual width the
+          // name column collapses to nothing.
+          mode === "items" ? "max-w-3xl" : "max-w-lg"
+        }`}
       >
         <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">
@@ -358,8 +478,32 @@ function SplitModal({
             </label>
           </div>
 
+          {/* By item: the receipt drives every figure, so the manual rows below
+              are replaced wholesale rather than shown alongside. */}
+          {mode === "items" && selected.length > 0 && (
+            <ReceiptSplit
+              transactionId={transaction.id}
+              currency={currency}
+              charged={Math.abs(total)}
+              participants={itemParticipants}
+              scanAvailable={scanAvailable}
+              receipt={receipt}
+              assignments={assignments}
+              onReceipt={(r, a) => {
+                setReceipt(r);
+                setAssignments(a);
+                setError(null);
+              }}
+              onAssignments={(a) => {
+                setAssignments(a);
+                setError(null);
+              }}
+              disabled={pending}
+            />
+          )}
+
           {/* Per-person breakdown */}
-          {selected.length > 0 && (
+          {mode !== "items" && selected.length > 0 && (
             <div className="space-y-1.5">
               {includeMe && (
                 <SplitRow
@@ -425,9 +569,15 @@ function SplitModal({
             />
           </div>
 
-          {(error || (!preview.ok && selected.length > 0)) && (
+          {pendingNote && !itemsBlocker && (
+            <p className="rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_10%,transparent)] px-3 py-2 text-xs text-[var(--brass)]">
+              {pendingNote}
+            </p>
+          )}
+
+          {(error || itemsBlocker || (!preview.ok && selected.length > 0)) && (
             <p className="text-xs text-[var(--coral)]">
-              {error ?? (!preview.ok ? preview.error : null)}
+              {error ?? itemsBlocker ?? (!preview.ok ? preview.error : null)}
             </p>
           )}
         </div>
@@ -450,7 +600,7 @@ function SplitModal({
           )}
           <button
             onClick={save}
-            disabled={pending || !preview.ok}
+            disabled={pending || !preview.ok || Boolean(itemsBlocker)}
             className="rounded-full bg-[var(--brass)] px-4 py-1.5 text-xs font-medium text-[var(--on-brass)] transition hover:brightness-105 disabled:opacity-40"
           >
             Save split
@@ -459,6 +609,28 @@ function SplitModal({
       </div>
     </div>
   );
+}
+
+/**
+ * Restore a saved itemized split. The blob is written by this component and
+ * versioned, but it lives in a column documented as opaque — so a shape we don't
+ * recognise is treated as "no saved receipt" rather than crashing the modal.
+ */
+function parseItemsJson(
+  raw: string | null,
+): { receipt: ParsedReceipt; assignments: Record<string, ItemAssignment> } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as {
+      v?: number;
+      receipt?: ParsedReceipt;
+      assignments?: Record<string, ItemAssignment>;
+    };
+    if (parsed.v !== 1 || !Array.isArray(parsed.receipt?.items)) return null;
+    return { receipt: parsed.receipt, assignments: parsed.assignments ?? {} };
+  } catch {
+    return null;
+  }
 }
 
 /** One participant line: name, their computed amount, and (per mode) an input. */
