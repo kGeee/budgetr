@@ -25,7 +25,6 @@ import {
 import { computeComparison, twrIndexSeries, type BenchmarkKey } from "@/lib/benchmark";
 import { parseOccSymbol } from "@/lib/options";
 import { getDividendCalendar } from "@/lib/yahoo";
-import { loadOptionChainContext } from "@/lib/options-desk";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (always fresh), but the Yahoo history fetches should
@@ -181,12 +180,11 @@ export default async function InvestmentsPage() {
   // read as outperformance.
   const comparison = computeComparison(portfolioReturnSeries, benchmarks);
 
-  // Options analytics: for the distinct OCC underlyings we hold, pull the option
-  // chains (only the expiries we actually own) for live IV + underlying prices.
-  // Shared with the Options desk — see lib/options-desk.ts.
-  const { ivByOcc, underlyingPrices, chainByUnderlying } = await loadOptionChainContext(
-    holdings.map((h) => h.ticker),
-  );
+  // No option chains are fetched here any more. The desk that needs them lives
+  // at /investments/options; this page shows a three-number summary and links to
+  // it. Dropping the fetch removes three multi-megabyte requests per render —
+  // MU's chain alone is 7.3 MB, over Next's 2 MB data-cache ceiling, so it was
+  // re-fetched every single time this page was drawn.
 
   // Ex-dividend calendar: pull Yahoo's upcoming ex-div/pay dates for the held
   // tickers, but only once we know some dividend income exists (the panel is
@@ -223,9 +221,6 @@ export default async function InvestmentsPage() {
         comparison={comparison}
         transactions={transactions}
         knownSectors={knownSectors}
-        ivByOcc={ivByOcc}
-        underlyingPrices={underlyingPrices}
-        chainByUnderlying={chainByUnderlying}
         allocationTargets={allocationTargets}
         assetClassOverrides={assetClassOverrides}
         geographyOverrides={geographyOverrides}
