@@ -6,9 +6,9 @@ import {
   itemsTotal,
   receiptTotal,
   reconcileToCharge,
-} from "./allocate";
-import { parseReceiptRows } from "./parse";
-import { ME } from "./types";
+} from "./allocate.js";
+import { parseReceiptRows } from "./parse.js";
+import { ME } from "./types.js";
 
 const IPPUDO = parseReceiptRows([
   "AKAMARU MODERN × 2 $48.00",
@@ -25,7 +25,8 @@ const IPPUDO = parseReceiptRows([
   "Total $90.00",
 ]);
 
-const [AKAMARU, BUNS, KARAAGE] = IPPUDO.items.map((i) => i.id);
+const ids = IPPUDO.items.map((i) => i.id);
+const [AKAMARU, BUNS, KARAAGE] = ids as [string, string, string];
 const A = ME;
 const B = "p_bea";
 const C = "p_cal";
@@ -45,7 +46,10 @@ describe("allocateReceipt — the real dinner: 3 people, $90", () => {
     participantIds: THREE,
   });
 
-  const byId = Object.fromEntries(split.people.map((p) => [p.participantId, p]));
+  const byId = Object.fromEntries(split.people.map((p) => [p.participantId, p])) as Record<
+    string,
+    (typeof split.people)[number]
+  >;
 
   it("splits to exactly the receipt total, no cent lost", () => {
     expect(sum(split.people.map((p) => p.total))).toBe(90);
@@ -54,28 +58,28 @@ describe("allocateReceipt — the real dinner: 3 people, $90", () => {
   });
 
   it("charges the ramen only to the two who ordered it", () => {
-    expect(byId[A].lines.find((l) => l.itemId === AKAMARU)?.amount).toBe(24);
-    expect(byId[B].lines.find((l) => l.itemId === AKAMARU)?.amount).toBe(24);
-    expect(byId[C].lines.find((l) => l.itemId === AKAMARU)).toBeUndefined();
+    expect(byId[A]!.lines.find((l) => l.itemId === AKAMARU)?.amount).toBe(24);
+    expect(byId[B]!.lines.find((l) => l.itemId === AKAMARU)?.amount).toBe(24);
+    expect(byId[C]!.lines.find((l) => l.itemId === AKAMARU)).toBeUndefined();
   });
 
   it("splits the shared plates three ways, distributing the odd cent", () => {
-    const buns = THREE.map((id) => byId[id].lines.find((l) => l.itemId === BUNS)!.amount);
+    const buns = THREE.map((id) => byId[id]!.lines.find((l) => l.itemId === BUNS)!.amount);
     expect(sum(buns)).toBe(16);
     expect(buns.sort()).toEqual([5.33, 5.33, 5.34]);
   });
 
   it("prorates tax and tip by what each person ate, not evenly", () => {
     // C only shared two plates, so C carries far less tax than A or B.
-    expect(byId[C].tax).toBeLessThan(byId[A].tax);
+    expect(byId[C]!.tax).toBeLessThan(byId[A]!.tax);
     expect(sum(split.people.map((p) => p.tax))).toBe(6.64);
     expect(sum(split.people.map((p) => p.tip))).toBe(6.36);
   });
 
   it("produces the per-person totals you would settle up with", () => {
-    expect(byId[A].total).toBe(39.37);
-    expect(byId[B].total).toBe(39.34);
-    expect(byId[C].total).toBe(11.29);
+    expect(byId[A]!.total).toBe(39.37);
+    expect(byId[B]!.total).toBe(39.34);
+    expect(byId[C]!.total).toBe(11.29);
   });
 });
 
@@ -86,10 +90,13 @@ describe("allocateReceipt — weights", () => {
       assignments: { [BUNS]: { [A]: 2, [B]: 1 } },
       participantIds: [A, B],
     });
-    const byId = Object.fromEntries(split.people.map((p) => [p.participantId, p]));
-    expect(byId[A].items).toBeCloseTo(10.67, 2);
-    expect(byId[B].items).toBeCloseTo(5.33, 2);
-    expect(sum([byId[A].items, byId[B].items])).toBe(16);
+    const byId = Object.fromEntries(split.people.map((p) => [p.participantId, p])) as Record<
+    string,
+    (typeof split.people)[number]
+  >;
+    expect(byId[A]!.items).toBeCloseTo(10.67, 2);
+    expect(byId[B]!.items).toBeCloseTo(5.33, 2);
+    expect(sum([byId[A]!.items, byId[B]!.items])).toBe(16);
   });
 
   it("records the weight and the denominator for the summary line", () => {
@@ -98,7 +105,7 @@ describe("allocateReceipt — weights", () => {
       assignments: { [BUNS]: { [A]: 2, [B]: 1 } },
       participantIds: [A, B],
     });
-    const line = split.people[0].lines[0];
+    const line = split.people[0]!.lines[0];
     expect(line).toMatchObject({ weight: 2, of: 3, label: "BUNS MEDLEY" });
   });
 });
@@ -162,7 +169,7 @@ describe("allocateReceipt — edges", () => {
   it("returns zeroes rather than dividing by zero on an empty receipt", () => {
     const empty = parseReceiptRows([]);
     const split = allocateReceipt({ receipt: empty, assignments: {}, participantIds: [A] });
-    expect(split.people[0].total).toBe(0);
+    expect(split.people[0]!.total).toBe(0);
     expect(split.allocated).toBe(0);
   });
 
@@ -251,7 +258,7 @@ describe("reconcileToCharge — the tip that was not on the receipt", () => {
 
   it("splits the reconciled receipt to exactly the amount charged", () => {
     const { receipt } = reconcileToCharge(printed, 66.13);
-    const [a, b] = receipt.items.map((i) => i.id);
+    const [a, b] = receipt.items.map((i) => i.id) as [string, string];
     const split = allocateReceipt({
       receipt,
       participantIds: [A, B, C],
@@ -267,7 +274,7 @@ describe("receiptTotal / itemsTotal / chargeGap", () => {
 
   it("computes from the lines, not the printed total", () => {
     // A printed total goes stale the moment a line is edited.
-    const edited = { ...r, items: [{ ...r.items[0], total: 20 }, r.items[1]] };
+    const edited = { ...r, items: [{ ...r.items[0]!, total: 20 }, r.items[1]!] };
     expect(itemsTotal(edited)).toBe(25);
     expect(receiptTotal(edited)).toBe(25);
   });

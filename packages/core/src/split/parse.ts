@@ -11,7 +11,7 @@
  * rather than dropped or invented.
  */
 
-import type { OcrLine, ParsedReceipt, ReceiptItem, ReceiptModifier } from "./types";
+import type { OcrLine, ParsedReceipt, ReceiptItem, ReceiptModifier } from "./types.js";
 
 /**
  * A money token at the END of a line. Two decimal places are required on
@@ -65,7 +65,9 @@ const norm = (s: string) => s.trim().toLowerCase().replace(/[.:•·]+/g, " ").r
 
 function money(match: RegExpMatchArray): number {
   const negative = Boolean(match[2] ?? match[3]);
-  const value = Number(`${match[4].replace(/,/g, "")}.${match[5]}`);
+  // Groups 4 and 5 are the integer and cents parts; the regex cannot match
+  // without them, so the assertion is a compile-time note, not a risk.
+  const value = Number(`${match[4]!.replace(/,/g, "")}.${match[5]}`);
   return negative ? -value : value;
 }
 
@@ -192,7 +194,7 @@ export function parseReceiptRows(rawRows: string[]): ParsedReceipt {
 
   for (let i = 0; i < rows.length; i++) {
     if (totalRowIdx.has(i)) continue;
-    const row = rows[i];
+    const row = rows[i]!;
     const label = norm(row.label);
 
     if (i >= firstTotalRow) {
@@ -254,7 +256,7 @@ export function parseReceiptRows(rawRows: string[]): ParsedReceipt {
       const inline = text.match(INLINE_MONEY);
       const mod: ReceiptModifier = {
         label: text.replace(INLINE_MONEY, "").replace(/[()]/g, "").replace(/\s+/g, " ").trim(),
-        price: inline ? Number(`${inline[1].replace(/,/g, "")}.${inline[2]}`) : null,
+        price: inline ? Number(`${inline[1]!.replace(/,/g, "")}.${inline[2]}`) : null,
       };
       if (mod.label || mod.price != null) pending.modifiers.push(mod);
       continue;
@@ -280,7 +282,7 @@ export function parseReceiptRows(rawRows: string[]): ParsedReceipt {
   // a headline above the order. When OCR groups it with the check number it can
   // look like a priced item — a phantom line worth the entire bill. Drop a
   // leading item that exactly equals the total when real items follow it.
-  if (items.length > 1 && totals.total != null && items[0].total === totals.total) {
+  if (items.length > 1 && totals.total != null && items[0]!.total === totals.total) {
     const rest = round2(items.slice(1).reduce((a, it) => a + it.total, 0));
     if (totals.subtotal == null || Math.abs(rest - totals.subtotal) < 0.01) items.shift();
   }

@@ -35,3 +35,4 @@ npm-debug.log*
 
 # marketing-only preview build
 .next-marketing/
+desktop/bin/receipt-ocr

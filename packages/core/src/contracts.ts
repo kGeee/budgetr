@@ -19,8 +19,8 @@
 // layer.
 
 // ── Format version. Bump on any breaking change to Summary/Outbox. ──
-export const SUMMARY_VERSION = 1;
-export const OUTBOX_VERSION = 1;
+export const SUMMARY_VERSION = 2;
+export const OUTBOX_VERSION = 2;
 
 // ── Desktop → Phone ────────────────────────────────────────────────
 
@@ -44,6 +44,75 @@ export interface Summary {
   spendByDay?: SparkPoint[];
   // Active categories in the desktop's display order; ≤ MAX_CATEGORIES.
   categories?: CategoryInfo[];
+  // ── v2: shared expenses ──────────────────────────────────────────
+  // People you split with, and what each of them nets out to. Optional so a
+  // v2 phone against a v1-shaped payload degrades to an empty tab rather than
+  // failing validation.
+  people?: PersonSummary[]; // ≤ MAX_PEOPLE
+  shared?: SharedExpenseSummary[]; // most recent first; ≤ MAX_SHARED
+  // Repayments the desktop believes it has spotted (a Venmo inflow matching an
+  // outstanding share), for one-tap confirmation on the phone.
+  settleSuggestions?: SettleSuggestionSummary[]; // ≤ MAX_SETTLE_SUGGESTIONS
+  /**
+   * Answers to `scanReceipt` ops, keyed by the op id that asked. The phone
+   * cannot read a receipt itself, so this is how the Mac replies — on the next
+   * poll, which is why the phone's scan UI is built around waiting rather than
+   * pretending to be instant.
+   */
+  scans?: ScanResultSummary[]; // ≤ MAX_SCAN_RESULTS
+}
+
+export interface ScanResultSummary {
+  /** The ScanReceiptOp.id this answers. */
+  opId: string;
+  txnId: string;
+  ts: number;
+  /** Parsed receipt as JSON (a ParsedReceipt), when the read succeeded. */
+  receiptJson?: string | null;
+  /** Why it failed, in the user's terms, when it didn't. */
+  error?: string | null;
+}
+
+export interface PersonSummary {
+  id: string;
+  name: string;
+  /** Hex, desktop-assigned, so both clients colour a person identically. */
+  color?: string | null;
+  /**
+   * Net position, signed: positive = they owe you. Already netted against
+   * settlements on the desktop; the phone never recomputes a balance.
+   */
+  cents: number;
+  /** Unsettled bills they appear on. */
+  openCount: number;
+  /** Last settlement, unix seconds — null if you have never squared up. */
+  lastSettledAt?: number | null;
+}
+
+export interface SharedExpenseSummary {
+  /** The shared-expense row id, not the transaction's. */
+  id: string;
+  txnId: string;
+  ts: number;
+  merchant: string;
+  /** The whole bill, positive cents. */
+  cents: number;
+  /** Your own slice of it. */
+  myCents: number;
+  shares: { personId: string; cents: number }[];
+  /** True when this split was built from a receipt, for the "by item" chip. */
+  itemized: boolean;
+  note?: string | null;
+}
+
+export interface SettleSuggestionSummary {
+  /** The inflow transaction that looks like a repayment. */
+  txnId: string;
+  personId: string;
+  ts: number;
+  cents: number;
+  /** Pre-rendered on the desktop, e.g. "Venmo · matches their Ippudo share". */
+  detail: string;
 }
 
 export interface SparkPoint {
@@ -162,7 +231,12 @@ export interface OutboxBatch {
   ops: Op[];
 }
 
-export type Op = RecategorizeOp | DismissAlertOp;
+export type Op =
+  | RecategorizeOp
+  | DismissAlertOp
+  | SplitBillOp
+  | RecordSettlementOp
+  | ScanReceiptOp;
 
 export interface OpBase {
   id: string; // uuid v4; idempotency key for the single op
@@ -180,6 +254,58 @@ export interface DismissAlertOp extends OpBase {
   alertId: string;
 }
 
+/**
+ * Split a bill the phone is looking at.
+ *
+ * Carries resolved per-person amounts rather than a mode plus inputs: the
+ * allocator is shared code (`allocateReceipt`), so the phone can compute the
+ * exact cents and the desktop stores them. The desktop still owns the
+ * accounting — it routes this through the same saveSharedExpense path the
+ * desktop UI uses, including the reimbursable transfer-category overlay.
+ */
+export interface SplitBillOp extends OpBase {
+  kind: 'splitBill';
+  txnId: string;
+  /** Positive cents owed, per person. Must reference known PersonSummary ids. */
+  shares: { personId: string; cents: number }[];
+  /**
+   * What the split was computed over, when it isn't the transaction's own
+   * amount — a restaurant that authorises pre-tip and settles the tip later.
+   */
+  basisCents?: number | null;
+  /** Receipt lines + assignment, opaque JSON, round-tripped for re-editing. */
+  itemsJson?: string | null;
+  note?: string | null;
+}
+
+/** "They paid me back." */
+export interface RecordSettlementOp extends OpBase {
+  kind: 'recordSettlement';
+  personId: string;
+  cents: number; // positive
+  /** The inflow this settles, when confirming a suggestion. */
+  txnId?: string | null;
+}
+
+/**
+ * A photographed receipt for the desktop to read.
+ *
+ * The phone cannot do this itself: Expo Go loads no custom native modules, so
+ * there is no on-device text recognition available to it. The Mac has Apple's
+ * Vision framework already wired, so the photo travels — sealed in the same
+ * end-to-end encrypted envelope as every other op, through a relay that holds
+ * only ciphertext — and the parsed lines come back in the next Summary.
+ *
+ * This is a weaker privacy claim than the desktop's ("never leaves your Mac")
+ * and the UI must say the weaker one.
+ */
+export interface ScanReceiptOp extends OpBase {
+  kind: 'scanReceipt';
+  txnId: string;
+  /** JPEG bytes, base64. Resized on device — see MAX_RECEIPT_BYTES. */
+  imageBase64: string;
+}
+
 // ── Contract bounds (shared by buildSummary and validators) ────────
 export const MAX_APPLIED_OP_IDS = 200;
 export const MAX_RECENT_TXNS = 40;
@@ -188,3 +314,14 @@ export const MAX_SECTOR_SLICES = 10;
 export const MAX_STRATEGIES = 8;
 export const MAX_CURVE_POINTS = 16;
 export const MAX_CATEGORIES = 96;
+export const MAX_PEOPLE = 32;
+export const MAX_SHARED = 40;
+export const MAX_SETTLE_SUGGESTIONS = 10;
+export const MAX_SCAN_RESULTS = 5;
+/**
+ * Ceiling for a receipt photo, before base64. Every other op is a small JSON
+ * object; this one carries an image, and an unbounded upload through a shared
+ * relay is a denial-of-service on your own channel. A 1600px-wide JPEG of a
+ * receipt lands around 250-400 KB, so 2 MB is headroom rather than a target.
+ */
+export const MAX_RECEIPT_BYTES = 2 * 1024 * 1024;

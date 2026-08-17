@@ -2,7 +2,7 @@
   "name": "budgetr",
   "version": "0.11.0",
   "private": true,
-  "description": "budgetr — personal finance, self-hosted",
+  "description": "budgetr \u2014 personal finance, self-hosted",
   "author": "budgetr",
   "main": "desktop/electron/main.js",
   "scripts": {
@@ -16,7 +16,7 @@
     "test:watch": "vitest",
     "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts",
     "dev:electron": "npm run web:rebuild && electron desktop/electron/main.js",
-    "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run electron:rebuild && CSC_IDENTITY_AUTO_DISCOVERY=${CSC_IDENTITY_AUTO_DISCOVERY:-false} electron-builder --mac --publish never",
+    "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run build:ocr && npm run electron:rebuild && CSC_IDENTITY_AUTO_DISCOVERY=${CSC_IDENTITY_AUTO_DISCOVERY:-false} electron-builder --mac --publish never",
     "electron:rebuild": "electron-rebuild -f -o better-sqlite3",
     "web:rebuild": "npm rebuild better-sqlite3",
     "db:generate": "drizzle-kit generate",
@@ -25,7 +25,8 @@
     "db:seed": "tsx --env-file-if-exists=.env.local scripts/seed-categories.ts",
     "db:reset-items": "tsx --env-file-if-exists=.env.local scripts/reset-items.ts",
     "db:studio": "drizzle-kit studio",
-    "sync": "tsx --env-file-if-exists=.env.local scripts/sync.ts"
+    "sync": "tsx --env-file-if-exists=.env.local scripts/sync.ts",
+    "build:ocr": "bash desktop/scripts/build-receipt-ocr.sh"
   },
   "engines": {
     "node": ">=20.9"
@@ -107,6 +108,12 @@
       "provider": "github",
       "owner": "kGeee",
       "repo": "budgetr"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "desktop/bin/receipt-ocr",
+        "to": "receipt-ocr"
+      }
+    ]
   }
 }

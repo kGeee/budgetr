@@ -19,7 +19,7 @@ import {
   HankenGrotesk_700Bold,
 } from "@expo-google-fonts/hanken-grotesk";
 import { SplineSansMono_500Medium, SplineSansMono_600SemiBold } from "@expo-google-fonts/spline-sans-mono";
-import { ArrowLeftRight, LineChart, PieChart, Wallet } from "lucide-react-native";
+import { ArrowLeftRight, LineChart, PieChart, Users, Wallet } from "lucide-react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { CompanionProvider, useCompanion } from "@/state/companion";
 import { PairingScreen } from "@/ui/pairing";
@@ -97,6 +97,10 @@ export default function RootLayout() {
           <Tabs.Screen
             name="activity"
             options={{ title: "Activity", tabBarIcon: ({ color }) => <ArrowLeftRight size={20} color={color} /> }}
+          />
+          <Tabs.Screen
+            name="shared"
+            options={{ title: "Shared", tabBarIcon: ({ color }) => <Users size={20} color={color} /> }}
           />
           <Tabs.Screen
             name="holdings"

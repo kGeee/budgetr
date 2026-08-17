@@ -14,8 +14,8 @@ import {
 } from "@/lib/actions-sharing";
 import { receiptScanAvailable } from "@/lib/actions-receipt";
 import { ReceiptSplit } from "@/components/transactions/receipt-split";
-import { allocateReceipt, receiptTotal } from "@/lib/receipt/allocate";
-import { ME as ITEM_ME, type ItemAssignment, type ParsedReceipt } from "@/lib/receipt/types";
+import { allocateReceipt, receiptTotal } from "@budgetr/core";
+import { ME as ITEM_ME, type ItemAssignment, type ParsedReceipt } from "@budgetr/core";
 import type { PersonBalance } from "@/lib/sharing";
 
 /**

@@ -6,9 +6,9 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { attachments, transactions } from "@/db/schema";
 import { saveAttachmentFile } from "@/lib/attachments";
-import { parseReceipt } from "@/lib/receipt/parse";
+import { parseReceipt } from "@budgetr/core";
 import { ocrAvailable, recognizeReceipt } from "@/lib/receipt/ocr";
-import type { ParsedReceipt } from "@/lib/receipt/types";
+import type { ParsedReceipt } from "@budgetr/core";
 
 /**
  * Server Actions for receipt scanning.

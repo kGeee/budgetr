@@ -10,6 +10,7 @@
 process.env.DEMO_DB = "1";
 
 import { beforeAll, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
 
 let db: typeof import("@/db").db;
 let schema: typeof import("@/db/schema");
@@ -252,5 +253,142 @@ describe("investments read-model", () => {
     expect(voo.sector).toBe("Broad Market");
     expect(voo.pnlCents).toBeUndefined(); // no basis recorded — never fake P&L
     expect(summary.positions.some((p) => p.symbol.includes("C00190000"))).toBe(false);
+  });
+});
+
+/**
+ * Contract v2: the phone can now split a bill and record a repayment. These are
+ * the first ops that move money rather than a label, so they get the same
+ * scrutiny as the desktop's own writes.
+ */
+describe("applyOps — shared expenses", () => {
+  beforeAll(() => {
+    const ts = new Date(NOW * 1000);
+    db.insert(schema.people)
+      .values([
+        { id: "p-eesh", name: "Eesh", archived: false, createdAt: ts },
+        { id: "p-vish", name: "Vishnu", archived: false, createdAt: ts },
+      ])
+      .run();
+    db.insert(schema.transactions)
+      .values({
+        id: "txn-dinner",
+        accountId: "acc-chk",
+        amount: 83.64, // authorised pre-tip; the receipt says 90.00
+        date: new Date().toISOString().slice(0, 10),
+        name: "IPPUDO",
+        pending: false,
+        userCategoryId: "cat_dining",
+      })
+      .run();
+  });
+
+  it("records who owes what, and parks the rest out of spending", () => {
+    const res = applyOps([
+      {
+        id: "op-split-1",
+        ts: NOW,
+        kind: "splitBill",
+        txnId: "txn-dinner",
+        shares: [
+          { personId: "p-eesh", cents: 3934 },
+          { personId: "p-vish", cents: 1129 },
+        ],
+        basisCents: 9000, // the receipt, not the pending charge
+        itemsJson: '{"v":1}',
+      },
+    ]);
+    expect(res.mutated).toBe(1);
+
+    const shares = db
+      .all<{ personId: string; amount: number }>(
+        sql`SELECT person_id AS personId, amount FROM expense_shares
+            WHERE shared_expense_id = (SELECT id FROM shared_expenses WHERE transaction_id = 'txn-dinner')`,
+      )
+      .sort((a, b) => b.amount - a.amount);
+    expect(shares).toEqual([
+      { personId: "p-eesh", amount: 39.34 },
+      { personId: "p-vish", amount: 11.29 },
+    ]);
+
+    // Your own share is measured against the receipt, which is what people owe.
+    const se = db.get<{ myShare: number; itemsJson: string | null }>(
+      sql`SELECT my_share AS myShare, items_json AS itemsJson FROM shared_expenses WHERE transaction_id = 'txn-dinner'`,
+    )!;
+    expect(se.myShare).toBe(39.37);
+    expect(se.itemsJson).toBe('{"v":1}');
+  });
+
+  it("keeps the reporting overlay reconciled to the transaction, not the receipt", () => {
+    // Splits that don't sum to their parent corrupt every spend query that
+    // reads them — so the overlay is scaled while the amounts owed stay true.
+    const total = db.get<{ n: number }>(
+      sql`SELECT ROUND(SUM(amount), 2) AS n FROM transaction_splits WHERE transaction_id = 'txn-dinner'`,
+    )!;
+    expect(total.n).toBe(83.64);
+
+    const reimb = db.get<{ n: number }>(
+      sql`SELECT amount AS n FROM transaction_splits
+          WHERE transaction_id = 'txn-dinner' AND category_id = 'cat_reimbursable'`,
+    );
+    expect(reimb).toBeTruthy();
+  });
+
+  it("is idempotent — a redelivered batch changes nothing", () => {
+    const before = db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expense_shares`)!.n;
+    const res = applyOps([
+      {
+        id: "op-split-1",
+        ts: NOW,
+        kind: "splitBill",
+        txnId: "txn-dinner",
+        shares: [{ personId: "p-eesh", cents: 3934 }],
+      },
+    ]);
+    expect(res.mutated).toBe(0);
+    expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expense_shares`)!.n).toBe(before);
+  });
+
+  it("acks a split naming a person who has since been deleted", () => {
+    const res = applyOps([
+      {
+        id: "op-split-gone",
+        ts: NOW + 1,
+        kind: "splitBill",
+        txnId: "txn-dinner",
+        shares: [{ personId: "p-deleted", cents: 100 }],
+      },
+    ]);
+    expect(res.mutated).toBe(0);
+    expect(store.getAppliedOpIds()).toContain("op-split-gone");
+  });
+
+  it("records a repayment once, even if the suggestion is confirmed twice", () => {
+    const op = {
+      id: "op-settle-1",
+      ts: NOW + 2,
+      kind: "recordSettlement" as const,
+      personId: "p-eesh",
+      cents: 3934,
+      txnId: "txn-2",
+    };
+    expect(applyOps([op]).mutated).toBe(1);
+    // A different op id, same inflow — the phone may not know it was recorded.
+    expect(applyOps([{ ...op, id: "op-settle-2" }]).mutated).toBe(0);
+    expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM settlements`)!.n).toBe(1);
+  });
+
+  it("surfaces the balance to the phone through the summary", () => {
+    const summary = core.buildSummary(buildReadModel(NOW));
+    const eesh = summary.people!.find((p) => p.id === "p-eesh")!;
+    // Owed 39.34, repaid 39.34 → square.
+    expect(eesh.cents).toBe(0);
+    const vish = summary.people!.find((p) => p.id === "p-vish")!;
+    expect(vish.cents).toBe(1129);
+
+    const bill = summary.shared!.find((e) => e.txnId === "txn-dinner")!;
+    expect(bill.itemized).toBe(true);
+    // Names reach the phone cleaned, the same as everywhere else.
+    expect(bill.merchant).toBe("Ippudo");
   });
 });

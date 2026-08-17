@@ -11,7 +11,8 @@
       "bundleIdentifier": "dev.budgetr.companion",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIViewControllerBasedStatusBarAppearance": false
+        "UIViewControllerBasedStatusBarAppearance": false,
+        "NSCameraUsageDescription": "Photograph a receipt so your Mac can read its line items and split the bill."
       },
       "entitlements": {
         "com.apple.security.application-groups": [

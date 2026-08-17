@@ -16,6 +16,7 @@ import {
   type Op,
   type OutboxBatch,
   type Summary,
+  MAX_RECEIPT_BYTES,
 } from './contracts.js';
 
 export class ContractValidationError extends Error {
@@ -192,6 +193,72 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
     });
   }
 
+  // ── v2: shared expenses. Optional throughout — an install that has never
+  // split a bill omits them, and a v2 phone must render an empty tab rather
+  // than reject the whole payload.
+  if (s.people !== undefined) {
+    reqArr(s.people, '$.people');
+    s.people.forEach((p, i) => {
+      const path = `$.people[${i}]`;
+      req(isRecord(p), path, 'must be an object');
+      reqStr(p.id, `${path}.id`);
+      reqStr(p.name, `${path}.name`);
+      reqInt(p.cents, `${path}.cents`);
+      reqInt(p.openCount, `${path}.openCount`);
+      if (p.color != null) reqStr(p.color, `${path}.color`);
+      if (p.lastSettledAt != null) reqInt(p.lastSettledAt, `${path}.lastSettledAt`);
+    });
+  }
+
+  if (s.shared !== undefined) {
+    reqArr(s.shared, '$.shared');
+    s.shared.forEach((e, i) => {
+      const path = `$.shared[${i}]`;
+      req(isRecord(e), path, 'must be an object');
+      reqStr(e.id, `${path}.id`);
+      reqStr(e.txnId, `${path}.txnId`);
+      reqInt(e.ts, `${path}.ts`);
+      reqStr(e.merchant, `${path}.merchant`);
+      reqInt(e.cents, `${path}.cents`);
+      reqInt(e.myCents, `${path}.myCents`);
+      reqArr(e.shares, `${path}.shares`);
+      e.shares.forEach((sh, j) => {
+        const sp = `${path}.shares[${j}]`;
+        req(isRecord(sh), sp, 'must be an object');
+        reqStr(sh.personId, `${sp}.personId`);
+        reqInt(sh.cents, `${sp}.cents`);
+      });
+      req(typeof e.itemized === 'boolean', `${path}.itemized`, 'must be a boolean');
+      if (e.note != null) reqStr(e.note, `${path}.note`);
+    });
+  }
+
+  if (s.settleSuggestions !== undefined) {
+    reqArr(s.settleSuggestions, '$.settleSuggestions');
+    s.settleSuggestions.forEach((sg, i) => {
+      const path = `$.settleSuggestions[${i}]`;
+      req(isRecord(sg), path, 'must be an object');
+      reqStr(sg.txnId, `${path}.txnId`);
+      reqStr(sg.personId, `${path}.personId`);
+      reqInt(sg.ts, `${path}.ts`);
+      reqInt(sg.cents, `${path}.cents`);
+      reqStr(sg.detail, `${path}.detail`);
+    });
+  }
+
+  if (s.scans !== undefined) {
+    reqArr(s.scans, '$.scans');
+    s.scans.forEach((sc, i) => {
+      const path = `$.scans[${i}]`;
+      req(isRecord(sc), path, 'must be an object');
+      reqStr(sc.opId, `${path}.opId`);
+      reqStr(sc.txnId, `${path}.txnId`);
+      reqInt(sc.ts, `${path}.ts`);
+      if (sc.receiptJson != null) reqStr(sc.receiptJson, `${path}.receiptJson`);
+      if (sc.error != null) reqStr(sc.error, `${path}.error`);
+    });
+  }
+
   if (s.investments !== undefined) {
     const inv = s.investments;
     req(isRecord(inv), '$.investments', 'must be an object');
@@ -261,6 +328,42 @@ function assertValidOp(op: unknown, path: string): asserts op is Op {
       return;
     case 'dismissAlert':
       reqStr(op.alertId, `${path}.alertId`);
+      return;
+    case 'splitBill': {
+      reqStr(op.txnId, `${path}.txnId`);
+      reqArr(op.shares, `${path}.shares`);
+      req(op.shares.length > 0, `${path}.shares`, 'must name at least one person');
+      op.shares.forEach((sh, i) => {
+        const p = `${path}.shares[${i}]`;
+        req(isRecord(sh), p, 'must be an object');
+        reqStr(sh.personId, `${p}.personId`);
+        reqInt(sh.cents, `${p}.cents`);
+        // A share of nothing is not a share, and a negative one would invert
+        // who owes whom on a device that cannot see the ledger to notice.
+        req((sh.cents as number) > 0, `${p}.cents`, 'must be positive');
+      });
+      if (op.basisCents != null) reqInt(op.basisCents, `${path}.basisCents`);
+      if (op.itemsJson != null) reqStr(op.itemsJson, `${path}.itemsJson`);
+      if (op.note != null) reqStr(op.note, `${path}.note`);
+      return;
+    }
+    case 'recordSettlement':
+      reqStr(op.personId, `${path}.personId`);
+      reqInt(op.cents, `${path}.cents`);
+      req((op.cents as number) > 0, `${path}.cents`, 'must be positive');
+      if (op.txnId != null) reqStr(op.txnId, `${path}.txnId`);
+      return;
+    case 'scanReceipt':
+      reqStr(op.txnId, `${path}.txnId`);
+      reqStr(op.imageBase64, `${path}.imageBase64`);
+      // Bounded here rather than at the transport: the relay stores ciphertext
+      // and cannot tell a receipt from a video, so the size rule has to live
+      // with the only code that knows what the field is meant to hold.
+      req(
+        (op.imageBase64 as string).length <= Math.ceil(MAX_RECEIPT_BYTES / 3) * 4,
+        `${path}.imageBase64`,
+        'receipt image is too large',
+      );
       return;
     default:
       // Unknown op kinds are a hard error: the desktop must never guess at an

@@ -35,6 +35,25 @@ function set(key: string, value: string): void {
     .run();
 }
 
+/**
+ * Small JSON blobs in app_settings. Used for transient companion state (scan
+ * answers) that would otherwise need a table for data measured in days.
+ * A corrupt value reads as absent rather than throwing — this is a cache.
+ */
+export function readJson<T>(key: string): T | null {
+  const raw = get(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function writeJson(key: string, value: unknown): void {
+  set(key, JSON.stringify(value));
+}
+
 function del(key: string): void {
   db.delete(appSettings).where(eq(appSettings.key, key)).run();
 }

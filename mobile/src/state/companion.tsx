@@ -32,6 +32,21 @@ interface CompanionState {
   refresh(opts?: { manual?: boolean }): Promise<void>;
   recategorize(txnId: string, toCategory: string): void;
   dismissAlert(alertId: string): void;
+  /** Record a bill split. `shares` are resolved cents, from the shared allocator. */
+  splitBill(input: {
+    txnId: string;
+    shares: { personId: string; cents: number }[];
+    basisCents?: number | null;
+    itemsJson?: string | null;
+    note?: string | null;
+  }): void;
+  /** "They paid me back." */
+  recordSettlement(input: { personId: string; cents: number; txnId?: string | null }): void;
+  /**
+   * Send a receipt photo to the Mac to read. Returns the op id so the caller can
+   * watch `summary.scans` for its answer — this is a round trip, not a call.
+   */
+  scanReceipt(input: { txnId: string; imageBase64: string }): string;
   unpair(): Promise<void>;
 }
 
@@ -51,7 +66,34 @@ function applyLocally(summary: Summary, op: Op): Summary {
       recent: summary.recent.map((t) => (t.id === op.txnId ? { ...t, category: op.toCategory } : t)),
     };
   }
-  return { ...summary, alerts: summary.alerts.filter((a) => a.id !== op.alertId) };
+  if (op.kind === "dismissAlert") {
+    return { ...summary, alerts: summary.alerts.filter((a) => a.id !== op.alertId) };
+  }
+  if (op.kind === "splitBill") {
+    // Move the balances immediately. The desktop's next summary replaces all of
+    // this — the point is only that the number you just changed doesn't sit
+    // stale until the round trip finishes.
+    const owed = new Map(op.shares.map((sh) => [sh.personId, sh.cents]));
+    return {
+      ...summary,
+      people: (summary.people ?? []).map((p) =>
+        owed.has(p.id) ? { ...p, cents: p.cents + owed.get(p.id)!, openCount: p.openCount + 1 } : p,
+      ),
+    };
+  }
+  if (op.kind === "recordSettlement") {
+    return {
+      ...summary,
+      people: (summary.people ?? []).map((p) =>
+        p.id === op.personId ? { ...p, cents: p.cents - op.cents } : p,
+      ),
+      // The suggestion has been acted on; it should not still be offered.
+      settleSuggestions: (summary.settleSuggestions ?? []).filter(
+        (sg) => !(sg.personId === op.personId && (op.txnId == null || sg.txnId === op.txnId)),
+      ),
+    };
+  }
+  return summary;
 }
 
 export function CompanionProvider({ children }: { children: React.ReactNode }) {
@@ -228,6 +270,49 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [enqueue],
   );
 
+  const splitBill = useCallback<CompanionState["splitBill"]>(
+    (input) =>
+      enqueue({
+        id: uuid4(),
+        ts: Math.floor(Date.now() / 1000),
+        kind: "splitBill",
+        txnId: input.txnId,
+        shares: input.shares,
+        basisCents: input.basisCents ?? null,
+        itemsJson: input.itemsJson ?? null,
+        note: input.note ?? null,
+      }),
+    [enqueue],
+  );
+
+  const scanReceipt = useCallback<CompanionState["scanReceipt"]>(
+    (input) => {
+      const id = uuid4();
+      enqueue({
+        id,
+        ts: Math.floor(Date.now() / 1000),
+        kind: "scanReceipt",
+        txnId: input.txnId,
+        imageBase64: input.imageBase64,
+      });
+      return id;
+    },
+    [enqueue],
+  );
+
+  const recordSettlement = useCallback<CompanionState["recordSettlement"]>(
+    (input) =>
+      enqueue({
+        id: uuid4(),
+        ts: Math.floor(Date.now() / 1000),
+        kind: "recordSettlement",
+        personId: input.personId,
+        cents: input.cents,
+        txnId: input.txnId ?? null,
+      }),
+    [enqueue],
+  );
+
   // Also the way out of demo — the state it tears down is the state demo built,
   // so leaving sample data and unpairing a real device are the same operation.
   const unpair = useCallback(async () => {
@@ -246,7 +331,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <Ctx.Provider
-      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, manualSyncAt, widget, demo, pair, enterDemo, refresh, recategorize, dismissAlert, unpair }}
+      value={{ phase, summary, pendingOps, lastSyncAt, syncError, refreshing, manualSyncAt, widget, demo, pair, enterDemo, refresh, recategorize, dismissAlert, splitBill, recordSettlement, scanReceipt, unpair }}
     >
       {children}
     </Ctx.Provider>

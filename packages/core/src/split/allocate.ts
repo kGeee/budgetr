@@ -12,8 +12,8 @@
  * and you carry more of the tax than the person who only shared the $13 plate.
  */
 
-import { allocateCents } from "@/lib/split-math";
-import type { ItemAssignment, ItemizedSplit, ParsedReceipt, PersonBreakdown } from "./types";
+import { allocateCents } from "./cents.js";
+import type { ItemAssignment, ItemizedSplit, ParsedReceipt, PersonBreakdown } from "./types.js";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const toCents = (n: number) => Math.round(n * 100);
@@ -61,17 +61,20 @@ export function allocateReceipt({
       continue;
     }
 
-    const weights = eaters.map((id) => weightsById[id]);
+    // `eaters` is already filtered to positive weights, so every lookup here is
+    // present — but the package compiles with checked index access, and an
+    // assertion at the read site is cheaper than threading a second structure.
+    const weights = eaters.map((id) => weightsById[id]!);
     const totalWeight = weights.reduce((a, w) => a + w, 0);
     const parts = allocateCents(cents, weights);
 
     eaters.forEach((id, i) => {
-      itemCents.set(id, (itemCents.get(id) ?? 0) + parts[i]);
+      itemCents.set(id, (itemCents.get(id) ?? 0) + parts[i]!);
       lines.get(id)!.push({
         itemId: item.id,
         label: item.label,
-        amount: parts[i] / 100,
-        weight: weights[i],
+        amount: parts[i]! / 100,
+        weight: weights[i]!,
         of: totalWeight,
       });
     });
@@ -101,9 +104,9 @@ export function allocateReceipt({
     return {
       participantId: id,
       items: items / 100,
-      tax: taxParts[i] / 100,
-      tip: tipParts[i] / 100,
-      total: (items + taxParts[i] + tipParts[i]) / 100,
+      tax: taxParts[i]! / 100,
+      tip: tipParts[i]! / 100,
+      total: (items + taxParts[i]! + tipParts[i]!) / 100,
       lines: lines.get(id) ?? [],
     };
   });

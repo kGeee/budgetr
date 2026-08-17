@@ -20,7 +20,8 @@ export const SITE = {
     "Net worth, spending, income, investments and options — read-only and stored on your own machine. No cloud account, no data resale.",
   repoUrl: repo,
   checkoutUrl: process.env.NEXT_PUBLIC_CHECKOUT_URL ?? "",
-  downloadUrl: process.env.NEXT_PUBLIC_DOWNLOAD_URL ?? `${repo}/releases/latest`,
+  /** The releases listing — for "all versions" links, not for a Download button. */
+  downloadUrl: `${repo}/releases/latest`,
   directDmgUrl: `${repo}/releases/latest/download/budgetr-mac.dmg`,
   price: process.env.NEXT_PUBLIC_PRICE ?? "$29",
   siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "https://budgetr.dev",
@@ -31,9 +32,22 @@ export function hasCheckout(): boolean {
   return SITE.checkoutUrl.trim().length > 0;
 }
 
-/** Where the primary CTA should point: paid checkout if set, else free download. */
+/**
+ * Where a download button should point.
+ *
+ * The direct asset, not the releases page. "Download" that opens a GitHub
+ * releases listing asks the visitor to work out which of five files they want;
+ * this URL redirects straight to the current DMG, so the click downloads the app
+ * the way the word promises. NEXT_PUBLIC_DOWNLOAD_URL still overrides for
+ * self-hosted or mirrored builds.
+ */
+export function downloadHref(): string {
+  return process.env.NEXT_PUBLIC_DOWNLOAD_URL || SITE.directDmgUrl;
+}
+
+/** Where the primary CTA should point: paid checkout if set, else the download. */
 export function primaryCtaHref(): string {
-  return hasCheckout() ? SITE.checkoutUrl : SITE.downloadUrl;
+  return hasCheckout() ? SITE.checkoutUrl : downloadHref();
 }
 
 /** Where the "try the live demo" CTA points — the read-only demo dashboard. */
