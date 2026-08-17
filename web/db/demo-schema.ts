@@ -266,7 +266,7 @@ CREATE TABLE "recurring_streams" (
 	"iso_currency_code" text,
 	"is_active" integer DEFAULT true NOT NULL,
 	"status" text,
-	"updated_at" integer NOT NULL,
+	"updated_at" integer NOT NULL, "user_label" text,
 	FOREIGN KEY ("account_id") REFERENCES "accounts"("id") ON UPDATE no action ON DELETE cascade
 );
 CREATE TABLE "saved_filters" (
