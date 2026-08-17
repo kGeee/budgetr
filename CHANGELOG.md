@@ -7,6 +7,74 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-08-17
+
+The companion phone stops being read-only. It gains a Shared tab, the ability to
+split a bill, and — through the Mac rather than on its own — receipt scanning.
+Alongside that, the receipt splitter shipped in 0.11.0 is fixed for people who
+installed it from the DMG rather than running it from source.
+
+**Upgrade note:** the sync contract goes to version 2, so the desktop app and the
+companion must be updated together. An older companion against this desktop will
+show "Update required" until it is rebuilt.
+
+### Added
+
+- **A Shared tab on the phone.** It leads with one number — what you're owed —
+  because that's the only question it exists to answer. Below it: everyone's
+  balance, the recent bills behind them, and the settlement suggestions the
+  desktop already computes. Those suggestions are the reason this belongs on a
+  phone at all: budgetr spots that a Venmo inflow matches an outstanding share,
+  and the moment you want to confirm that is the moment it lands, not next time
+  you sit at a desk.
+- **Split a bill from the phone.** On the transaction, in the Activity tab,
+  because that's where the bill is. Same interaction as the desktop — pick whose
+  turn it is once, then tap down the receipt — which was always a touch gesture
+  and only happened to ship on a Mac first.
+- **Scan a receipt with the phone's camera, and the Mac reads it.** Expo Go
+  cannot load a text recognizer, and the Mac already has one wired. So the photo
+  travels up, sealed in the same end-to-end encrypted envelope as every other
+  edit, and the parsed lines come back on the next sync. This is a weaker claim
+  than the desktop's, where a receipt photo never leaves the machine, and the app
+  says the weaker one: *encrypted end to end, the relay can't see it* — not
+  *nothing is uploaded*. Typing the lines in never depends on the round trip.
+- **Contract v2** carries people, shared bills and settlement suggestions down,
+  and split / settle / scan operations up. Splits travel as resolved cents rather
+  than a mode plus inputs, because the allocator now lives in the shared package:
+  two devices showing the same bill a cent apart is the kind of bug nobody
+  reports and everybody quietly stops trusting.
+
+### Changed
+
+- **The phone's landing screen says how old its numbers are.** Spending was the
+  only screen without a sync signal — the other three have one — and it is the
+  screen the app opens on, where a stale month-to-date figure reads as today's.
+- **Alerts on the phone are stated, not dotted.** A 6px dot on an unlabelled
+  wallet glyph is not a way to tell someone a bank connection has been dead for
+  seven weeks. Net worth comes out from behind that same glyph and onto the page.
+- **Every truncated list on the phone says so.** Activity presented a 40-item
+  window as "your activity", with no older and no search; Budgets listed
+  transactions from that same window while the figure above them covered the
+  whole month. Activity also groups by day now, and filters.
+- **Download downloads.** The marketing CTA pointed at the GitHub releases
+  listing, which hands a visitor five files and asks them to pick. It now points
+  at the DMG.
+- **The trial-ended screen leads with buying**, at the price, rather than putting
+  a key-entry form first — someone whose trial just ended rarely has a key in a
+  drawer.
+
+### Fixed
+
+- **Receipt scanning didn't work in the packaged app.** It looked for its Swift
+  source relative to the working directory and compiled it on demand; in a DMG
+  install that file isn't there, and compiling Swift needs the Xcode command line
+  tools that most people don't have. The helper is now compiled when the release
+  is built and shipped inside the app.
+- **Tax and tip refused decimal points.** The field stored the parsed number and
+  re-rendered it, so typing "6." became "6" and ate the point.
+- A raw file input rendered its own "No file chosen" in the middle of the split
+  screen's empty state.
+
 ## [0.11.0] — 2026-08-17
 
 Two pieces of work and three fixes. Bill splitting finally does the thing it was
@@ -423,6 +491,7 @@ and the LEAPS desk lands as the release's one new tool.
   cold start (in `instrumentation.register()`) instead of racing parallel page
   renders, so pages no longer render blank on first load.
 
+[0.12.0]: https://github.com/kGeee/budgetr/releases/tag/v0.12.0
 [0.11.0]: https://github.com/kGeee/budgetr/releases/tag/v0.11.0
 [0.10.0]: https://github.com/kGeee/budgetr/releases/tag/v0.10.0
 [0.9.0]: https://github.com/kGeee/budgetr/releases/tag/v0.9.0
