@@ -11,9 +11,9 @@ import {
   itemsTotal,
   receiptTotal,
   reconcileToCharge,
-} from "@/lib/receipt/allocate";
-import { acceptsMoneyDraft, formatMoneyDraft, parseMoneyDraft } from "@/lib/receipt/money-input";
-import { ME, type ItemAssignment, type ParsedReceipt, type ReceiptItem } from "@/lib/receipt/types";
+} from "@budgetr/core";
+import { acceptsMoneyDraft, formatMoneyDraft, parseMoneyDraft } from "@budgetr/core";
+import { ME, type ItemAssignment, type ParsedReceipt, type ReceiptItem } from "@budgetr/core";
 
 /**
  * Split a bill by item.

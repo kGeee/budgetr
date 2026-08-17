@@ -2,3 +2,8 @@ export * from './contracts.js';
 export * from './validate.js';
 export * from './build-summary.js';
 export * from "./quant/index.js";
+export * from './split/cents.js';
+export * from './split/types.js';
+export * from './split/parse.js';
+export * from './split/allocate.js';
+export * from './split/money-input.js';

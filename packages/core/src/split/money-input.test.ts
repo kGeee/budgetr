@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptsMoneyDraft, formatMoneyDraft, parseMoneyDraft } from "./money-input";
+import { acceptsMoneyDraft, formatMoneyDraft, parseMoneyDraft } from "./money-input.js";
 
 describe("acceptsMoneyDraft — you must be able to type a decimal", () => {
   it("accepts every keystroke on the way to 6.36", () => {

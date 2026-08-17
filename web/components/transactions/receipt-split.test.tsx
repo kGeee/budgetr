@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { parseReceiptRows } from "@/lib/receipt/parse";
-import { ME } from "@/lib/receipt/types";
+import { parseReceiptRows } from "@budgetr/core";
+import { ME } from "@budgetr/core";
 
 // The editor imports a "use server" module for scanning; stub it so this test
 // renders markup instead of dragging the database in.

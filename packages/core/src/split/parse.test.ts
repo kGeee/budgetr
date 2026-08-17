@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { groupIntoRows, parseReceipt, parseReceiptRows } from "./parse";
-import type { OcrLine } from "./types";
+import { groupIntoRows, parseReceipt, parseReceiptRows } from "./parse.js";
+import type { OcrLine } from "./types.js";
 
 /**
  * The fixture is a real receipt (Ippudo, 16 Aug 2026, $90.00) — the one that
@@ -37,7 +37,7 @@ describe("parseReceiptRows — the Ippudo receipt", () => {
   });
 
   it("reads the quantity off the line and the unit price off the line below", () => {
-    const akamaru = r.items[0];
+    const akamaru = r.items[0]!;
     expect(akamaru.quantity).toBe(2);
     expect(akamaru.unitPrice).toBe(21);
     expect(akamaru.total).toBe(48);
@@ -45,13 +45,13 @@ describe("parseReceiptRows — the Ippudo receipt", () => {
 
   it("keeps a paid modifier as a modifier, never as its own item", () => {
     // ◆TAMAGO is $6 and is already inside the $48 — adding it would overcount.
-    expect(r.items[0].modifiers).toEqual([{ label: "◆TAMAGO", price: 6 }]);
+    expect(r.items[0]!.modifiers).toEqual([{ label: "◆TAMAGO", price: 6 }]);
     expect(r.items.some((i) => i.label.includes("TAMAGO"))).toBe(false);
   });
 
   it("attaches unpriced option lines to the item above", () => {
-    expect(r.items[1].label).toBe("BUNS MEDLEY");
-    expect(r.items[1].modifiers.map((m) => m.label)).toEqual(["CHICKEN", "CHICKEN", "CHICKEN"]);
+    expect(r.items[1]!.label).toBe("BUNS MEDLEY");
+    expect(r.items[1]!.modifiers.map((m) => m.label)).toEqual(["CHICKEN", "CHICKEN", "CHICKEN"]);
   });
 
   it("reads the totals block, including the tax rate", () => {
@@ -197,7 +197,7 @@ describe("groupIntoRows", () => {
       line("$16.00", 0.8, 0.6),
     ]);
     expect(r.items).toHaveLength(1);
-    expect(r.items[0].modifiers.map((m) => m.label)).toEqual(["CHICKEN"]);
+    expect(r.items[0]!.modifiers.map((m) => m.label)).toEqual(["CHICKEN"]);
     expect(r.subtotal).toBe(16);
   });
 });
