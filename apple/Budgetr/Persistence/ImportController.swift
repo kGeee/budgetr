@@ -2,7 +2,7 @@ import CoreData
 import SQLite3
 
 enum ImportError: Error, LocalizedError {
-    case cannotOpenDatabase
+    case cannotOpenDatabase(String)
     case saveFailed(Error)
     /// A statement wouldn't prepare — almost always the ledger's schema having
     /// moved on from what this importer expects.
@@ -14,8 +14,8 @@ enum ImportError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .cannotOpenDatabase:
-            return "Could not open that database file."
+        case .cannotOpenDatabase(let detail):
+            return "Could not open that database file. \(detail)"
         case .saveFailed(let error):
             return "Could not save: \(error.localizedDescription)"
         case .queryFailed(let table, let message):
@@ -67,8 +67,17 @@ final class ImportController {
         // been closed that is nothing; for one grabbed mid-write it could be the
         // newest transactions, which is why the count check below exists.
         let uri = "file:\(url.path)?immutable=1"
-        guard sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK else {
-            throw ImportError.cannotOpenDatabase
+        let rc = sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil)
+        guard rc == SQLITE_OK else {
+            // "unable to open database file" is what the sandbox denying a read
+            // looks like from down here, and it is indistinguishable from a
+            // missing file — so say both possibilities rather than the one.
+            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "sqlite error \(rc)"
+            throw ImportError.cannotOpenDatabase(
+                FileManager.default.fileExists(atPath: url.path)
+                    ? "\(message) — the file exists, so this is usually a permissions problem."
+                    : message
+            )
         }
         defer { sqlite3_close(db) }
 
