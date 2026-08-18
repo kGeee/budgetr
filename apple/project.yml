@@ -44,3 +44,35 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         # INFOPLIST_KEY_UIBackgroundModes: "remote-notification"  # restore when CloudKit re-enabled
+
+  BudgetrTests:
+    type: bundle.unit-test
+    # macOS only: these cover the pure domain layer (MonthSummary, BudgetPacing,
+    # CategoryMapping), which has no platform dependencies — so running them on
+    # one destination proves them for both, and the suite stays fast enough to
+    # run on every build.
+    supportedDestinations: [macOS]
+    # Compiles the domain sources directly instead of hosting the app. The app
+    # is sandboxed, and a sandboxed ad-hoc-signed host hangs before the test
+    # runner can connect — but none of this code needs an app: it is pure value
+    # types over Foundation. Anything touching Core Data belongs in a separate
+    # hosted suite, once there is something worth hosting for.
+    sources:
+      - path: Tests
+      - path: Budgetr/Domain/MonthSummary.swift
+      - path: Budgetr/Domain/BudgetPacing.swift
+      - path: Budgetr/Domain/CategoryMapping.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Budgetr:
+    build:
+      targets:
+        Budgetr: all
+        BudgetrTests: [test]
+    test:
+      targets: [BudgetrTests]
+      gatherCoverageData: false

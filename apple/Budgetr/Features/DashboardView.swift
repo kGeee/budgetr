@@ -26,8 +26,13 @@ struct DashboardView: View {
     private var budgets: FetchedResults<CDBudget>
 
     private var model: DashboardModel {
-        DashboardModel(
-            transactions: transactions.map(\.summaryEntry),
+        // Resolve through the same rule the ledger uses. Grouping on the raw
+        // stored value instead put overridden and un-overridden rows of the same
+        // category in different buckets — which reads as several identical
+        // "Uncategorised" bars on the chart.
+        let idx = CategoryIndex(categories: Array(categories))
+        return DashboardModel(
+            transactions: transactions.map { $0.summaryEntry(using: idx) },
             categoryNames: Dictionary(
                 categories.map { ($0.id ?? "", $0.name ?? "") },
                 uniquingKeysWith: { a, _ in a }
@@ -328,14 +333,15 @@ private struct EmptyStore: View {
 private extension CDTransaction {
     /// Core Data row → the pure summary type.
     ///
-    /// The user's category override wins over Plaid's, matching the web app's
-    /// `effectiveCatId`. Pending transactions are kept: they are real money
-    /// already committed, and dropping them makes today's total look wrong.
-    var summaryEntry: MonthSummary.Entry {
+    /// The category is resolved, not read: the override wins, else the category
+    /// whose `plaidPrimary` matches — the web app's `effectiveCatId`. Pending
+    /// transactions are kept, because they are money already committed and
+    /// dropping them makes today's total look wrong.
+    func summaryEntry(using index: CategoryIndex) -> MonthSummary.Entry {
         MonthSummary.Entry(
             amount: amount,
             date: date ?? "",
-            categoryId: userCategory?.id ?? category,
+            categoryId: index.resolvedId(for: self),
             pending: pending
         )
     }

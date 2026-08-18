@@ -25,4 +25,13 @@ enum CategoryMapping {
         guard let plaidPrimary else { return true }
         return !transferPrimaries.contains(plaidPrimary)
     }
+
+    /// `FOOD_AND_DRINK` → `Food and drink`. Plaid's constants are shouty and
+    /// must never reach the user verbatim.
+    static func humanise(_ raw: String) -> String {
+        let words = raw.split(separator: "_").map { $0.lowercased() }
+        guard let first = words.first else { return raw }
+        return ([first.prefix(1).uppercased() + first.dropFirst()] + words.dropFirst())
+            .joined(separator: " ")
+    }
 }
