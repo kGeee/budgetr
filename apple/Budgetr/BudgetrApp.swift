@@ -10,7 +10,7 @@ struct BudgetrApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            AppShell()
                 .environment(\.managedObjectContext, persistence.container.viewContext)
         }
         #if os(macOS)

@@ -90,25 +90,7 @@ struct RootView: View {
             isPresented: $showingImporter,
             allowedContentTypes: [.init(filenameExtension: "db")!]
         ) { result in
-            switch result {
-            case .success(let url):
-                do {
-                    try ImportController.run(url: url, context: context)
-                    importAlert = ImportAlert(
-                        title: "Import complete",
-                        message: "Your ledger is loaded."
-                    )
-                } catch ImportError.cannotOpenDatabase {
-                    importAlert = ImportAlert(
-                        title: "Import failed",
-                        message: "Could not open that database file."
-                    )
-                } catch {
-                    importAlert = ImportAlert(title: "Import failed", message: error.localizedDescription)
-                }
-            case .failure(let error):
-                importAlert = ImportAlert(title: "Could not open file", message: error.localizedDescription)
-            }
+            importAlert = ImportRunner.handle(result, context: context)
         }
         .alert(item: $importAlert) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message))

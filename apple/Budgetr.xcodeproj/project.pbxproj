@@ -19,6 +19,7 @@
 		37A5FD19C1CA4BEBBF8FB070 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F928F8BDD0DC37862CF4838 /* KeychainStore.swift */; };
 		3E7CBB6B1A1BB2002BB54F62 /* TransactionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA4E3511A390619B607FD38 /* TransactionsView.swift */; };
 		3ED2976907FDA90E8E8F5564 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A373F1B5D9EDB3618E9FE54 /* DashboardView.swift */; };
+		46718A0C835373E3DE94B2C9 /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA45997321AFEBA24701B7F /* AppShell.swift */; };
 		4F40F609D1E0C93FA075E169 /* TransactionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012A0FB3AEAC3DDA29D40A5A /* TransactionRepository.swift */; };
 		51888A3C79D4C9DCB8F6AF3D /* Model.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = A0D3B593CF453D31B4C22355 /* Model.xcdatamodeld */; };
 		519F43582402FB700D1BD94A /* Fraunces_700Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 720E3B929979C248F48F1295 /* Fraunces_700Bold.ttf */; };
@@ -26,6 +27,7 @@
 		60523EBB7F9833EAE4B1CA50 /* VendorGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46FA8EB2F73B59E24E6278A5 /* VendorGrouping.swift */; };
 		6979350D65B6BE7A744CA978 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81ED19750A676B23FD907591 /* RootView.swift */; };
 		7DF04DFB42B72B474C279390 /* FontLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40FE536D2DA9661A2915088 /* FontLoader.swift */; };
+		7EA1CDF7ECFB52800C93FD11 /* ImportRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CBE9E33294F03C104208089 /* ImportRunner.swift */; };
 		7ECD57F02655287DE6B63EDA /* HankenGrotesk_400Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 095A5D5AB2A6FE5B19718A63 /* HankenGrotesk_400Regular.ttf */; };
 		881F67626B9B0FC0390E108C /* CategoryMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DD47B1F2F7AB1398DFC8D9D /* CategoryMapping.swift */; };
 		955B036DDCB5D17F74F3CF3B /* AutoTagging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68FC64F6AE91E4DB23F8C3A2 /* AutoTagging.swift */; };
@@ -35,6 +37,7 @@
 		A4979D03778B88947A287D4D /* MonthSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8445158F976B9B9F19F4DD /* MonthSummary.swift */; };
 		A62D05521DD3A12090CF43AE /* SplineSansMono_600SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 712761E876095C79F4EF383C /* SplineSansMono_600SemiBold.ttf */; };
 		BA0ACE53888001F6564CD865 /* SplineSansMono_500Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 84094BE09AC13D32000C0F5B /* SplineSansMono_500Medium.ttf */; };
+		BC75C826A95339FFD4AAD1F6 /* FirstRunImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90FAAD59CDE74BB0F17A70AC /* FirstRunImport.swift */; };
 		C1FFDCE4B731A95AA3A91098 /* CategoryIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D73CA3C6FAE2F93AFFD096D /* CategoryIndex.swift */; };
 		D99A7E025DD77605EA371985 /* BudgetsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39F03E00FB78FA0A5877618 /* BudgetsView.swift */; };
 		DA985FD6C99B34852E0AA4ED /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D8F1618120B414A06D7AEC0 /* ReviewView.swift */; };
@@ -47,6 +50,7 @@
 /* Begin PBXFileReference section */
 		012A0FB3AEAC3DDA29D40A5A /* TransactionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionRepository.swift; sourceTree = "<group>"; };
 		095A5D5AB2A6FE5B19718A63 /* HankenGrotesk_400Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = HankenGrotesk_400Regular.ttf; sourceTree = "<group>"; };
+		0CBE9E33294F03C104208089 /* ImportRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportRunner.swift; sourceTree = "<group>"; };
 		0D8F1618120B414A06D7AEC0 /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
 		3707E0930386EEF308DD0C74 /* ProxyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyClient.swift; sourceTree = "<group>"; };
 		3A373F1B5D9EDB3618E9FE54 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
@@ -67,11 +71,13 @@
 		8D73CA3C6FAE2F93AFFD096D /* CategoryIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryIndex.swift; sourceTree = "<group>"; };
 		8EA4E3511A390619B607FD38 /* TransactionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionsView.swift; sourceTree = "<group>"; };
 		8F928F8BDD0DC37862CF4838 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		90FAAD59CDE74BB0F17A70AC /* FirstRunImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstRunImport.swift; sourceTree = "<group>"; };
 		9241368E862AC8FA8A16C097 /* MonthSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthSummaryTests.swift; sourceTree = "<group>"; };
 		98C9AF58DA5F7B6EE730B24C /* BudgetrApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetrApp.swift; sourceTree = "<group>"; };
 		9BEBCFF587EA49BCFFC92FA4 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A39F03E00FB78FA0A5877618 /* BudgetsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetsView.swift; sourceTree = "<group>"; };
 		BADF462CADCE7DEA792E49E5 /* AppCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCrypto.swift; sourceTree = "<group>"; };
+		BCA45997321AFEBA24701B7F /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
 		C03F4080CE879F5EFD02A6FF /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
 		C7F091E21A0D11FA2DC44649 /* Fraunces_600SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fraunces_600SemiBold.ttf; sourceTree = "<group>"; };
 		D40FE536D2DA9661A2915088 /* FontLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontLoader.swift; sourceTree = "<group>"; };
@@ -106,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				C03F4080CE879F5EFD02A6FF /* AccountsView.swift */,
+				BCA45997321AFEBA24701B7F /* AppShell.swift */,
 				A39F03E00FB78FA0A5877618 /* BudgetsView.swift */,
 				581DCB166B8CBA1E54338A5B /* CategoriesView.swift */,
 				3A373F1B5D9EDB3618E9FE54 /* DashboardView.swift */,
@@ -142,7 +149,9 @@
 		6AC81D98D12C9C3B372BE0B4 /* Persistence */ = {
 			isa = PBXGroup;
 			children = (
+				90FAAD59CDE74BB0F17A70AC /* FirstRunImport.swift */,
 				5A536026645A9DD5568BF538 /* ImportController.swift */,
+				0CBE9E33294F03C104208089 /* ImportRunner.swift */,
 				6EF5C4E36C3182F51EB25B6B /* PersistenceController.swift */,
 				012A0FB3AEAC3DDA29D40A5A /* TransactionRepository.swift */,
 				A0D3B593CF453D31B4C22355 /* Model.xcdatamodeld */,
@@ -316,6 +325,7 @@
 			files = (
 				0AB2B7DF60D97D54FFF17669 /* AccountsView.swift in Sources */,
 				31B85DF883C4E6BF7E9D8457 /* AppCrypto.swift in Sources */,
+				46718A0C835373E3DE94B2C9 /* AppShell.swift in Sources */,
 				955B036DDCB5D17F74F3CF3B /* AutoTagging.swift in Sources */,
 				9E1F220AA1164A46A02D8DBC /* BudgetPacing.swift in Sources */,
 				FA264A4DA55251BA685AB151 /* BudgetrApp.swift in Sources */,
@@ -324,8 +334,10 @@
 				C1FFDCE4B731A95AA3A91098 /* CategoryIndex.swift in Sources */,
 				98B97D03BFE97096C44DF212 /* CategoryMapping.swift in Sources */,
 				3ED2976907FDA90E8E8F5564 /* DashboardView.swift in Sources */,
+				BC75C826A95339FFD4AAD1F6 /* FirstRunImport.swift in Sources */,
 				7DF04DFB42B72B474C279390 /* FontLoader.swift in Sources */,
 				DEFD11F59E5C74669CA2CCA9 /* ImportController.swift in Sources */,
+				7EA1CDF7ECFB52800C93FD11 /* ImportRunner.swift in Sources */,
 				37A5FD19C1CA4BEBBF8FB070 /* KeychainStore.swift in Sources */,
 				51888A3C79D4C9DCB8F6AF3D /* Model.xcdatamodeld in Sources */,
 				A4979D03778B88947A287D4D /* MonthSummary.swift in Sources */,
@@ -441,7 +453,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Budgetr;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -528,7 +542,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Budgetr;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
