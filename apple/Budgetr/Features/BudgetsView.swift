@@ -40,6 +40,7 @@ struct BudgetsView: View {
                 .padding(.vertical, 2)
             }
         }
+        .background(T.ink)
         .navigationTitle("Budgets")
     }
 

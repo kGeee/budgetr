@@ -62,7 +62,8 @@ struct DashboardView: View {
                 .padding(20)
             }
         }
-        .navigationTitle("Dashboard")
+        .background(T.ink)
+        .navigationTitle("Overview")
     }
 }
 
@@ -139,14 +140,11 @@ private struct Header: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("\(model.monthLabel) · spent so far".uppercased())
-                .font(.caption2.weight(.semibold))
-                .tracking(1.1)
-                .foregroundStyle(.secondary)
+            Eyebrow("\(model.monthLabel) · spent so far")
 
             Text(model.spent, format: .currency(code: "USD"))
-                .font(.system(size: 44, weight: .semibold, design: .rounded))
-                .monospacedDigit()
+                .font(F.display(44))
+                .foregroundStyle(T.paper)
 
             HStack(spacing: 10) {
                 if let delta = model.deltaPct {
@@ -156,7 +154,7 @@ private struct Header: View {
                         systemImage: delta > 0 ? "arrow.up" : "arrow.down"
                     )
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(delta > 0 ? .red : .green)
+                    .foregroundStyle(delta > 0 ? T.coral : T.jade)
 
                     Text("vs \(model.prior, format: .currency(code: "USD")) by this day last month")
                         .font(.caption)
@@ -174,7 +172,7 @@ private struct Header: View {
                     Stat(
                         label: model.pacing.paceDelta > 0 ? "Over pace by" : "Under pace by",
                         value: abs(model.pacing.paceDelta),
-                        tint: model.pacing.isAheadOfPace ? .red : .green
+                        tint: model.pacing.isAheadOfPace ? T.coral : T.jade
                     )
                 }
             }
@@ -185,17 +183,13 @@ private struct Header: View {
     private struct Stat: View {
         let label: String
         let value: Double
-        var tint: Color = .primary
+        var tint: Color = T.paper
 
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
-                Text(label.uppercased())
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.secondary)
-                Text(value, format: .currency(code: "USD"))
-                    .font(.callout.weight(.medium))
-                    .monospacedDigit()
+                Eyebrow(label, color: T.muted)
+                Text(value.money())
+                    .font(F.mono(14))
                     .foregroundStyle(tint)
             }
         }
@@ -206,13 +200,13 @@ private struct DailySpendCard: View {
     let model: DashboardModel
 
     var body: some View {
-        Card("By day") {
+        TitledPanel("By day") {
             Chart(model.byDay) { day in
                 BarMark(
                     x: .value("Day", day.date, unit: .day),
                     y: .value("Spent", day.spent)
                 )
-                .foregroundStyle(.tint)
+                .foregroundStyle(T.jade)
                 .cornerRadius(2)
             }
             .chartYAxis { AxisMarks(position: .leading) }
@@ -236,13 +230,13 @@ private struct PaceCard: View {
     }
 
     var body: some View {
-        Card("Cumulative vs pace") {
+        TitledPanel("Cumulative vs pace") {
             Chart {
                 ForEach(cumulative, id: \.date) { point in
                     AreaMark(x: .value("Day", point.date), y: .value("Spent", point.spent))
-                        .foregroundStyle(.tint.opacity(0.18))
+                        .foregroundStyle(T.jade.opacity(0.16))
                     LineMark(x: .value("Day", point.date), y: .value("Spent", point.spent))
-                        .foregroundStyle(model.pacing.isAheadOfPace ? .red : .green)
+                        .foregroundStyle(model.pacing.isAheadOfPace ? T.coral : T.jade)
                 }
                 RuleMark(y: .value("Budget", model.budgetTotal))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
@@ -271,7 +265,7 @@ private struct CategoryCard: View {
     let model: DashboardModel
 
     var body: some View {
-        Card("Where it went") {
+        TitledPanel("Where it went") {
             Chart(model.byCategory) { row in
                 BarMark(
                     x: .value("Spent", row.spent),
@@ -287,28 +281,6 @@ private struct CategoryCard: View {
     }
 }
 
-/// A titled panel. One place to change what a card looks like.
-private struct Card<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
-
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1)
-                .foregroundStyle(.secondary)
-            content
-        }
-        .padding(14)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
-    }
-}
 
 private struct EmptyStore: View {
     var body: some View {

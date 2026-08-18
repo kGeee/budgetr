@@ -64,6 +64,8 @@ struct TransactionsView: View {
         // strictest — often CI's, not the one on your desk.
         ledger
         .searchable(text: $searchText, prompt: "Search merchant or category")
+        .background(T.ink)
+        .scrollContentBackground(.hidden)
         .navigationTitle("Transactions")
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -99,8 +101,8 @@ struct TransactionsView: View {
             // about the data — not window chrome.
             Section {
                 Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(unreviewed > 0 ? .orange : .secondary)
+                    .font(F.mono(10.5))
+                    .foregroundStyle(unreviewed > 0 ? T.brass : T.faint)
                     .listRowBackground(Color.clear)
             }
 
@@ -112,7 +114,7 @@ struct TransactionsView: View {
                             .onTapGesture { editing = txn }
                     }
                 } header: {
-                    Text(Self.dayLabel(group.day))
+                    Eyebrow(Self.dayLabel(group.day), color: T.muted)
                 }
             }
         }
@@ -153,30 +155,32 @@ private struct Row: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(txn.merchantName ?? txn.name ?? "—")
+                    .font(F.body(13.5))
+                    .foregroundStyle(T.paper)
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Text(categoryName)
                     if txn.pending {
                         Text("·")
-                        Text("pending").foregroundStyle(.orange)
+                        Text("pending").foregroundStyle(T.brass)
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(F.mono(10.5))
+                .foregroundStyle(T.faint)
             }
 
             Spacer(minLength: 8)
 
             // Plaid's convention: positive is money leaving. Inflows are the
             // ones worth colouring, because they're the exception.
-            Text(abs(txn.amount), format: .currency(code: txn.isoCurrencyCode ?? "USD"))
-                .monospacedDigit()
-                .foregroundStyle(txn.amount > 0 ? Color.primary : Color.green)
+            Text(abs(txn.amount).money(txn.isoCurrencyCode ?? "USD"))
+                .font(F.mono(13))
+                .foregroundStyle(txn.amount > 0 ? T.paper : T.jade)
 
             if !txn.reviewed {
                 Image(systemName: "circle.fill")
                     .font(.system(size: 6))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(T.brass)
                     .accessibilityLabel("Needs review")
             }
         }
@@ -216,10 +220,10 @@ private struct CategorizeSheet: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(abs(txn.amount), format: .currency(code: txn.isoCurrencyCode ?? "USD"))
-                            .font(.system(size: 30, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                        Text(merchant).font(.headline)
+                        Text(abs(txn.amount).money(txn.isoCurrencyCode ?? "USD"))
+                            .font(F.display(30))
+                            .foregroundStyle(T.paper)
+                        Text(merchant).font(F.medium(15)).foregroundStyle(T.paper)
                         Text(TransactionsView.dayLabel(txn.date ?? ""))
                             .font(.caption)
                             .foregroundStyle(.secondary)

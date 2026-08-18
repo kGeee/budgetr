@@ -43,6 +43,13 @@ struct MonthSummary {
         return String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
     }
 
+    /// `YYYY-MM-DD` for a date, in the same plain-calendar form the web app
+    /// stores — so string comparison against stored dates is meaningful.
+    static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
     /// Entries falling inside `month` (a `YYYY-MM` key).
     ///
     /// Matches on the stored string rather than parsing to `Date`: the web app
