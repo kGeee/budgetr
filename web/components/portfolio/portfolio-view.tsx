@@ -480,6 +480,47 @@ function useColumnPrefs() {
 }
 
 /** A row in the holdings table: a single holding, or a grouped option underlying. */
+type HoldingsView = "sheet" | "table";
+
+const VIEW_STORAGE_KEY = "budgetr.holdings.view.v1";
+
+/**
+ * Sheet or table. The sheet is the default — it answers "what do I own, in what
+ * proportion" without being read end to end — but the table's eleven columns are
+ * the right tool for reconciling against a brokerage statement, so it stays one
+ * click away and remembers which you prefer.
+ */
+function useHoldingsView(): [HoldingsView, (v: HoldingsView) => void] {
+  const [view, setView] = useState<HoldingsView>("sheet");
+  const loaded = useRef(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(VIEW_STORAGE_KEY);
+      if (saved === "sheet" || saved === "table") {
+        // Deferred to an effect: SSR and first paint use the default so
+        // hydration matches, then the saved choice is applied once.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setView(saved);
+      }
+    } catch {
+      /* corrupt or unavailable storage — keep the default */
+    }
+    loaded.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!loaded.current) return;
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, view);
+    } catch {
+      /* ignore */
+    }
+  }, [view]);
+
+  return [view, setView];
+}
+
 type RowItem =
   | { kind: "holding"; h: HoldingRow; name: string; m: RowMetrics }
   | { kind: "options"; underlying: string; legs: HoldingRow[]; name: string; m: RowMetrics };
@@ -527,6 +568,7 @@ function PortfolioInner({
   /** Un-folds the sub-1% tail. Off by default; the money is never hidden, only the rows. */
   const [showAll, setShowAll] = useState(false);
   const { visible: visibleCols, toggle: toggleColumn, reset: resetColumns } = useColumnPrefs();
+  const [view, setView] = useHoldingsView();
   const orderedCols = useMemo(
     () => COLUMNS.filter((c) => visibleCols.includes(c.key)),
     [visibleCols],
@@ -735,6 +777,45 @@ function PortfolioInner({
     };
   }, [items, showAll]);
 
+  // Bands are measured against the largest position, not against 100% — a book
+  // whose biggest holding is 8% would otherwise render as forty identical stubs.
+  const maxWeight = useMemo(
+    () => items.reduce((mx, it) => Math.max(mx, Math.abs(it.m.weight)), 0),
+    [items],
+  );
+
+  // The two things a list of forty rows cannot say at a glance: how concentrated
+  // the book is, and what actually moved it today.
+  const concentration = useMemo(() => {
+    const weights = items.map((it) => Math.abs(it.m.weight)).sort((a, b) => b - a);
+    const n = Math.min(5, weights.length);
+    return {
+      n,
+      count: weights.length,
+      share: weights.slice(0, n).reduce((a, b) => a + b, 0),
+    };
+  }, [items]);
+
+  const topMover = useMemo(() => {
+    let best: { name: string; change: number; currency: string } | null = null;
+    for (const it of items) {
+      const change = it.m.dayValue;
+      if (change == null) continue;
+      if (!best || Math.abs(change) > Math.abs(best.change)) {
+        best = {
+          name:
+            it.kind === "holding"
+              ? it.h.ticker ?? cleanSecurityName(it.h.securityName) ?? "—"
+              : it.underlying,
+          change,
+          currency: it.m.currency,
+        };
+      }
+    }
+    // A sub-dollar "mover" is noise dressed as a finding.
+    return best && Math.abs(best.change) >= 1 ? best : null;
+  }, [items]);
+
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
     else {
@@ -890,169 +971,238 @@ function PortfolioInner({
       </div>
 
       <Card id="holdings" className="scroll-mt-28 overflow-hidden p-0">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <span className="eyebrow">Holdings</span>
-            <StatusBadge status={status} />
+        <div className="border-b border-line px-4 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+            <div className="flex items-center gap-3">
+              <span className="eyebrow">Holdings</span>
+              <StatusBadge status={status} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              {sectorFilter && (
+                <button
+                  onClick={() => setSectorFilter(null)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
+                >
+                  <Tag size={11} />
+                  {sectorFilter}
+                  <span className="text-[var(--faint)]">·</span>
+                  {visible.length}
+                  <X size={11} />
+                </button>
+              )}
+              {/* The sheet has no column headers to click, so its sort is explicit. */}
+              {view === "sheet" && (
+                <SheetSort sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              )}
+              <ViewToggle view={view} onChange={setView} />
+              {/* Column controls drive the table only; the sheet ignores them. */}
+              {view === "table" && (
+                <span className="hidden md:inline-flex">
+                  <ColumnsMenu
+                    visible={visibleCols}
+                    onToggle={toggleColumn}
+                    onReset={resetColumns}
+                  />
+                </span>
+              )}
+              <AddManualHoldingButton />
+            </div>
           </div>
-          <div className="flex items-center gap-3 sm:gap-4">
-            {sectorFilter ? (
-              <button
-                onClick={() => setSectorFilter(null)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
-              >
-                <Tag size={11} />
-                {sectorFilter}
-                <span className="text-[var(--faint)]">·</span>
-                {visible.length}
-                <X size={11} />
-              </button>
-            ) : (
-              <span className="text-xs text-[var(--muted)]">
-                {holdings.length} {holdings.length === 1 ? "position" : "positions"}
-              </span>
-            )}
-            {/* Column controls drive the table only; the mobile card view ignores them. */}
-            <span className="hidden md:inline-flex">
-              <ColumnsMenu visible={visibleCols} onToggle={toggleColumn} onReset={resetColumns} />
-            </span>
-            <AddManualHoldingButton />
-          </div>
+          {/* What the rows themselves can't tell you: the shape of the book. */}
+          {concentration.count > 0 && (
+            <p className="mt-2.5 text-xs text-[var(--muted)]">
+              {concentration.count > 6 ? (
+                <>
+                  Top {concentration.n} of {concentration.count} positions hold{" "}
+                  <span className="mono text-[var(--paper)]">
+                    {concentration.share.toFixed(0)}%
+                  </span>{" "}
+                  of the book.
+                </>
+              ) : (
+                <>
+                  {concentration.count} {concentration.count === 1 ? "position" : "positions"}.
+                </>
+              )}
+              {topMover && (
+                <>
+                  {" "}
+                  <span className="mono text-[var(--paper)]">{topMover.name}</span> moved it most
+                  today,{" "}
+                  <span className={`mono ${signedColor(topMover.change)}`}>
+                    {fmtSigned(topMover.change, topMover.currency)}
+                  </span>
+                  .
+                </>
+              )}
+            </p>
+          )}
         </div>
-        {/* Mobile: a compact card per position (the wide table can't fit a phone). */}
-        <ul className="divide-y divide-line/60 md:hidden">
-          {items.map((it) =>
-            it.kind === "holding" ? (
-              <HoldingCardMobile key={it.h.id} h={it.h} m={it.m} />
-            ) : (
-              <OptionGroupCardMobile key={`optc:${it.underlying}`} underlying={it.underlying} legs={it.legs} m={it.m} />
-            ),
-          )}
-          {holdings.length === 0 && (
-            <li className="px-4 py-10 text-center text-sm text-[var(--muted)]">
-              No holdings yet. Connect a brokerage account and hit Sync.
-            </li>
-          )}
-        </ul>
-        <div className="hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[640px] text-sm">
-          <thead>
-            <tr className="border-b border-line text-left">
-              <th className="w-8" aria-hidden />
-              <HeaderCell
-                label="Security"
-                align="left"
-                sortable
-                active={sortKey === "name"}
-                dir={sortDir}
-                onClick={() => toggleSort("name")}
-              />
-              {orderedCols.map((c) => (
-                <HeaderCell
-                  key={c.key}
-                  label={c.label}
-                  align={c.align}
-                  sortable={c.sortable}
-                  active={c.sortable && sortKey === c.key}
-                  dir={sortDir}
-                  onClick={c.sortable ? () => toggleSort(c.key as SortKey) : undefined}
-                />
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {groups.sections.map((section) => (
-              <Fragment key={section.kind}>
-                <GroupHeaderRow
-                  section={section}
-                  span={orderedCols.length + 2}
-                  currency={holdings[0]?.currency ?? "USD"}
-                />
-                {section.rows.map((it) =>
-                  it.kind === "holding" ? (
-                    <HoldingRowView
-                      key={it.h.id}
-                      h={it.h}
-                      m={it.m}
-                      columns={orderedCols}
-                      history={it.h.ticker ? histories[it.h.ticker.toUpperCase()] : undefined}
-                      txns={it.h.ticker ? txnsByTicker[it.h.ticker.toUpperCase()] ?? [] : []}
-                      sector={sectorOf(it.h)}
-                      sectorOptions={sectorOptions}
-                      onSetSector={(name) => setSector(it.h.sectorKey, name)}
-                      sectorColor={sectorColor}
-                    />
-                  ) : (
-                    <OptionGroupRow
-                      key={`opt:${it.underlying}`}
-                      underlying={it.underlying}
-                      legs={it.legs}
-                      m={it.m}
-                      columns={orderedCols}
-                      quotes={quotes}
-                    />
-                  ),
-                )}
-              </Fragment>
-            ))}
-
-            {/* The long tail, folded. The money is counted in the line — only
-                the rows are hidden, and one click brings them back. */}
-            {groups.tail.length > 0 && (
-              <tr className="border-b border-line/60 last:border-0">
-                <td colSpan={orderedCols.length + 2} className="px-3 py-2.5">
-                  <button
-                    onClick={() => setShowAll(true)}
-                    className="flex w-full items-center gap-3 text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
-                  >
-                    <ChevronDown size={13} className="text-[var(--faint)]" />
-                    <span>
-                      {groups.tail.length} positions under {TAIL_WEIGHT_PCT}% each
-                    </span>
-                    <span className="mono ml-auto text-[var(--faint)]">
-                      {formatMoney(groups.tailValue, holdings[0]?.currency ?? "USD")} ·{" "}
-                      {groups.tailWeight.toFixed(1)}%
-                    </span>
-                    <span className="text-[var(--brass)]">Show</span>
-                  </button>
-                </td>
-              </tr>
-            )}
-            {showAll && (
-              <tr className="border-b border-line/60 last:border-0">
-                <td colSpan={orderedCols.length + 2} className="px-3 py-2">
-                  <button
-                    onClick={() => setShowAll(false)}
-                    className="text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
-                  >
-                    Fold small positions again
-                  </button>
-                </td>
-              </tr>
+        {view === "sheet" ? (
+          <HoldingsSheet
+            sections={groups.sections}
+            tail={groups.tail}
+            tailValue={groups.tailValue}
+            tailWeight={groups.tailWeight}
+            showAll={showAll}
+            onShowAll={setShowAll}
+            currency={holdings[0]?.currency ?? "USD"}
+            ctx={{
+              maxWeight,
+              histories,
+              txnsByTicker,
+              quotes,
+              sectorOf,
+              sectorOptions,
+              setSector,
+              sectorColor,
+            }}
+            empty={
+              holdings.length === 0
+                ? "No holdings yet. Connect a brokerage account and hit Sync."
+                : visible.length === 0
+                  ? `No holdings in ${sectorFilter}.`
+                  : null
+            }
+          />
+        ) : (
+          <>
+          {/* Mobile: a compact card per position (the wide table can't fit a phone). */}
+          <ul className="divide-y divide-line/60 md:hidden">
+            {items.map((it) =>
+              it.kind === "holding" ? (
+                <HoldingCardMobile key={it.h.id} h={it.h} m={it.m} />
+              ) : (
+                <OptionGroupCardMobile key={`optc:${it.underlying}`} underlying={it.underlying} legs={it.legs} m={it.m} />
+              ),
             )}
             {holdings.length === 0 && (
-              <tr>
-                <td
-                  colSpan={orderedCols.length + 2}
-                  className="px-6 py-10 text-center text-[var(--muted)]"
-                >
-                  No holdings yet. Connect a brokerage account and hit Sync.
-                </td>
-              </tr>
+              <li className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                No holdings yet. Connect a brokerage account and hit Sync.
+              </li>
             )}
-            {holdings.length > 0 && visible.length === 0 && (
-              <tr>
-                <td
-                  colSpan={orderedCols.length + 2}
-                  className="px-6 py-10 text-center text-[var(--muted)]"
-                >
-                  No holdings in {sectorFilter}.
-                </td>
+          </ul>
+          <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-line text-left">
+                <th className="w-8" aria-hidden />
+                <HeaderCell
+                  label="Security"
+                  align="left"
+                  sortable
+                  active={sortKey === "name"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("name")}
+                />
+                {orderedCols.map((c) => (
+                  <HeaderCell
+                    key={c.key}
+                    label={c.label}
+                    align={c.align}
+                    sortable={c.sortable}
+                    active={c.sortable && sortKey === c.key}
+                    dir={sortDir}
+                    onClick={c.sortable ? () => toggleSort(c.key as SortKey) : undefined}
+                  />
+                ))}
               </tr>
-            )}
-          </tbody>
-        </table>
-        </div>
+            </thead>
+            <tbody>
+              {groups.sections.map((section) => (
+                <Fragment key={section.kind}>
+                  <GroupHeaderRow
+                    section={section}
+                    span={orderedCols.length + 2}
+                    currency={holdings[0]?.currency ?? "USD"}
+                  />
+                  {section.rows.map((it) =>
+                    it.kind === "holding" ? (
+                      <HoldingRowView
+                        key={it.h.id}
+                        h={it.h}
+                        m={it.m}
+                        columns={orderedCols}
+                        history={it.h.ticker ? histories[it.h.ticker.toUpperCase()] : undefined}
+                        txns={it.h.ticker ? txnsByTicker[it.h.ticker.toUpperCase()] ?? [] : []}
+                        sector={sectorOf(it.h)}
+                        sectorOptions={sectorOptions}
+                        onSetSector={(name) => setSector(it.h.sectorKey, name)}
+                        sectorColor={sectorColor}
+                      />
+                    ) : (
+                      <OptionGroupRow
+                        key={`opt:${it.underlying}`}
+                        underlying={it.underlying}
+                        legs={it.legs}
+                        m={it.m}
+                        columns={orderedCols}
+                        quotes={quotes}
+                      />
+                    ),
+                  )}
+                </Fragment>
+              ))}
+
+              {/* The long tail, folded. The money is counted in the line — only
+                  the rows are hidden, and one click brings them back. */}
+              {groups.tail.length > 0 && (
+                <tr className="border-b border-line/60 last:border-0">
+                  <td colSpan={orderedCols.length + 2} className="px-3 py-2.5">
+                    <button
+                      onClick={() => setShowAll(true)}
+                      className="flex w-full items-center gap-3 text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+                    >
+                      <ChevronDown size={13} className="text-[var(--faint)]" />
+                      <span>
+                        {groups.tail.length} positions under {TAIL_WEIGHT_PCT}% each
+                      </span>
+                      <span className="mono ml-auto text-[var(--faint)]">
+                        {formatMoney(groups.tailValue, holdings[0]?.currency ?? "USD")} ·{" "}
+                        {groups.tailWeight.toFixed(1)}%
+                      </span>
+                      <span className="text-[var(--brass)]">Show</span>
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {showAll && (
+                <tr className="border-b border-line/60 last:border-0">
+                  <td colSpan={orderedCols.length + 2} className="px-3 py-2">
+                    <button
+                      onClick={() => setShowAll(false)}
+                      className="text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+                    >
+                      Fold small positions again
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {holdings.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={orderedCols.length + 2}
+                    className="px-6 py-10 text-center text-[var(--muted)]"
+                  >
+                    No holdings yet. Connect a brokerage account and hit Sync.
+                  </td>
+                </tr>
+              )}
+              {holdings.length > 0 && visible.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={orderedCols.length + 2}
+                    className="px-6 py-10 text-center text-[var(--muted)]"
+                  >
+                    No holdings in {sectorFilter}.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          </div>
+          </>
+        )}
       </Card>
 
       {optionLegs.length > 0 && (
@@ -1748,106 +1898,759 @@ function OptionGroupRow({
       {expanded && (
         <tr className="border-b border-line/60 bg-[var(--panel-2)]/40">
           <td colSpan={columns.length + 2} className="px-4 py-4 sm:px-6">
-            <div className="space-y-3">
-              {structures.map((st, i) => {
-                const stLegs = st.legIndexes.map((idx) => parsed[idx]);
-                const stValue = stLegs.reduce((s, { h }) => s + effectiveValue(h, quotes), 0);
-                const stCosted = stLegs.filter(({ h }) => h.costBasis != null);
-                const stPnl = stCosted.length
-                  ? stCosted.reduce((s, { h }) => s + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
-                  : null;
-                return (
-                  <div key={i} className="rounded-lg border border-line/60 bg-[var(--panel)]/40 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{st.label}</p>
-                        <p className="text-xs text-[var(--muted)]">{st.detail}</p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="mono text-sm">{formatMoney(stValue, currency)}</p>
-                        {stPnl != null && (
-                          <p
-                            className={`mono text-xs ${stPnl >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
-                          >
-                            {stPnl >= 0 ? "+" : "−"}
-                            {formatMoney(Math.abs(stPnl), currency)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    {/* The options desk's signature payoff curve, right where the
-                        position lives — economics chips + expiry P&L diagram. */}
-                    {st.payoffLegs && st.payoffLegs.length > 0 && (
-                      <div className="mt-3 border-t border-line/60 pt-3">
-                        <div className="mb-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
-                          <span className="text-[var(--muted)]">
-                            Max profit{" "}
-                            <span className="mono text-[var(--jade)]">
-                              {st.maxProfitUnbounded
-                                ? "Unlimited"
-                                : st.maxProfit != null
-                                  ? formatMoney(st.maxProfit, currency)
-                                  : "—"}
-                            </span>
-                          </span>
-                          <span className="text-[var(--muted)]">
-                            Max loss{" "}
-                            <span className="mono text-[var(--coral)]">
-                              {st.maxLossUnbounded
-                                ? "Unlimited"
-                                : st.maxLoss != null
-                                  ? formatMoney(st.maxLoss, currency)
-                                  : "—"}
-                            </span>
-                          </span>
-                          {(st.breakevens?.length ?? 0) > 0 && (
-                            <span className="text-[var(--muted)]">
-                              Breakeven{" "}
-                              <span className="mono text-[var(--paper)]">
-                                {st.breakevens!.map((b) => formatStrike(b)).join(" · ")}
-                              </span>
-                            </span>
-                          )}
-                        </div>
-                        <PayoffDiagram
-                          legs={st.payoffLegs}
-                          currentPrice={underlyingPrice}
-                          breakevens={st.breakevens}
-                          className="w-full"
-                        />
-                      </div>
-                    )}
-                    <ul className="mt-2 space-y-1 border-t border-line/60 pt-2">
-                      {stLegs.map(({ h, p }) => {
-                        const long = (h.quantity ?? 0) >= 0;
-                        return (
-                          <li key={h.id} className="flex items-center justify-between gap-3 text-xs">
-                            <span className="flex min-w-0 items-center gap-2 text-[var(--muted)]">
-                              <span
-                                className={`mono shrink-0 ${long ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
-                              >
-                                {long ? "+" : "−"}
-                                {Math.abs(h.quantity ?? 0)}
-                              </span>
-                              <span className="truncate">
-                                {formatStrike(p.strike)} {p.right} · {formatOptionExpiry(p.expiry)}
-                              </span>
-                            </span>
-                            <span className="mono shrink-0 text-[var(--paper)]">
-                              {formatMoney(effectiveValue(h, quotes), currency)}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
+            <OptionStructuresPanel legs={legs} quotes={quotes} currency={currency} />
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * The legs of one underlying, grouped into recognised structures — each with its
+ * economics, payoff curve, and per-leg detail. Shared by the table row and the
+ * position sheet, which both expand into exactly this.
+ */
+function OptionStructuresPanel({
+  legs,
+  quotes,
+  currency,
+}: {
+  legs: HoldingRow[];
+  quotes: Record<string, LiveQuote>;
+  currency: string;
+}) {
+  const parsed = legs.map((h) => ({ h, p: parseOccSymbol(h.ticker)! }));
+  const structures = classifyOptionLegs(
+    parsed.map(({ h, p }) => ({ parsed: p, quantity: h.quantity, costBasis: h.costBasis })),
+  );
+  const underlyingPrice = quotes[parsed[0]?.p.underlying.toUpperCase() ?? ""]?.price ?? null;
+
+  return (
+<div className="space-y-3">
+      {structures.map((st, i) => {
+        const stLegs = st.legIndexes.map((idx) => parsed[idx]);
+        const stValue = stLegs.reduce((s, { h }) => s + effectiveValue(h, quotes), 0);
+        const stCosted = stLegs.filter(({ h }) => h.costBasis != null);
+        const stPnl = stCosted.length
+          ? stCosted.reduce((s, { h }) => s + (effectiveValue(h, quotes) - (h.costBasis ?? 0)), 0)
+          : null;
+        return (
+          <div key={i} className="rounded-lg border border-line/60 bg-[var(--panel)]/40 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{st.label}</p>
+                <p className="text-xs text-[var(--muted)]">{st.detail}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="mono text-sm">{formatMoney(stValue, currency)}</p>
+                {stPnl != null && (
+                  <p
+                    className={`mono text-xs ${stPnl >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
+                  >
+                    {stPnl >= 0 ? "+" : "−"}
+                    {formatMoney(Math.abs(stPnl), currency)}
+                  </p>
+                )}
+              </div>
+            </div>
+            {/* The options desk's signature payoff curve, right where the
+                position lives — economics chips + expiry P&L diagram. */}
+            {st.payoffLegs && st.payoffLegs.length > 0 && (
+              <div className="mt-3 border-t border-line/60 pt-3">
+                <div className="mb-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                  <span className="text-[var(--muted)]">
+                    Max profit{" "}
+                    <span className="mono text-[var(--jade)]">
+                      {st.maxProfitUnbounded
+                        ? "Unlimited"
+                        : st.maxProfit != null
+                          ? formatMoney(st.maxProfit, currency)
+                          : "—"}
+                    </span>
+                  </span>
+                  <span className="text-[var(--muted)]">
+                    Max loss{" "}
+                    <span className="mono text-[var(--coral)]">
+                      {st.maxLossUnbounded
+                        ? "Unlimited"
+                        : st.maxLoss != null
+                          ? formatMoney(st.maxLoss, currency)
+                          : "—"}
+                    </span>
+                  </span>
+                  {(st.breakevens?.length ?? 0) > 0 && (
+                    <span className="text-[var(--muted)]">
+                      Breakeven{" "}
+                      <span className="mono text-[var(--paper)]">
+                        {st.breakevens!.map((b) => formatStrike(b)).join(" · ")}
+                      </span>
+                    </span>
+                  )}
+                </div>
+                <PayoffDiagram
+                  legs={st.payoffLegs}
+                  currentPrice={underlyingPrice}
+                  breakevens={st.breakevens}
+                  className="w-full"
+                />
+              </div>
+            )}
+            <ul className="mt-2 space-y-1 border-t border-line/60 pt-2">
+              {stLegs.map(({ h, p }) => {
+                const long = (h.quantity ?? 0) >= 0;
+                return (
+                  <li key={h.id} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="flex min-w-0 items-center gap-2 text-[var(--muted)]">
+                      <span
+                        className={`mono shrink-0 ${long ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}
+                      >
+                        {long ? "+" : "−"}
+                        {Math.abs(h.quantity ?? 0)}
+                      </span>
+                      <span className="truncate">
+                        {formatStrike(p.strike)} {p.right} · {formatOptionExpiry(p.expiry)}
+                      </span>
+                    </span>
+                    <span className="mono shrink-0 text-[var(--paper)]">
+                      {formatMoney(effectiveValue(h, quotes), currency)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   The position sheet — the default Holdings view.
+
+   A portfolio isn't a list, it's a distribution: the top handful of positions
+   are usually most of the money and the rest is dust. The table rendered a
+   $184k position and a $2.27 one at identical weight — eleven figures a row,
+   every one the same size — so it read as texture and answered "what do I
+   own?" only if you were willing to read all of it.
+
+   Here each position is a band whose fill is its share of the book, measured
+   against the largest position, so concentration is legible before a single
+   figure is. The band is always brass: colour stays reserved for numbers that
+   carry a sign, so a red day never makes a position look bigger than it is.
+   Three type sizes, total — ticker and value lead, everything else recedes.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+type SheetCtx = {
+  maxWeight: number;
+  histories: Record<string, PricePoint[]>;
+  txnsByTicker: Record<string, InvestmentTxnRow[]>;
+  quotes: Record<string, LiveQuote>;
+  sectorOf: (h: HoldingRow) => string | null;
+  sectorOptions: string[];
+  setSector: (sectorKey: string, sector: string | null) => void;
+  sectorColor: Record<string, string>;
+};
+
+/** Fill width for one row's band, as a percent of the widest position. */
+function bandWidth(weight: number, maxWeight: number): number {
+  if (!Number.isFinite(weight) || maxWeight <= 0) return 0;
+  return Math.max(1.5, Math.min(100, (Math.abs(weight) / maxWeight) * 100));
+}
+
+/** One position: a proportional band, an identity, today, and what it's worth. */
+function SheetRow({
+  bar,
+  expanded,
+  onToggle,
+  toggleLabel,
+  identity,
+  meta,
+  day,
+  value,
+  panel,
+}: {
+  bar: number;
+  expanded: boolean;
+  onToggle?: () => void;
+  toggleLabel: string;
+  identity: React.ReactNode;
+  meta: React.ReactNode;
+  day: React.ReactNode;
+  value: React.ReactNode;
+  panel?: React.ReactNode;
+}) {
+  return (
+    <li className="border-b border-line/60 last:border-0">
+      {/* The band measures the row, not the row plus whatever it expands into,
+          so it lives on its own wrapper rather than the list item. */}
+      <div className="group relative transition-colors hover:bg-[var(--panel-2)]/40">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0"
+          style={{
+            width: `${bar}%`,
+            background:
+              "linear-gradient(90deg, color-mix(in srgb, var(--brass) 15%, transparent) 0%, color-mix(in srgb, var(--brass) 5%, transparent) 62%, transparent 100%)",
+          }}
+        />
+        <div className="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-3 sm:grid-cols-[1.25rem_minmax(0,1fr)_6rem_9.5rem] sm:gap-x-5 sm:px-4">
+          <div>
+            {onToggle && (
+              <button
+                onClick={onToggle}
+                aria-expanded={expanded}
+                aria-label={toggleLabel}
+                className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
+              >
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+                />
+              </button>
+            )}
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-1">
+            {identity}
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-[var(--faint)]">
+              {meta}
+            </div>
+          </div>
+
+          <div className="hidden text-right sm:block">{day}</div>
+          <div className="text-right">{value}</div>
+        </div>
+      </div>
+
+      {expanded && panel}
+    </li>
+  );
+}
+
+/** Today's move for one row — the sheet's only coloured figures, besides P&L. */
+function SheetDay({ m }: { m: RowMetrics }) {
+  if (m.day == null && m.dayValue == null) {
+    return <span className="mono text-[13px] text-[var(--faint)]">—</span>;
+  }
+  return (
+    <>
+      <p className={`mono text-[13px] ${signedColor(m.day)}`}>{fmtPct(m.day)}</p>
+      {m.dayValue != null && (
+        <p className={`mono text-[11px] opacity-75 ${signedColor(m.dayValue)}`}>
+          {fmtSigned(m.dayValue, m.currency)}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** What a position is worth, and what it has made — the row's terminal figure. */
+function SheetValue({ m }: { m: RowMetrics }) {
+  return (
+    <>
+      <p className="mono text-[15px] tabular text-[var(--paper)]">
+        {formatMoney(m.value, m.currency)}
+      </p>
+      {m.pnl != null ? (
+        <p className={`mono text-[11px] ${signedColor(m.pnl)}`}>
+          {fmtSigned(m.pnl, m.currency)}
+          {m.pnlPct != null && (
+            <span className="opacity-70"> · {m.pnlPct >= 0 ? "+" : "−"}
+              {Math.abs(m.pnlPct).toFixed(1)}%
+            </span>
+          )}
+        </p>
+      ) : (
+        <p className="text-[11px] text-[var(--faint)]">no cost basis</p>
+      )}
+    </>
+  );
+}
+
+/** Day change on the meta line, where phones read it (the Day column is sm+). */
+function SheetDayInline({ m }: { m: RowMetrics }) {
+  if (m.day == null) return null;
+  return (
+    <span className={`mono sm:hidden ${signedColor(m.day)}`}>{fmtPct(m.day)} today</span>
+  );
+}
+
+function SheetStat({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="eyebrow">{label}</p>
+      <p className="mono mt-1 text-sm text-[var(--paper)]">{children}</p>
+    </div>
+  );
+}
+
+function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: SheetCtx }) {
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = Boolean(h.ticker);
+  const sector = ctx.sectorOf(h);
+  const history = h.ticker ? ctx.histories[h.ticker.toUpperCase()] : undefined;
+
+  return (
+    <SheetRow
+      bar={bandWidth(m.weight, ctx.maxWeight)}
+      expanded={expanded}
+      onToggle={canExpand ? () => setExpanded((v) => !v) : undefined}
+      toggleLabel={expanded ? `Collapse ${h.ticker}` : `Expand ${h.ticker}`}
+      identity={
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="mono shrink-0 text-[15px] font-semibold tracking-tight text-[var(--brass)]">
+            {h.ticker ?? "—"}
+          </span>
+          <span
+            className="truncate text-[13px] text-[var(--muted)]"
+            title={h.securityName ?? undefined}
+          >
+            {cleanSecurityName(h.securityName)}
+          </span>
+          {h.manual && (
+            <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+              {h.securityType ?? "manual"}
+            </span>
+          )}
+          {h.hasOverride && (
+            <span
+              title="Cost basis manually corrected"
+              className="shrink-0 rounded border border-[var(--brass-dim)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]"
+            >
+              adj
+            </span>
+          )}
+          {/* Quiet row actions — revealed on hover so 40 rows don't shout. */}
+          <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100 md:inline-flex">
+            {isOptionable(h) && (
+              <>
+                <Link
+                  href={`/investments/options/chain?ticker=${encodeURIComponent(h.ticker as string)}`}
+                  title={`Option chain for ${h.ticker}`}
+                  className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+                >
+                  Chain
+                  <ArrowUpRight size={10} />
+                </Link>
+                <Link
+                  href={`/investments/options/vol?ticker=${encodeURIComponent(h.ticker as string)}`}
+                  title={`Fixed-strike vol for ${h.ticker}`}
+                  className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+                >
+                  Vol
+                  <ArrowUpRight size={10} />
+                </Link>
+              </>
+            )}
+            {h.ticker && !parseOccSymbol(h.ticker) && (
+              <Link
+                href={`/fundamentals?ticker=${encodeURIComponent(h.ticker)}`}
+                title={`Fundamentals for ${h.ticker}`}
+                className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+              >
+                Fundamentals
+                <ArrowUpRight size={10} />
+              </Link>
+            )}
+            {h.manual ? (
+              <span className="inline-flex items-center">
+                <EditManualHoldingButton
+                  id={h.id}
+                  name={h.securityName ?? h.ticker ?? "holding"}
+                  isTickered={Boolean(h.ticker)}
+                  quantity={h.quantity}
+                  costBasis={h.costBasis}
+                  value={h.value}
+                  fromWallet={h.fromWallet}
+                />
+                {/* Wallet holdings are removed by disconnecting the wallet
+                    (Accounts page), not per-row, so no delete here. */}
+                {!h.fromWallet && (
+                  <DeleteManualHoldingButton
+                    id={h.id}
+                    name={h.securityName ?? h.ticker ?? "holding"}
+                  />
+                )}
+              </span>
+            ) : (
+              <EditCostBasisButton
+                holdingId={h.id}
+                name={h.securityName ?? h.ticker ?? "holding"}
+                quantity={h.quantity}
+                plaidCostBasis={h.plaidCostBasis ?? null}
+                overrideTotal={h.overrideTotal ?? null}
+                overrideUnit={h.overrideUnit ?? null}
+                overrideAsOf={h.overrideAsOf ?? null}
+                hasOverride={Boolean(h.hasOverride)}
+              />
+            )}
+          </span>
+        </div>
+      }
+      meta={
+        <>
+          <span className="mono text-[var(--brass-dim)]">{m.weight.toFixed(1)}%</span>
+          {m.qty != null && (
+            <span className="mono">
+              {m.qty.toLocaleString()}
+              {m.price != null && ` @ ${formatMoney(m.price, m.currency)}`}
+            </span>
+          )}
+          {m.account && <span className="truncate">{m.account}</span>}
+          <SheetDayInline m={m} />
+          <SectorEditor
+            sector={sector}
+            options={ctx.sectorOptions}
+            color={sector ? ctx.sectorColor[sector] : undefined}
+            onSave={(name) => ctx.setSector(h.sectorKey, name)}
+          />
+        </>
+      }
+      day={<SheetDay m={m} />}
+      value={<SheetValue m={m} />}
+      panel={
+        canExpand && (
+          <div className="relative border-t border-line/60 bg-[var(--panel-2)]/40 px-4 py-5 sm:px-6">
+            {/* The figures the sheet drops from the row, kept one click away
+                rather than spent on every row's width. */}
+            <div className="mb-5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+              <SheetStat label="Cost basis">
+                {m.costBasis != null ? formatMoney(m.costBasis, m.currency) : "—"}
+              </SheetStat>
+              <SheetStat label="Avg cost">
+                {m.avgCost != null ? formatMoney(m.avgCost, m.currency) : "—"}
+              </SheetStat>
+              <SheetStat label="Day">
+                <span className={signedColor(m.dayValue)}>
+                  {m.dayValue != null ? fmtSigned(m.dayValue, m.currency) : "—"}
+                </span>
+              </SheetStat>
+              <SheetStat label="Share of book">{m.weight.toFixed(2)}%</SheetStat>
+            </div>
+            <TickerHistoryPanel
+              ticker={h.ticker as string}
+              history={history ?? []}
+              txns={h.ticker ? ctx.txnsByTicker[h.ticker.toUpperCase()] ?? [] : []}
+              currency={m.currency}
+            />
+          </div>
+        )
+      }
+    />
+  );
+}
+
+function SheetOptionRow({
+  underlying,
+  legs,
+  m,
+  ctx,
+}: {
+  underlying: string;
+  legs: HoldingRow[];
+  m: RowMetrics;
+  ctx: SheetCtx;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const parsed = legs.map((h) => ({ h, p: parseOccSymbol(h.ticker)! }));
+  const structures = classifyOptionLegs(
+    parsed.map(({ h, p }) => ({ parsed: p, quantity: h.quantity, costBasis: h.costBasis })),
+  );
+  const underlyingPrice = ctx.quotes[underlying.toUpperCase()]?.price ?? null;
+  const soonestDte = Math.min(...parsed.map(({ p }) => daysToExpiry(p.expiry)));
+  const groupRisk = riskLevel(soonestDte);
+  const flags = new Set(
+    parsed
+      .map(({ h, p }) => optionRiskFlag(p, h.quantity, underlyingPrice, daysToExpiry(p.expiry)))
+      .filter((f): f is "assignment" | "expiry" => f != null),
+  );
+  const summary =
+    structures.length === 1
+      ? structures[0].label
+      : `${structures.length} structures · ${legs.length} legs`;
+
+  return (
+    <SheetRow
+      bar={bandWidth(m.weight, ctx.maxWeight)}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+      toggleLabel={expanded ? `Collapse ${underlying} options` : `Expand ${underlying} options`}
+      identity={
+        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+          <span className="mono shrink-0 text-[15px] font-semibold tracking-tight text-[var(--brass)]">
+            {underlying}
+          </span>
+          <span className="truncate text-[13px] text-[var(--muted)]">{summary}</span>
+          {/* A short-dominant spread is worth negative money: closing it costs
+              cash. Calling that "small" — which is what an unlabelled −$1,538
+              reads as — is the opposite of the truth. */}
+          {m.value < -0.005 && (
+            <span
+              title="Net short: this position is a liability, not an asset"
+              className="mono shrink-0 rounded bg-[var(--coral)]/15 px-1.5 py-0.5 text-[10px] text-[var(--coral)]"
+            >
+              liability
+            </span>
+          )}
+          {[...flags].map((f) => (
+            <span
+              key={f}
+              className="shrink-0 rounded bg-[var(--coral)]/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--coral)]"
+            >
+              {f === "assignment" ? "Assign risk" : "Worthless risk"}
+            </span>
+          ))}
+          <Link
+            href={`/investments/options/chain?ticker=${encodeURIComponent(underlying)}`}
+            title={`Option chain for ${underlying}`}
+            className="hidden items-center gap-0.5 text-[11px] text-[var(--faint)] opacity-0 transition-opacity duration-150 hover:text-[var(--brass)] focus-within:opacity-100 group-hover:opacity-100 md:inline-flex"
+          >
+            Chain
+            <ArrowUpRight size={10} />
+          </Link>
+        </div>
+      }
+      meta={
+        <>
+          <span className="mono text-[var(--brass-dim)]">{m.weight.toFixed(1)}%</span>
+          {Number.isFinite(soonestDte) && (
+            <span
+              className={`mono ${
+                groupRisk === "expired" || groupRisk === "high"
+                  ? "text-[var(--coral)]"
+                  : groupRisk === "medium"
+                    ? "text-[var(--brass)]"
+                    : ""
+              }`}
+              title={`${soonestDte} days to soonest expiry`}
+            >
+              {expiryBucket(soonestDte)}
+            </span>
+          )}
+          <span className="mono">
+            {legs.length} {legs.length === 1 ? "leg" : "legs"}
+          </span>
+          {m.account && <span className="truncate">{m.account}</span>}
+        </>
+      }
+      day={<SheetDay m={m} />}
+      value={<SheetValue m={m} />}
+      panel={
+        <div className="relative border-t border-line/60 bg-[var(--panel-2)]/40 px-4 py-5 sm:px-6">
+          <OptionStructuresPanel legs={legs} quotes={ctx.quotes} currency={m.currency} />
+        </div>
+      }
+    />
+  );
+}
+
+/** One kind of thing — stocks, ETFs, crypto, options, cash — and its subtotal. */
+function SheetSection({
+  section,
+  currency,
+  ctx,
+}: {
+  section: {
+    kind: HoldingKind;
+    label: string;
+    rows: RowItem[];
+    value: number;
+    weight: number;
+    pnl: number | null;
+  };
+  currency: string;
+  ctx: SheetCtx;
+}) {
+  const n = section.rows.length;
+  return (
+    <section>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-line/60 bg-[var(--panel-2)]/50 px-4 py-2.5">
+        <span className="eyebrow">{section.label}</span>
+        <span className="text-[11px] text-[var(--faint)]">
+          {n}{" "}
+          {section.kind === "option"
+            ? n === 1
+              ? "structure"
+              : "structures"
+            : n === 1
+              ? "position"
+              : "positions"}
+        </span>
+        <span className="mono ml-auto text-xs text-[var(--muted)]">
+          {formatMoney(section.value, currency)} · {section.weight.toFixed(1)}%
+          {section.pnl != null && (
+            <span className={section.pnl >= 0 ? " text-[var(--jade)]" : " text-[var(--coral)]"}>
+              {" · "}
+              {section.pnl >= 0 ? "+" : "−"}
+              {formatMoney(Math.abs(section.pnl), currency)}
+            </span>
+          )}
+          {/* Cash is in the total but it isn't a bet — say so once, here,
+              rather than letting it pad the "invested" figure silently. */}
+          {section.kind === "cash" && <span className="text-[var(--faint)]"> · not invested</span>}
+        </span>
+      </div>
+      <ul>
+        {section.rows.map((it) =>
+          it.kind === "holding" ? (
+            <SheetHoldingRow key={it.h.id} h={it.h} m={it.m} ctx={ctx} />
+          ) : (
+            <SheetOptionRow
+              key={`opt:${it.underlying}`}
+              underlying={it.underlying}
+              legs={it.legs}
+              m={it.m}
+              ctx={ctx}
+            />
+          ),
+        )}
+      </ul>
+    </section>
+  );
+}
+
+/** Sheet or table, remembered per browser. */
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: HoldingsView;
+  onChange: (v: HoldingsView) => void;
+}) {
+  return (
+    <div className="flex items-center rounded-lg border border-line p-0.5 text-xs">
+      {(["sheet", "table"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => onChange(v)}
+          aria-pressed={view === v}
+          className={`rounded-md px-2.5 py-1 transition ${
+            view === v
+              ? "bg-[var(--panel-2)] text-[var(--paper)]"
+              : "text-[var(--faint)] hover:text-[var(--muted)]"
+          }`}
+        >
+          {v === "sheet" ? "Sheet" : "Table"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Sort control for the sheet, which has no column headers to click. */
+function SheetSort({
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  sortKey: SortKey;
+  sortDir: "desc" | "asc";
+  onSort: (key: SortKey) => void;
+}) {
+  const OPTIONS: { key: SortKey; label: string }[] = [
+    { key: "value", label: "Value" },
+    { key: "weight", label: "Weight" },
+    { key: "day", label: "Day" },
+    { key: "pnl", label: "P&L" },
+    { key: "name", label: "Name" },
+  ];
+  return (
+    <span className="inline-flex items-center gap-1">
+      <select
+        value={sortKey}
+        onChange={(e) => onSort(e.target.value as SortKey)}
+        aria-label="Sort positions by"
+        className="rounded-lg border border-line bg-[var(--ink)] px-2 py-1 text-xs text-[var(--muted)] outline-none transition hover:text-[var(--paper)] focus:border-[var(--brass-dim)]"
+      >
+        {OPTIONS.map((o) => (
+          <option key={o.key} value={o.key}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={() => onSort(sortKey)}
+        aria-label={sortDir === "desc" ? "Sort ascending" : "Sort descending"}
+        title={sortDir === "desc" ? "Largest first" : "Smallest first"}
+        className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
+      >
+        <ChevronDown size={13} className={sortDir === "asc" ? "rotate-180" : ""} />
+      </button>
+    </span>
+  );
+}
+
+/**
+ * The whole sheet: every section, then the folded tail of sub-1% positions.
+ * Responsive by construction — it's a list, not a table — so it serves phones
+ * and desktops from one markup instead of a card view shadowing a table view.
+ */
+function HoldingsSheet({
+  sections,
+  tail,
+  tailValue,
+  tailWeight,
+  showAll,
+  onShowAll,
+  currency,
+  ctx,
+  empty,
+}: {
+  sections: {
+    kind: HoldingKind;
+    label: string;
+    rows: RowItem[];
+    value: number;
+    weight: number;
+    pnl: number | null;
+  }[];
+  tail: RowItem[];
+  tailValue: number;
+  tailWeight: number;
+  showAll: boolean;
+  onShowAll: (v: boolean) => void;
+  currency: string;
+  ctx: SheetCtx;
+  empty: string | null;
+}) {
+  if (empty) {
+    return <p className="px-6 py-10 text-center text-sm text-[var(--muted)]">{empty}</p>;
+  }
+  return (
+    <div>
+      {sections.map((section) => (
+        <SheetSection key={section.kind} section={section} currency={currency} ctx={ctx} />
+      ))}
+
+      {/* The long tail, folded. The money is counted in the line — only the
+          rows are hidden, and one click brings them back. */}
+      {tail.length > 0 && (
+        <button
+          onClick={() => onShowAll(true)}
+          className="flex w-full items-center gap-3 px-4 py-3 text-left text-xs text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)]/40 hover:text-[var(--paper)]"
+        >
+          <ChevronDown size={13} className="text-[var(--faint)]" />
+          <span>
+            {tail.length} positions under {TAIL_WEIGHT_PCT}% each
+          </span>
+          <span className="mono ml-auto text-[var(--faint)]">
+            {formatMoney(tailValue, currency)} · {tailWeight.toFixed(1)}%
+          </span>
+          <span className="text-[var(--brass)]">Show</span>
+        </button>
+      )}
+      {showAll && (
+        <button
+          onClick={() => onShowAll(false)}
+          className="w-full px-4 py-3 text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+        >
+          Fold small positions again
+        </button>
+      )}
+    </div>
   );
 }
 

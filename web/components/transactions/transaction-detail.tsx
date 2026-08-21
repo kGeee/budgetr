@@ -7,6 +7,8 @@ import {
   Check,
   Download,
   FileText,
+  Maximize2,
+  PanelRight,
   Paperclip,
   Plus,
   Repeat,
@@ -48,6 +50,48 @@ import type {
 } from "@/lib/queries";
 import type { MatchCounterpart } from "@/lib/matching";
 
+type DetailVariant = "drawer" | "modal";
+
+const VARIANT_STORAGE_KEY = "budgetr.transaction-detail.variant.v1";
+
+/**
+ * Which presentation the transaction detail uses — the right-hand drawer (A) or
+ * the wide centred modal (B). An explicit toggle rather than a random bucket:
+ * the choice sticks per browser so a session isn't spent re-picking it. First
+ * paint always uses the default so SSR and hydration agree; the saved choice is
+ * applied after mount.
+ */
+function useDetailVariant(): [DetailVariant, (v: DetailVariant) => void] {
+  const [variant, setVariant] = useState<DetailVariant>("modal");
+  const loaded = useRef(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(VARIANT_STORAGE_KEY);
+      if (saved === "drawer" || saved === "modal") {
+        // Deferred to an effect on purpose — see the column-prefs hook in
+        // portfolio-view for the same SSR-safe shape.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setVariant(saved);
+      }
+    } catch {
+      /* unavailable storage — keep the default */
+    }
+    loaded.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!loaded.current) return;
+    try {
+      localStorage.setItem(VARIANT_STORAGE_KEY, variant);
+    } catch {
+      /* ignore */
+    }
+  }, [variant]);
+
+  return [variant, setVariant];
+}
+
 export function TransactionDetail({
   transaction,
   categories,
@@ -59,6 +103,7 @@ export function TransactionDetail({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [variant, setVariant] = useDetailVariant();
   const t = transaction;
 
   // After changing a category, offer to apply it to other txns from this vendor.
@@ -138,6 +183,225 @@ export function TransactionDetail({
     });
   }
 
+  const amountBlock = t && (
+    <div>
+      <p
+        className={`display-1 font-display text-4xl tabular ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
+      >
+        {income ? "+" : "−"}
+        {formatCurrency(Math.abs(t.amount), t.currency ?? "USD")}
+      </p>
+      <p className="mt-1.5 text-sm text-[var(--muted)]">
+        {t.date} · {t.accountName}
+        {t.pending && <span className="ml-2 text-[var(--brass)]">pending</span>}
+      </p>
+    </div>
+  );
+
+  const primaryFields = t && (
+    <>
+      {/* Category */}
+      <Field label="Category">
+        <div className="space-y-2.5">
+          {catSuggestion &&
+            catSuggestion.categoryId !== t.categoryId &&
+            t.splitCount === 0 && (
+              <button
+                disabled={pending}
+                onClick={() => {
+                  setCatSuggestion(null);
+                  changeCategory(catSuggestion.categoryId);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-3 py-2 text-left text-xs transition hover:brightness-110 disabled:opacity-50"
+              >
+                <Sparkles size={13} className="shrink-0 text-[var(--brass)]" />
+                <span className="min-w-0 flex-1 text-[var(--muted)]">
+                  Suggested:{" "}
+                  <span className="font-medium text-[var(--paper)]">
+                    {catSuggestion.categoryName}
+                  </span>{" "}
+                  <span className="text-[var(--faint)]">
+                    ({Math.round(catSuggestion.confidence * 100)}% of{" "}
+                    {catSuggestion.count} past)
+                  </span>
+                </span>
+                <span className="shrink-0 rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[var(--on-brass)]">
+                  Apply
+                </span>
+              </button>
+            )}
+
+          <div className="flex items-center gap-2">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--brass)]">
+              <CategoryIcon icon={t.categoryIcon} size={15} />
+            </span>
+            <select
+              value={t.categoryId ?? ""}
+              disabled={pending || t.splitCount > 0}
+              onChange={(e) => changeCategory(e.target.value || null)}
+              className="min-w-0 flex-1 rounded-lg border border-line bg-[var(--ink)] px-3 py-2 text-sm outline-none focus:border-[var(--brass-dim)] disabled:opacity-50"
+            >
+              <option value="">Auto (from Plaid)</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {t.splitCount > 0 && (
+            <p className="text-xs text-[var(--muted)]">
+              Category is managed by the {t.splitCount} splits below.
+            </p>
+          )}
+
+          {catOffer && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-3 py-2 text-xs">
+              <span className="min-w-0 text-[var(--muted)]">
+                Apply{" "}
+                <span className="font-medium text-[var(--paper)]">
+                  {catOffer.categoryName}
+                </span>{" "}
+                to {catOffer.count} other{" "}
+                {catOffer.count === 1 ? "transaction" : "transactions"} from{" "}
+                <span className="font-medium text-[var(--paper)]">
+                  {catOffer.vendorName}
+                </span>
+                ?
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  disabled={pending}
+                  onClick={() => {
+                    const o = catOffer;
+                    setCatOffer(null);
+                    act(() => applyCategoryToVendor(t.id, o.categoryId));
+                  }}
+                  className="rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[var(--on-brass)] hover:brightness-105"
+                >
+                  Apply
+                </button>
+                <button
+                  onClick={() => setCatOffer(null)}
+                  aria-label="Dismiss"
+                  className="rounded-md p-1 text-[var(--faint)] hover:text-[var(--paper)]"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Field>
+
+      {/* Split */}
+      <Field label="Split">
+        {/* key remounts per transaction → fresh load of that txn's splits */}
+        <SplitEditor key={t.id} transaction={t} categories={categories} />
+        {/* Splitting with people also writes category splits, so the two
+            editors are alternatives — the modal warns before replacing. */}
+        <div className="mt-2">
+          <SplitBillButton key={t.id} transaction={t} categories={categories} />
+        </div>
+      </Field>
+
+      {/* Recurring */}
+      {t.recurring && (
+        <Field label="Recurring">
+          <a
+            href="/recurring"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--brass-dim)] px-2.5 py-1 text-xs text-[var(--brass)] hover:bg-[color-mix(in_srgb,var(--brass)_12%,transparent)]"
+          >
+            <Repeat size={12} /> Part of a recurring series
+          </a>
+        </Field>
+      )}
+
+      {/* Matched refund/transfer counterpart */}
+      {t.matched && (
+        <Field label="Matched">
+          {/* key remounts per transaction → fresh load of the counterpart */}
+          <MatchInfo key={t.id} transaction={t} onAct={act} />
+        </Field>
+      )}
+    </>
+  );
+
+  const secondaryFields = t && (
+    <>
+      {/* Tags */}
+      <Field label="Tags">
+        <TagEditor
+          transaction={t}
+          disabled={pending}
+          onAct={act}
+          suggestions={tagSuggestions}
+        />
+      </Field>
+
+      {/* Notes */}
+      <Field label="Note">
+        {/* key remounts the editor per transaction → fresh initial value, no effect sync */}
+        <NotesEditor key={t.id} transaction={t} onAct={act} />
+      </Field>
+
+      {/* Receipts */}
+      <Field label="Receipts">
+        {/* key remounts per transaction → fresh load of that txn's files */}
+        <AttachmentsEditor key={t.id} transaction={t} />
+      </Field>
+    </>
+  );
+
+  const reviewButton = t && (
+    <button
+      disabled={pending}
+      onClick={() => act(() => setReviewed([t.id], !t.reviewed))}
+      className={`flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-all active:scale-[0.99] ${
+        t.reviewed
+          ? "border border-line bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--paper)]"
+          : "bg-[var(--jade)] text-[var(--on-jade)] hover:brightness-105"
+      }`}
+    >
+      <Check size={16} />
+      {t.reviewed ? "Reviewed — mark to review" : "Mark reviewed"}
+    </button>
+  );
+
+  // The A/B control itself. Both presentations render the same fields — only the
+  // shell and the column layout differ — so switching mid-session loses nothing.
+  const variantToggle = (
+    <div className="flex shrink-0 items-center rounded-lg border border-line p-0.5">
+      {(["drawer", "modal"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => setVariant(v)}
+          aria-pressed={variant === v}
+          aria-label={v === "drawer" ? "Show as side panel" : "Show as centred modal"}
+          title={v === "drawer" ? "Side panel" : "Centred modal"}
+          className={`rounded-md p-1.5 transition ${
+            variant === v
+              ? "bg-[var(--panel-2)] text-[var(--paper)]"
+              : "text-[var(--faint)] hover:text-[var(--muted)]"
+          }`}
+        >
+          {v === "drawer" ? <PanelRight size={14} /> : <Maximize2 size={14} />}
+        </button>
+      ))}
+    </div>
+  );
+
+  const closeButton = (
+    <button
+      onClick={onClose}
+      aria-label="Close"
+      className="shrink-0 rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
+    >
+      <X size={18} />
+    </button>
+  );
+
   return (
     <>
       {/* Scrim */}
@@ -148,212 +412,97 @@ export function TransactionDetail({
         }`}
         aria-hidden
       />
-      {/* Panel */}
-      <aside
-        role="dialog"
-        aria-label="Transaction detail"
-        className={`material-thick fixed right-0 top-0 z-40 flex h-dvh w-full max-w-[400px] flex-col border-l border-line shadow-[0_0_60px_-20px_rgba(0,0,0,0.9)] transition-transform duration-300 ease-[var(--ease)] will-change-transform ${
-          open ? "translate-x-0" : "translate-x-full"
-        } ${pending ? "opacity-90" : ""}`}
-      >
-        {t && (
-          <>
-            <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
-              <div className="min-w-0">
-                <p className="eyebrow">{income ? "Income" : "Transaction"}</p>
-                <p className="mt-1 truncate font-display text-lg">{t.displayName}</p>
-              </div>
-              <button
-                onClick={onClose}
-                aria-label="Close"
-                className="shrink-0 rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
-              >
-                <X size={18} />
-              </button>
-            </header>
 
-            <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
-              {/* Amount */}
-              <div>
-                <p
-                  className={`display-1 font-display text-4xl tabular ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
-                >
-                  {income ? "+" : "−"}
-                  {formatCurrency(Math.abs(t.amount), t.currency ?? "USD")}
-                </p>
-                <p className="mt-1.5 text-sm text-[var(--muted)]">
-                  {t.date} · {t.accountName}
-                  {t.pending && <span className="ml-2 text-[var(--brass)]">pending</span>}
-                </p>
+      {variant === "drawer" ? (
+        /* A — the side panel: 400px, one column, amount at the top of the body. */
+        <aside
+          role="dialog"
+          aria-label="Transaction detail"
+          className={`material-thick fixed right-0 top-0 z-40 flex h-dvh w-full max-w-[400px] flex-col border-l border-line shadow-[0_0_60px_-20px_rgba(0,0,0,0.9)] transition-transform duration-300 ease-[var(--ease)] will-change-transform ${
+            open ? "translate-x-0" : "translate-x-full"
+          } ${pending ? "opacity-90" : ""}`}
+        >
+          {t && (
+            <>
+              <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+                <div className="min-w-0">
+                  <p className="eyebrow">{income ? "Income" : "Transaction"}</p>
+                  <p className="mt-1 truncate font-display text-lg">{t.displayName}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {variantToggle}
+                  {closeButton}
+                </div>
+              </header>
+
+              <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+                {amountBlock}
+                {primaryFields}
+                {secondaryFields}
               </div>
 
-              {/* Category */}
-              <Field label="Category">
-                <div className="space-y-2.5">
-                  {catSuggestion &&
-                    catSuggestion.categoryId !== t.categoryId &&
-                    t.splitCount === 0 && (
-                      <button
-                        disabled={pending}
-                        onClick={() => {
-                          setCatSuggestion(null);
-                          changeCategory(catSuggestion.categoryId);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-3 py-2 text-left text-xs transition hover:brightness-110 disabled:opacity-50"
-                      >
-                        <Sparkles size={13} className="shrink-0 text-[var(--brass)]" />
-                        <span className="min-w-0 flex-1 text-[var(--muted)]">
-                          Suggested:{" "}
-                          <span className="font-medium text-[var(--paper)]">
-                            {catSuggestion.categoryName}
-                          </span>{" "}
-                          <span className="text-[var(--faint)]">
-                            ({Math.round(catSuggestion.confidence * 100)}% of{" "}
-                            {catSuggestion.count} past)
-                          </span>
-                        </span>
-                        <span className="shrink-0 rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[var(--on-brass)]">
-                          Apply
-                        </span>
-                      </button>
-                    )}
-
-                  <div className="flex items-center gap-2">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--brass)]">
-                      <CategoryIcon icon={t.categoryIcon} size={15} />
-                    </span>
-                    <select
-                      value={t.categoryId ?? ""}
-                      disabled={pending || t.splitCount > 0}
-                      onChange={(e) => changeCategory(e.target.value || null)}
-                      className="min-w-0 flex-1 rounded-lg border border-line bg-[var(--ink)] px-3 py-2 text-sm outline-none focus:border-[var(--brass-dim)] disabled:opacity-50"
-                    >
-                      <option value="">Auto (from Plaid)</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {t.splitCount > 0 && (
-                    <p className="text-xs text-[var(--muted)]">
-                      Category is managed by the {t.splitCount} splits below.
+              <footer className="border-t border-line px-5 py-4">{reviewButton}</footer>
+            </>
+          )}
+        </aside>
+      ) : (
+        /* B — the centred modal: wide enough for two columns, with the amount
+           lifted into the header so it doesn't spend body height. */
+        <div
+          onClick={onClose}
+          className={`fixed inset-0 z-40 grid place-items-center p-4 transition-opacity duration-200 sm:p-6 ${
+            open ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          <div
+            role="dialog"
+            aria-modal
+            aria-label="Transaction detail"
+            onClick={(e) => e.stopPropagation()}
+            className={`material-thick flex h-[min(860px,92dvh)] w-full max-w-[1040px] flex-col overflow-hidden rounded-[var(--radius)] border border-line shadow-[0_40px_90px_-30px_rgba(0,0,0,0.9)] transition-all duration-200 ease-[var(--ease)] ${
+              open ? "scale-100 opacity-100" : "scale-[0.98] opacity-0"
+            } ${pending ? "opacity-90" : ""}`}
+          >
+            {t && (
+              <>
+                <header className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
+                  <div className="min-w-0">
+                    <p className="eyebrow">{income ? "Income" : "Transaction"}</p>
+                    <p className="mt-1 truncate font-display text-xl">{t.displayName}</p>
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                      {t.date} · {t.accountName}
+                      {t.pending && <span className="ml-2 text-[var(--brass)]">pending</span>}
                     </p>
-                  )}
-
-                  {catOffer && (
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-3 py-2 text-xs">
-                      <span className="min-w-0 text-[var(--muted)]">
-                        Apply{" "}
-                        <span className="font-medium text-[var(--paper)]">
-                          {catOffer.categoryName}
-                        </span>{" "}
-                        to {catOffer.count} other{" "}
-                        {catOffer.count === 1 ? "transaction" : "transactions"} from{" "}
-                        <span className="font-medium text-[var(--paper)]">
-                          {catOffer.vendorName}
-                        </span>
-                        ?
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        <button
-                          disabled={pending}
-                          onClick={() => {
-                            const o = catOffer;
-                            setCatOffer(null);
-                            act(() => applyCategoryToVendor(t.id, o.categoryId));
-                          }}
-                          className="rounded-full bg-[var(--brass)] px-2.5 py-1 font-medium text-[var(--on-brass)] hover:brightness-105"
-                        >
-                          Apply
-                        </button>
-                        <button
-                          onClick={() => setCatOffer(null)}
-                          aria-label="Dismiss"
-                          className="rounded-md p-1 text-[var(--faint)] hover:text-[var(--paper)]"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    <div className="flex items-center gap-1.5">
+                      {variantToggle}
+                      {closeButton}
                     </div>
-                  )}
+                    <p
+                      className={`font-display text-3xl tabular ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
+                    >
+                      {income ? "+" : "−"}
+                      {formatCurrency(Math.abs(t.amount), t.currency ?? "USD")}
+                    </p>
+                  </div>
+                </header>
+
+                <div className="flex-1 overflow-y-auto px-6 py-6">
+                  <div className="grid gap-x-10 gap-y-7 lg:grid-cols-2">
+                    <div className="min-w-0 space-y-7">{primaryFields}</div>
+                    <div className="min-w-0 space-y-7">{secondaryFields}</div>
+                  </div>
                 </div>
-              </Field>
 
-              {/* Split */}
-              <Field label="Split">
-                {/* key remounts per transaction → fresh load of that txn's splits */}
-                <SplitEditor key={t.id} transaction={t} categories={categories} />
-                {/* Splitting with people also writes category splits, so the two
-                    editors are alternatives — the modal warns before replacing. */}
-                <div className="mt-2">
-                  <SplitBillButton key={t.id} transaction={t} categories={categories} />
-                </div>
-              </Field>
-
-              {/* Recurring */}
-              {t.recurring && (
-                <Field label="Recurring">
-                  <a
-                    href="/recurring"
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--brass-dim)] px-2.5 py-1 text-xs text-[var(--brass)] hover:bg-[color-mix(in_srgb,var(--brass)_12%,transparent)]"
-                  >
-                    <Repeat size={12} /> Part of a recurring series
-                  </a>
-                </Field>
-              )}
-
-              {/* Matched refund/transfer counterpart */}
-              {t.matched && (
-                <Field label="Matched">
-                  {/* key remounts per transaction → fresh load of the counterpart */}
-                  <MatchInfo key={t.id} transaction={t} onAct={act} />
-                </Field>
-              )}
-
-              {/* Tags */}
-              <Field label="Tags">
-                <TagEditor
-                  transaction={t}
-                  disabled={pending}
-                  onAct={act}
-                  suggestions={tagSuggestions}
-                />
-              </Field>
-
-              {/* Notes */}
-              <Field label="Note">
-                {/* key remounts the editor per transaction → fresh initial value, no effect sync */}
-                <NotesEditor key={t.id} transaction={t} onAct={act} />
-              </Field>
-
-              {/* Receipts */}
-              <Field label="Receipts">
-                {/* key remounts per transaction → fresh load of that txn's files */}
-                <AttachmentsEditor key={t.id} transaction={t} />
-              </Field>
-            </div>
-
-            {/* Footer — review toggle */}
-            <footer className="border-t border-line px-5 py-4">
-              <button
-                disabled={pending}
-                onClick={() => act(() => setReviewed([t.id], !t.reviewed))}
-                className={`flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-all active:scale-[0.99] ${
-                  t.reviewed
-                    ? "border border-line bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--paper)]"
-                    : "bg-[var(--jade)] text-[var(--on-jade)] hover:brightness-105"
-                }`}
-              >
-                <Check size={16} />
-                {t.reviewed ? "Reviewed — mark to review" : "Mark reviewed"}
-              </button>
-            </footer>
-          </>
-        )}
-      </aside>
+                <footer className="flex justify-end border-t border-line px-6 py-4">
+                  <div className="w-full sm:w-auto sm:min-w-[260px]">{reviewButton}</div>
+                </footer>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

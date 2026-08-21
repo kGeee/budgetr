@@ -53,3 +53,8 @@ apple/build/
 apple/DerivedData/
 **/.swiftpm/
 **/SKILL.md
+
+# Xcode build output (apple/)
+apple/build/
+apple/build-ios/
+apple/DerivedData/

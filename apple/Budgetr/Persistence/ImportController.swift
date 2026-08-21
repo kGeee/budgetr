@@ -1,9 +1,29 @@
 import CoreData
 import SQLite3
 
-enum ImportError: Error {
-    case cannotOpenDatabase
+enum ImportError: Error, LocalizedError {
+    case cannotOpenDatabase(String)
     case saveFailed(Error)
+    /// A statement wouldn't prepare — almost always the ledger's schema having
+    /// moved on from what this importer expects.
+    case queryFailed(table: String, message: String)
+    /// The file opened and every statement ran, but nothing came back. Worth its
+    /// own case: "imported successfully, zero rows" is the failure that looks
+    /// like success.
+    case nothingImported
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotOpenDatabase(let detail):
+            return "Could not open that database file. \(detail)"
+        case .saveFailed(let error):
+            return "Could not save: \(error.localizedDescription)"
+        case .queryFailed(let table, let message):
+            return "Reading \(table) failed: \(message)"
+        case .nothingImported:
+            return "That file opened, but held no transactions."
+        }
+    }
 }
 
 final class ImportController {
@@ -29,10 +49,39 @@ final class ImportController {
             if secured { url.stopAccessingSecurityScopedResource() }
         }
 
-        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            throw ImportError.cannotOpenDatabase
+        // `immutable=1`, and it is load-bearing.
+        //
+        // The ledger runs in WAL mode. To read a WAL database SQLite wants to
+        // build the `-shm` shared-memory index next to it — which it will not do
+        // for a read-only connection, so every statement failed to prepare with
+        // SQLITE_CANTOPEN ("unable to open database file"). Combined with a
+        // `query` that used to return quietly on a prepare failure, the import
+        // read nothing and reported success.
+        //
+        // `immutable` promises the file cannot change underneath us, which lets
+        // SQLite skip the WAL machinery and read the main file directly. That is
+        // exactly true here: this is a copy, opened once, never written.
+        //
+        // The tradeoff is that anything still sitting in an uncheckpointed `-wal`
+        // is invisible. For a file copied off a machine where the app has since
+        // been closed that is nothing; for one grabbed mid-write it could be the
+        // newest transactions, which is why the count check below exists.
+        let uri = "file:\(url.path)?immutable=1"
+        let rc = sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil)
+        guard rc == SQLITE_OK else {
+            // "unable to open database file" is what the sandbox denying a read
+            // looks like from down here, and it is indistinguishable from a
+            // missing file — so say both possibilities rather than the one.
+            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "sqlite error \(rc)"
+            throw ImportError.cannotOpenDatabase(
+                FileManager.default.fileExists(atPath: url.path)
+                    ? "\(message) — the file exists, so this is usually a permissions problem."
+                    : message
+            )
         }
         defer { sqlite3_close(db) }
+
+        let transactionCount = try countRows(db: db, table: "transactions")
 
         try importCategories(db: db)
         try importTags(db: db)
@@ -47,11 +96,26 @@ final class ImportController {
         try importVendorGroups(db: db)
         try importVendorGroupMembers(db: db)
 
+        // A ledger with transactions that produced no inserts means the import
+        // did nothing, whatever the individual steps reported.
+        if transactionCount > 0 && !ctx.hasChanges {
+            throw ImportError.nothingImported
+        }
+
         do {
             try ctx.save()
         } catch {
             throw ImportError.saveFailed(error)
         }
+    }
+
+    private func countRows(db: OpaquePointer?, table: String) throws -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM \(table)", -1, &stmt, nil) == SQLITE_OK else {
+            throw ImportError.queryFailed(table: table, message: String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
     }
 
     // MARK: - Table importers
@@ -86,14 +150,19 @@ final class ImportController {
 
     private func importItems(db: OpaquePointer?) throws {
         let sql = """
-            SELECT id, access_token_enc, plaid_env, institution_id, institution_name,
+            SELECT id, access_token, plaid_env, institution_id, institution_name,
                    transactions_cursor, status, error, created_at, updated_at
             FROM items
             """
         try query(db: db, sql: sql) { stmt in
             let obj = findOrCreate(CDItem.self, id: str(stmt, 0))
             obj.id                  = str(stmt, 0)
-            obj.accessTokenEnc      = blob(stmt, 1)
+            // The web app stores the encrypted token as TEXT (an AES-GCM blob
+            // rendered to a string by lib/crypto.ts), in a column called
+            // `access_token` — not `access_token_enc`, which is what this read
+            // for and which made every items row fail. Items are the root of
+            // the cascade, so that took accounts and transactions with it.
+            obj.accessTokenEnc      = str(stmt, 1)?.data(using: .utf8)
             obj.plaidEnv            = str(stmt, 2)
             obj.institutionId       = str(stmt, 3)
             obj.institutionName     = str(stmt, 4)
@@ -275,13 +344,29 @@ final class ImportController {
         return (try? ctx.fetch(req).first) ?? T(context: ctx)
     }
 
-    private func query(db: OpaquePointer?, sql: String, row: (OpaquePointer) throws -> Void) throws {
+    /// Runs one statement, and refuses to fail quietly.
+    ///
+    /// This used to `return` when the statement wouldn't prepare. That turned
+    /// any schema drift into a silent no-op: every table imported zero rows, the
+    /// save succeeded because there was nothing to save, and the app said
+    /// "Import complete" over an empty store. A failure that reports success is
+    /// worse than a crash, so it throws now and carries SQLite's own message.
+    @discardableResult
+    private func query(db: OpaquePointer?, sql: String, row: (OpaquePointer) throws -> Void) throws -> Int {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            let message = String(cString: sqlite3_errmsg(db))
+            let table = sql.split(separator: " ").drop(while: { $0.uppercased() != "FROM" })
+                .dropFirst().first.map(String.init) ?? "the ledger"
+            throw ImportError.queryFailed(table: table, message: message)
+        }
         defer { sqlite3_finalize(stmt) }
+        var count = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
             try row(stmt!)
+            count += 1
         }
+        return count
     }
 
     private func str(_ stmt: OpaquePointer, _ col: Int32) -> String? {

@@ -15,8 +15,16 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
-    # Set your Apple Developer Team ID here (or in Xcode > Signing & Capabilities).
-    DEVELOPMENT_TEAM: "68YAY3V65J"  # Replace with your 10-char Team ID from developer.apple.com/account
+    # The real team — same one the Expo companion signs with (mobile/app.json),
+    # so both apps belong to one account. This was a placeholder matching no
+    # certificate on this machine, which is why the project would only build
+    # with signing switched off entirely.
+    #
+    # Automatic signing needs Xcode to be signed in (Xcode > Settings >
+    # Accounts). Until it is, build with scripts/build-mac.sh, which signs
+    # ad-hoc — enough to run locally, since the entitlements are sandbox +
+    # network only.
+    DEVELOPMENT_TEAM: "B9UFFWUAD8"
 
 targets:
   Budgetr:
@@ -35,4 +43,42 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.finance"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # A phone has no budgetr.db on disk — it has to arrive. These expose the
+        # app's Documents folder in Files (and over a cable), so the ledger can
+        # be dropped in and opened, which is the only data path on iOS until
+        # CloudKit is switched on.
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         # INFOPLIST_KEY_UIBackgroundModes: "remote-notification"  # restore when CloudKit re-enabled
+
+  BudgetrTests:
+    type: bundle.unit-test
+    # macOS only: these cover the pure domain layer (MonthSummary, BudgetPacing,
+    # CategoryMapping), which has no platform dependencies — so running them on
+    # one destination proves them for both, and the suite stays fast enough to
+    # run on every build.
+    supportedDestinations: [macOS]
+    # Compiles the domain sources directly instead of hosting the app. The app
+    # is sandboxed, and a sandboxed ad-hoc-signed host hangs before the test
+    # runner can connect — but none of this code needs an app: it is pure value
+    # types over Foundation. Anything touching Core Data belongs in a separate
+    # hosted suite, once there is something worth hosting for.
+    sources:
+      - path: Tests
+      - path: Budgetr/Domain/MonthSummary.swift
+      - path: Budgetr/Domain/BudgetPacing.swift
+      - path: Budgetr/Domain/CategoryMapping.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Budgetr:
+    build:
+      targets:
+        Budgetr: all
+        BudgetrTests: [test]
+    test:
+      targets: [BudgetrTests]
+      gatherCoverageData: false

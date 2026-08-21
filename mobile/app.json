@@ -11,8 +11,7 @@
       "bundleIdentifier": "dev.budgetr.companion",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIViewControllerBasedStatusBarAppearance": false,
-        "NSCameraUsageDescription": "Photograph a receipt so your Mac can read its line items and split the bill."
+        "UIViewControllerBasedStatusBarAppearance": false
       },
       "entitlements": {
         "com.apple.security.application-groups": [
@@ -52,7 +51,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "budgetr uses the camera only to scan your Mac's pairing code."
+          "cameraPermission": "budgetr uses the camera to scan your Mac's pairing code and to photograph receipts for splitting a bill."
         }
       ],
       "expo-font",

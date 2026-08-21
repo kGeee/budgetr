@@ -371,14 +371,14 @@ function SplitModal({
         role="dialog"
         aria-modal="true"
         aria-label="Split this bill"
-        className={`max-h-[90dvh] w-full overflow-y-auto rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)] ${
+        className={`flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)] ${
           // The itemized editor is a table in disguise — a name, who's on it, a
           // price and four controls per row. At the dialog's usual width the
           // name column collapses to nothing.
           mode === "items" ? "max-w-3xl" : "max-w-lg"
         }`}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">
             <p className="eyebrow">Split this bill</p>
             <p className="mt-1 truncate text-sm">{transaction.displayName}</p>
@@ -395,7 +395,7 @@ function SplitModal({
           </button>
         </div>
 
-        <div className="space-y-5 px-5 py-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
           {clobbers && (
             <p className="rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_10%,transparent)] px-3 py-2 text-xs text-[var(--brass)]">
               This transaction already has category splits. Saving a bill split replaces them.
@@ -582,7 +582,7 @@ function SplitModal({
           )}
         </div>
 
-        <div className="flex items-center gap-2 border-t border-line px-5 py-4">
+        <div className="flex shrink-0 items-center gap-2 border-t border-line px-5 py-4">
           <div className="min-w-0 flex-1">
             <p className="eyebrow">Owed to you</p>
             <p className="mono mt-0.5 text-sm text-[var(--jade)]">
