@@ -16,7 +16,12 @@ import { getEntitlement } from "@/lib/license";
 import { getFinnhubKey, getPlaidConfig, isDemoMode } from "@/lib/app-config";
 import { demoEnabled } from "@/lib/site";
 import { hasPlaidCredentials } from "@/lib/plaid";
-import { getAccounts, getDisplayCurrencyRates, getPendingSummary } from "@/lib/queries";
+import {
+  countUnreviewed,
+  getAccounts,
+  getDisplayCurrencyRates,
+  getPendingSummary,
+} from "@/lib/queries";
 import { getIncludePending } from "@/lib/pending";
 import { PendingToggle } from "@/components/pending-toggle";
 import { OBF_COOKIE, hiddenFromCookie, setHidden } from "@/lib/scale";
@@ -70,6 +75,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   setRatesMap(ratesMap);
 
   const accounts = getAccounts();
+  // Drives the sidebar's Review badge — nav that reports the one queue that
+  // actually accumulates, and shows nothing when it's empty.
+  const reviewCount = countUnreviewed();
 
   // Whether pending charges count toward spending, plus what's in flight — the
   // header toggle shows itself only when it would change a number.
@@ -95,7 +103,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <CurrencyInit currency={displayCurrency} rates={ratesMap} />
       <RegisterSW />
       <div className="mx-auto flex min-h-dvh max-w-[1500px]">
-        <Sidebar accounts={accounts} webDemo={webDemo} />
+        <Sidebar accounts={accounts} reviewCount={reviewCount} webDemo={webDemo} />
         <div className="flex min-w-0 flex-1 flex-col">
           {entitlement?.status === "trial" && (
             <TrialBanner daysLeft={entitlement.trialDaysLeft} />
@@ -104,7 +112,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {/* pt uses the iOS safe-area inset so the notch/status bar never
               covers the controls in standalone (Add to Home Screen) mode. */}
           <header className="material sticky top-0 z-20 flex items-center gap-2 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-4 sm:px-8">
-            <MobileNav webDemo={webDemo} />
+            <MobileNav accounts={accounts} reviewCount={reviewCount} webDemo={webDemo} />
             <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
               <PendingToggle
                 on={countPending}

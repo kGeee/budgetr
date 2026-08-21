@@ -1252,6 +1252,20 @@ export function getPendingSummary(): { count: number; amount: number } {
   return { count: Number(row?.count ?? 0), amount: Number(row?.amount ?? 0) };
 }
 
+/**
+ * How many settled transactions are still waiting to be reviewed. Powers the
+ * sidebar's Review badge, so it must stay a single count — it runs on every
+ * page render of the app shell.
+ */
+export function countUnreviewed(): number {
+  const row = db.get<{ count: number }>(sql`
+    SELECT COUNT(*) AS count
+      FROM transactions t
+     WHERE t.reviewed = 0
+       AND t.pending = 0`);
+  return Number(row?.count ?? 0);
+}
+
 // ── History-based suggestions ───────────────────────────────────────────────────
 
 /**
