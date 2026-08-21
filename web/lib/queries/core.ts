@@ -93,7 +93,7 @@ function isConfirmedMatch(alias: string) {
  * sign convention as transactions.amount. Splice into a query with
  * `sql`WITH ${spendRowsCte} SELECT ... FROM spend_rows sr ...``.
  */
-const spendRowsCte = sql`spend_rows AS (
+export const spendRowsCte = sql`spend_rows AS (
   SELECT t.id AS txn_id, t.date AS date, t.pending AS pending, t.amount AS amount,
          ${effectiveCatId("t")} AS category_id
   FROM transactions t
@@ -463,6 +463,11 @@ export type EnvelopeBudgetRow = BudgetRow & {
  * getBudgetMonth(). available = budget + carryIn − spent; carryOut = available
  * (what next month would inherit). Non-rollover categories read carryIn 0, so
  * their available/carryOut collapse to the usual remaining.
+ *
+ * Spend comes from spend_rows, not raw transactions, so a split bill counts
+ * only the slice attributed to each category — the reimbursable remainder sits
+ * in the `transfer` group and the group filter below drops it. Reading the
+ * parent amount instead charged the whole table to your envelope.
  */
 export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
   const month = getBudgetMonth();
@@ -476,7 +481,8 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
       carryIn: number;
       spent: number;
     }>(
-      sql`SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
+      sql`WITH ${spendRowsCte}
+          SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
              b.amount AS budget,
              COALESCE(b.rollover, 0) AS rollover,
              COALESCE((
@@ -484,10 +490,10 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
                WHERE r.category_id = cat.id AND r.month = ${month}
              ), 0) AS carryIn,
              COALESCE((
-               SELECT SUM(t.amount) FROM transactions t
-               WHERE ${settledOnly()} AND t.amount > 0
-                 AND ${effectiveCatId("t")} = cat.id
-                 AND substr(t.date, 1, 7) = ${month}
+               SELECT SUM(sr.amount) FROM spend_rows sr
+               WHERE ${settledOnly("sr")} AND sr.amount > 0
+                 AND sr.category_id = cat.id
+                 AND substr(sr.date, 1, 7) = ${month}
              ), 0) AS spent
           FROM categories cat
           LEFT JOIN budgets b ON b.category_id = cat.id
@@ -520,18 +526,26 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
 /**
  * Every tag with its monthly budget (if any) and this month's spend across
  * tagged transactions. Reuses BudgetRow (categoryId field carries the tag id).
+ *
+ * Split-aware like the envelope query: tags live on the transaction, so every
+ * split of a tagged transaction counts toward the tag — except the reimbursable
+ * one, dropped by the `transfer`-group test. Uncategorized rows still count
+ * (LEFT JOIN + COALESCE), which is how this query has always read them.
  */
 export function getTagBudgetsWithSpend(): BudgetRow[] {
   const month = getBudgetMonth();
   return db
     .all<{ categoryId: string; name: string; budget: number | null; spent: number }>(
-      sql`SELECT tg.id AS categoryId, ('#' || tg.name) AS name,
+      sql`WITH ${spendRowsCte}
+          SELECT tg.id AS categoryId, ('#' || tg.name) AS name,
              b.amount AS budget,
              COALESCE((
-               SELECT SUM(t.amount) FROM transactions t
-               JOIN transaction_tags tt ON tt.transaction_id = t.id
-               WHERE tt.tag_id = tg.id AND ${settledOnly()} AND t.amount > 0
-                 AND substr(t.date, 1, 7) = ${month}
+               SELECT SUM(sr.amount) FROM spend_rows sr
+               JOIN transaction_tags tt ON tt.transaction_id = sr.txn_id
+               LEFT JOIN categories cat ON cat.id = sr.category_id
+               WHERE tt.tag_id = tg.id AND ${settledOnly("sr")} AND sr.amount > 0
+                 AND COALESCE(cat."group", 'spending') <> 'transfer'
+                 AND substr(sr.date, 1, 7) = ${month}
              ), 0) AS spent
           FROM tags tg
           LEFT JOIN tag_budgets b ON b.tag_id = tg.id
@@ -558,7 +572,11 @@ export type BudgetSummary = {
   month: string;
 };
 
-/** Budget-month totals across all budgeted spending categories. */
+/**
+ * Budget-month totals across all budgeted spending categories. Spend is summed
+ * over spend_rows so split bills contribute only your own share and the
+ * reimbursable (transfer-group) slice never reaches the total.
+ */
 export function getMonthlyBudgetSummary(): BudgetSummary {
   const month = getBudgetMonth();
   const totalBudget = Number(
@@ -571,13 +589,14 @@ export function getMonthlyBudgetSummary(): BudgetSummary {
   );
   const totalSpent = Number(
     db.get<{ v: number }>(
-      sql`SELECT COALESCE(SUM(t.amount), 0) AS v
-          FROM transactions t
-          JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+      sql`WITH ${spendRowsCte}
+          SELECT COALESCE(SUM(sr.amount), 0) AS v
+          FROM spend_rows sr
+          JOIN categories cat ON cat.id = sr.category_id
           JOIN budgets b ON b.category_id = cat.id
-          WHERE ${settledOnly()} AND t.amount > 0
+          WHERE ${settledOnly("sr")} AND sr.amount > 0
             AND cat."group" = 'spending'
-            AND substr(t.date, 1, 7) = ${month}`,
+            AND substr(sr.date, 1, 7) = ${month}`,
     )?.v ?? 0,
   );
   return { totalBudget, totalSpent, left: totalBudget - totalSpent, month };
@@ -585,22 +604,24 @@ export function getMonthlyBudgetSummary(): BudgetSummary {
 
 /**
  * Per-day spend for the budget month across budgeted spending categories only —
- * mirrors getMonthlyBudgetSummary.totalSpent so a cumulative chart reconciles
- * with the budget totals. Returns days with spend, oldest first.
+ * mirrors getMonthlyBudgetSummary.totalSpent (same split-aware spend_rows base)
+ * so a cumulative chart reconciles with the budget totals. Returns days with
+ * spend, oldest first.
  */
 export function getBudgetSpendByDay(): { date: string; spent: number }[] {
   const month = getBudgetMonth();
   return db
     .all<{ date: string; spent: number }>(
-      sql`SELECT t.date AS date, SUM(t.amount) AS spent
-          FROM transactions t
-          JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+      sql`WITH ${spendRowsCte}
+          SELECT sr.date AS date, SUM(sr.amount) AS spent
+          FROM spend_rows sr
+          JOIN categories cat ON cat.id = sr.category_id
           JOIN budgets b ON b.category_id = cat.id
-          WHERE ${settledOnly()} AND t.amount > 0
+          WHERE ${settledOnly("sr")} AND sr.amount > 0
             AND cat."group" = 'spending'
-            AND substr(t.date, 1, 7) = ${month}
-          GROUP BY t.date
-          ORDER BY t.date ASC`,
+            AND substr(sr.date, 1, 7) = ${month}
+          GROUP BY sr.date
+          ORDER BY sr.date ASC`,
     )
     .map((r) => ({ date: r.date, spent: Number(r.spent) }));
 }
@@ -620,15 +641,16 @@ export function getBudgetSpendByCategoryDay(): {
   const month = getBudgetMonth();
   return db
     .all<{ categoryId: string; date: string; spent: number }>(
-      sql`SELECT cat.id AS categoryId, t.date AS date, SUM(t.amount) AS spent
-          FROM transactions t
-          JOIN categories cat ON cat.id = ${effectiveCatId("t")}
+      sql`WITH ${spendRowsCte}
+          SELECT cat.id AS categoryId, sr.date AS date, SUM(sr.amount) AS spent
+          FROM spend_rows sr
+          JOIN categories cat ON cat.id = sr.category_id
           JOIN budgets b ON b.category_id = cat.id
-          WHERE ${settledOnly()} AND t.amount > 0
+          WHERE ${settledOnly("sr")} AND sr.amount > 0
             AND cat."group" = 'spending'
-            AND substr(t.date, 1, 7) = ${month}
-          GROUP BY cat.id, t.date
-          ORDER BY t.date ASC`,
+            AND substr(sr.date, 1, 7) = ${month}
+          GROUP BY cat.id, sr.date
+          ORDER BY sr.date ASC`,
     )
     .map((r) => ({ categoryId: r.categoryId, date: r.date, spent: Number(r.spent) }));
 }

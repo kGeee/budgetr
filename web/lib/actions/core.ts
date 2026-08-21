@@ -37,7 +37,6 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { applyTagRules } from "@/lib/tag-rules";
 import { cleanTransactionName } from "@/lib/utils";
 import {
-  effectiveCatId,
   getAttachments,
   getCategoryDailySpend,
   getCategoryMonthlyBreakdown,
@@ -46,6 +45,7 @@ import {
   getTagSuggestions,
   getTransactionSplits,
   getTransactionsByDate,
+  spendRowsCte,
   type AttachmentRow,
   type CategoryDay,
   type CategoryMonth,
@@ -712,18 +712,24 @@ export async function rolloverToMonth(month: string) {
   const prev = new Date(y, m - 2, 1);
   const priorMonth = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
 
+  // Prior-month spend reads spend_rows, not raw transactions, so it matches
+  // what the budgets page showed for that month: a split bill charges the
+  // envelope only your own share, and the reimbursable slice — parked in the
+  // `transfer` group — never touches it. Summing parent amounts here shrank the
+  // carry-in rolled forward by other people's share of every split bill.
   const rows = db.all<{ categoryId: string; leftover: number }>(
-    sql`SELECT cat.id AS categoryId,
+    sql`WITH ${spendRowsCte}
+        SELECT cat.id AS categoryId,
            (b.amount
              + COALESCE((
                  SELECT r.carry_in FROM budget_rollovers r
                  WHERE r.category_id = cat.id AND r.month = ${priorMonth}
                ), 0)
              - COALESCE((
-                 SELECT SUM(t.amount) FROM transactions t
-                 WHERE ${settledOnly()} AND t.amount > 0
-                   AND ${effectiveCatId("t")} = cat.id
-                   AND substr(t.date, 1, 7) = ${priorMonth}
+                 SELECT SUM(sr.amount) FROM spend_rows sr
+                 WHERE ${settledOnly("sr")} AND sr.amount > 0
+                   AND sr.category_id = cat.id
+                   AND substr(sr.date, 1, 7) = ${priorMonth}
                ), 0)
            ) AS leftover
         FROM budgets b
