@@ -6,7 +6,7 @@ import { ConnectWalletButton, WalletsCard } from "@/components/connect-wallet-di
 import { ConnectionAlert, ConnectionChip } from "@/components/connection-status";
 import { DisconnectInstitution } from "@/components/disconnect-institution";
 import { getConnectionSummary, getHealthByInstitution } from "@/lib/connection-health";
-import { getAccounts, getWallets } from "@/lib/queries";
+import { getAccounts, getHiddenWalletTokens, getWallets } from "@/lib/queries";
 import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
 import { demoEnabled } from "@/lib/site";
@@ -23,6 +23,7 @@ const TYPE_LABEL: Record<string, string> = {
 export default function AccountsPage() {
   const accounts = getAccounts();
   const wallets = getWallets();
+  const hiddenWalletTokens = getHiddenWalletTokens();
   const connections = getConnectionSummary();
   const healthByInstitution = getHealthByInstitution();
 
@@ -84,7 +85,7 @@ export default function AccountsPage() {
         </Card>
       )}
 
-      <WalletsCard wallets={wallets} />
+      <WalletsCard wallets={wallets} hiddenTokens={hiddenWalletTokens} />
 
       <div className="space-y-5">
         {[...byItem.entries()].map(([itemId, { label: institution, source, accts }]) => {

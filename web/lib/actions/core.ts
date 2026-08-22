@@ -27,6 +27,7 @@ import {
   transactions,
   vendorGroupMembers,
   vendorGroups,
+  walletTokenRules,
   wallets,
 } from "@/db/schema";
 import { decrypt } from "@/lib/crypto";
@@ -862,12 +863,45 @@ export async function updateManualHolding(
   id: string,
   patch: { name?: string; quantity?: number | null; costBasis?: number | null; manualValue?: number | null },
 ) {
-  const set: Record<string, unknown> = { updatedAt: new Date() };
+  const now = new Date();
+  const set: Record<string, unknown> = { updatedAt: now };
   if (patch.name !== undefined) set.name = patch.name.trim();
   if (patch.quantity !== undefined) set.quantity = patch.quantity;
   if (patch.costBasis !== undefined) set.costBasis = patch.costBasis;
   if (patch.manualValue !== undefined) set.manualValue = patch.manualValue;
+
+  const row = db
+    .select({
+      walletId: manualHoldings.walletId,
+      name: manualHoldings.name,
+      contractAddress: manualHoldings.contractAddress,
+    })
+    .from(manualHoldings)
+    .where(eq(manualHoldings.id, id))
+    .get();
+
   db.update(manualHoldings).set(set).where(eq(manualHoldings.id, id)).run();
+
+  // Wallet rows are rebuilt by every sync, so a user-set basis has to be mirrored
+  // into the rules table to survive (see walletTokenRules).
+  if (row?.walletId && patch.costBasis !== undefined) {
+    db.insert(walletTokenRules)
+      .values({
+        holdingId: id,
+        walletId: row.walletId,
+        label: row.name,
+        contractAddress: row.contractAddress,
+        hidden: false,
+        costBasis: patch.costBasis,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: walletTokenRules.holdingId,
+        set: { costBasis: patch.costBasis, label: row.name, updatedAt: now },
+      })
+      .run();
+  }
   revalidateAll();
 }
 
@@ -911,7 +945,13 @@ export async function connectWallet(input: {
     .run();
 
   try {
-    const sync = await syncWallet({ id, chain, address });
+    // Re-connecting an existing address keeps its dust floor (and its hide rules).
+    const existing = db
+      .select({ minValueUsd: wallets.minValueUsd })
+      .from(wallets)
+      .where(eq(wallets.id, id))
+      .get();
+    const sync = await syncWallet({ id, chain, address, minValueUsd: existing?.minValueUsd ?? null });
     revalidateAll();
     return { ok: true, sync };
   } catch (e) {
@@ -927,7 +967,12 @@ export async function resyncWallet(id: string): Promise<ConnectWalletResult> {
   const w = db.select().from(wallets).where(eq(wallets.id, id)).get();
   if (!w) return { ok: false, error: "Wallet not found." };
   try {
-    const sync = await syncWallet({ id: w.id, chain: w.chain, address: w.address });
+    const sync = await syncWallet({
+      id: w.id,
+      chain: w.chain,
+      address: w.address,
+      minValueUsd: w.minValueUsd,
+    });
     revalidateAll();
     return { ok: true, sync };
   } catch (e) {
@@ -946,9 +991,104 @@ export async function removeWallet(id: string) {
   // fail the foreign-key constraint.)
   db.transaction((tx) => {
     tx.delete(manualHoldings).where(eq(manualHoldings.walletId, id)).run();
+    tx.delete(walletTokenRules).where(eq(walletTokenRules.walletId, id)).run();
     tx.delete(wallets).where(eq(wallets.id, id)).run();
   });
   revalidateAll();
+}
+
+/**
+ * Hide a wallet-imported token by hand — the manual junk filter for spam that
+ * CoinGecko happens to track. Drops the holding now and writes a rule so future
+ * syncs never bring it back; the wallet's snapshot totals are recomputed from the
+ * surviving rows so the Accounts figure doesn't stay stale until the next sync.
+ */
+export async function hideWalletToken(holdingId: string) {
+  const row = db
+    .select({
+      walletId: manualHoldings.walletId,
+      name: manualHoldings.name,
+      contractAddress: manualHoldings.contractAddress,
+      lastValueUsd: manualHoldings.lastValueUsd,
+      manualValue: manualHoldings.manualValue,
+    })
+    .from(manualHoldings)
+    .where(eq(manualHoldings.id, holdingId))
+    .get();
+  if (!row?.walletId) return;
+  const walletId = row.walletId;
+  const now = new Date();
+
+  db.transaction((tx) => {
+    tx.insert(walletTokenRules)
+      .values({
+        holdingId,
+        walletId,
+        label: row.name,
+        contractAddress: row.contractAddress,
+        hidden: true,
+        hiddenValueUsd: row.lastValueUsd ?? row.manualValue ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: walletTokenRules.holdingId,
+        set: {
+          hidden: true,
+          label: row.name,
+          hiddenValueUsd: row.lastValueUsd ?? row.manualValue ?? null,
+          updatedAt: now,
+        },
+      })
+      .run();
+    tx.delete(manualHoldings).where(eq(manualHoldings.id, holdingId)).run();
+
+    const rest = tx
+      .select({ lastValueUsd: manualHoldings.lastValueUsd })
+      .from(manualHoldings)
+      .where(eq(manualHoldings.walletId, walletId))
+      .all();
+    tx.update(wallets)
+      .set({
+        lastValueUsd: rest.reduce((s, r) => s + (r.lastValueUsd ?? 0), 0),
+        lastTokenCount: rest.length,
+        updatedAt: now,
+      })
+      .where(eq(wallets.id, walletId))
+      .run();
+  });
+  revalidateAll();
+}
+
+/** Un-hide a token and re-sync its wallet so it comes straight back. */
+export async function unhideWalletToken(holdingId: string): Promise<ConnectWalletResult> {
+  const rule = db
+    .select({ walletId: walletTokenRules.walletId })
+    .from(walletTokenRules)
+    .where(eq(walletTokenRules.holdingId, holdingId))
+    .get();
+  if (!rule) return { ok: false, error: "That token isn't hidden." };
+  db.update(walletTokenRules)
+    .set({ hidden: false, hiddenValueUsd: null, updatedAt: new Date() })
+    .where(eq(walletTokenRules.holdingId, holdingId))
+    .run();
+  return resyncWallet(rule.walletId);
+}
+
+/**
+ * Raise (or reset) a wallet's dust floor — the USD value a token must clear to be
+ * imported at all. Re-syncs so the change takes effect immediately. Null restores
+ * the built-in $1 default.
+ */
+export async function setWalletDustFloor(
+  walletId: string,
+  minValueUsd: number | null,
+): Promise<ConnectWalletResult> {
+  const floor = minValueUsd != null && Number.isFinite(minValueUsd) && minValueUsd > 0 ? minValueUsd : null;
+  const w = db.select().from(wallets).where(eq(wallets.id, walletId)).get();
+  if (!w) return { ok: false, error: "Wallet not found." };
+  db.update(wallets).set({ minValueUsd: floor, updatedAt: new Date() }).where(eq(wallets.id, walletId)).run();
+  return resyncWallet(walletId);
 }
 
 // ── Investment sectors ──────────────────────────────────────────────────────

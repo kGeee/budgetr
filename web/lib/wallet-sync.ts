@@ -4,8 +4,11 @@
  * wallet id. Re-syncing replaces that wallet's rows atomically.
  *
  * Junk filter: a token is kept only if (a) CoinGecko tracks its contract/mint
- * (i.e. it has a real market — see getContractIdMap) and (b) its USD value is at
- * or above MIN_TOKEN_USD. Airdrop spam has no CoinGecko listing and is dropped.
+ * (i.e. it has a real market — see getContractIdMap), (b) its USD value is at or
+ * above the wallet's dust floor (`wallets.minValueUsd`, default MIN_TOKEN_USD),
+ * and (c) the user hasn't hidden it. Airdrop spam has no CoinGecko listing and is
+ * dropped automatically; anything that slips through the automatic filters can be
+ * hidden by hand, which writes a `wallet_token_rules` row this sync obeys.
  *
  * Storage flavour mirrors user-entered manual holdings:
  *  - Curated majors (BTC/ETH/SOL/…): stored tickered (`${SYM}-USD`) so they get
@@ -15,7 +18,7 @@
  */
 
 import { db } from "@/db";
-import { manualHoldings, wallets } from "@/db/schema";
+import { manualHoldings, walletTokenRules, wallets } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import {
   getContractIdMap,
@@ -27,22 +30,33 @@ import {
 } from "@/lib/coingecko";
 import { fetchWalletBalances, type Chain } from "@/lib/onchain";
 
-/** Drop priced tokens worth less than this — kills dust + surviving low-value spam. */
-const MIN_TOKEN_USD = 1;
+/**
+ * Default dust floor: drop priced tokens worth less than this — kills dust +
+ * surviving low-value spam. Raised per wallet via `wallets.minValueUsd`.
+ */
+export const MIN_TOKEN_USD = 1;
 
 export type SyncedToken = { symbol: string; amount: number; usd: number };
 export type WalletSyncResult = {
   kept: number;
   droppedJunk: number;
   droppedDust: number;
+  /** Tokens skipped because the user hid them by hand. */
+  droppedHidden: number;
   totalUsd: number;
   tokens: SyncedToken[];
 };
+
+/** The stable `manual_holdings` id a wallet token gets — also the rule key. */
+export function walletHoldingId(walletId: string, contractOrSymbol: string): string {
+  return `${walletId}:${contractOrSymbol}`;
+}
 
 export async function syncWallet(wallet: {
   id: string;
   chain: string;
   address: string;
+  minValueUsd?: number | null;
 }): Promise<WalletSyncResult> {
   const chain = wallet.chain as Chain;
   const balances = await fetchWalletBalances(chain, wallet.address);
@@ -77,9 +91,24 @@ export async function syncWallet(wallet: {
     });
   }
 
-  // Preserve any user-set cost basis across the destructive re-sync. Rows have
-  // stable ids (`${walletId}:${contract|symbol}`), so we carry costBasis forward
-  // by id rather than letting the delete+insert wipe it.
+  // User decisions about this wallet's tokens (hidden flag + cost basis) live in
+  // wallet_token_rules, keyed by the same stable row id we're about to rebuild,
+  // so the destructive re-sync can't wipe them.
+  const rules = new Map<string, { hidden: boolean; costBasis: number | null }>();
+  for (const r of db
+    .select({
+      holdingId: walletTokenRules.holdingId,
+      hidden: walletTokenRules.hidden,
+      costBasis: walletTokenRules.costBasis,
+    })
+    .from(walletTokenRules)
+    .where(eq(walletTokenRules.walletId, wallet.id))
+    .all()) {
+    rules.set(r.holdingId, { hidden: r.hidden, costBasis: r.costBasis });
+  }
+
+  // Fallback for rows whose basis predates the rules table (pre-0022 rows that
+  // the migration backfill somehow missed): carry the prior value forward by id.
   const priorCostBasis = new Map<string, number>();
   for (const row of db
     .select({ id: manualHoldings.id, costBasis: manualHoldings.costBasis })
@@ -101,9 +130,11 @@ export async function syncWallet(wallet: {
   }
 
   const now = new Date();
+  const dustFloor = wallet.minValueUsd ?? MIN_TOKEN_USD;
   const rows: (typeof manualHoldings.$inferInsert)[] = [];
   const tokens: SyncedToken[] = [];
   let droppedDust = 0;
+  let droppedHidden = 0;
   let totalUsd = 0;
 
   for (const r of resolved) {
@@ -113,26 +144,32 @@ export async function syncWallet(wallet: {
       continue;
     }
     const usd = r.amount * p.price;
-    if (usd < MIN_TOKEN_USD) {
+    if (usd < dustFloor) {
       droppedDust++;
+      continue;
+    }
+    const rowId = walletHoldingId(wallet.id, r.contract ?? (r.symbol || r.coinId));
+    const rule = rules.get(rowId);
+    if (rule?.hidden) {
+      droppedHidden++;
       continue;
     }
     totalUsd += usd;
     tokens.push({ symbol: r.symbol || r.coinId, amount: r.amount, usd });
 
     const tickered = hasCuratedSymbol(r.symbol);
-    const rowId = `${wallet.id}:${r.contract ?? (r.symbol || r.coinId)}`;
     rows.push({
       id: rowId,
       symbol: tickered ? `${r.symbol.toUpperCase()}-USD` : null,
       name: r.symbol || r.coinId,
       type: "crypto",
       quantity: r.amount,
-      costBasis: priorCostBasis.get(rowId) ?? null,
+      costBasis: rule?.costBasis ?? priorCostBasis.get(rowId) ?? null,
       manualValue: tickered ? null : usd,
       isoCurrencyCode: "USD",
       walletId: wallet.id,
       contractAddress: r.contract,
+      lastValueUsd: usd,
       createdAt: now,
       updatedAt: now,
     });
@@ -155,5 +192,5 @@ export async function syncWallet(wallet: {
   });
 
   tokens.sort((a, b) => b.usd - a.usd);
-  return { kept: rows.length, droppedJunk, droppedDust, totalUsd, tokens };
+  return { kept: rows.length, droppedJunk, droppedDust, droppedHidden, totalUsd, tokens };
 }

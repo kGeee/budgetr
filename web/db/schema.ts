@@ -450,6 +450,35 @@ export const wallets = sqliteTable("wallets", {
   lastValueUsd: real("last_value_usd"), // snapshot total at last sync (display only)
   lastTokenCount: integer("last_token_count"), // kept-token count at last sync
   lastError: text("last_error"), // last sync failure message, or null
+  // User-raised dust floor: tokens worth less than this at sync time are dropped.
+  // Null = the built-in $1 default (MIN_TOKEN_USD in lib/wallet-sync.ts).
+  minValueUsd: real("min_value_usd"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * Per-token user overrides for a connected wallet, keyed by the `manual_holdings`
+ * row id the sync would generate (`${walletId}:${contract|symbol}`).
+ *
+ * Wallet holdings are re-created by delete+insert on every sync, so anything the
+ * user decides about a token has to live outside that row:
+ *  - `hidden` — the manual junk filter. syncWallet never re-inserts a hidden
+ *    token, so an airdrop CoinGecko happens to track stays gone across syncs.
+ *  - `costBasis` — what the user paid. Authoritative over the holding row, so it
+ *    survives even if the token drops out of a sync (dust dip) and returns.
+ * `label` / `contractAddress` are snapshots taken when the rule was written, so
+ * the hidden-token list still reads sensibly for tokens no longer fetched.
+ */
+export const walletTokenRules = sqliteTable("wallet_token_rules", {
+  holdingId: text("holding_id").primaryKey(),
+  walletId: text("wallet_id").notNull(),
+  label: text("label"),
+  contractAddress: text("contract_address"),
+  hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
+  costBasis: real("cost_basis"),
+  /** USD value the token carried when it was hidden (display only). */
+  hiddenValueUsd: real("hidden_value_usd"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
@@ -472,6 +501,9 @@ export const manualHoldings = sqliteTable("manual_holdings", {
   walletId: text("wallet_id").references(() => wallets.id),
   // On-chain token contract / mint address (natives + user rows leave this null).
   contractAddress: text("contract_address"),
+  // USD value this token carried at its last wallet sync. Lets wallet totals be
+  // recomputed when a token is hidden without re-pricing the chain.
+  lastValueUsd: real("last_value_usd"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
@@ -961,6 +993,7 @@ export type Holding = typeof holdings.$inferSelect;
 export type InvestmentTransaction = typeof investmentTransactions.$inferSelect;
 export type ManualHolding = typeof manualHoldings.$inferSelect;
 export type Wallet = typeof wallets.$inferSelect;
+export type WalletTokenRule = typeof walletTokenRules.$inferSelect;
 export type BalanceSnapshot = typeof balanceSnapshots.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Tag = typeof tags.$inferSelect;

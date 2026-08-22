@@ -15,6 +15,7 @@ import {
   investmentTransactions,
   items,
   manualHoldings,
+  walletTokenRules,
   wallets,
   savedFilters,
   savingsContributions,
@@ -1917,6 +1918,8 @@ export type WalletRow = {
   lastValueUsd: number | null;
   lastTokenCount: number | null;
   lastError: string | null;
+  /** User-raised dust floor in USD; null = the built-in $1 default. */
+  minValueUsd: number | null;
 };
 
 /** Connected crypto wallets, newest first. */
@@ -1931,10 +1934,41 @@ export function getWallets(): WalletRow[] {
       lastValueUsd: wallets.lastValueUsd,
       lastTokenCount: wallets.lastTokenCount,
       lastError: wallets.lastError,
+      minValueUsd: wallets.minValueUsd,
     })
     .from(wallets)
     .orderBy(desc(wallets.createdAt))
     .all();
+}
+
+export type HiddenWalletToken = {
+  holdingId: string;
+  walletId: string;
+  label: string | null;
+  contractAddress: string | null;
+  hiddenValueUsd: number | null;
+};
+
+/**
+ * Tokens the user hid by hand, grouped by wallet — the manual junk filter's
+ * undo list. Syncs skip these, so they exist only as rules, never as holdings.
+ */
+export function getHiddenWalletTokens(): Record<string, HiddenWalletToken[]> {
+  const rows = db
+    .select({
+      holdingId: walletTokenRules.holdingId,
+      walletId: walletTokenRules.walletId,
+      label: walletTokenRules.label,
+      contractAddress: walletTokenRules.contractAddress,
+      hiddenValueUsd: walletTokenRules.hiddenValueUsd,
+    })
+    .from(walletTokenRules)
+    .where(eq(walletTokenRules.hidden, true))
+    .orderBy(desc(walletTokenRules.updatedAt))
+    .all();
+  const byWallet: Record<string, HiddenWalletToken[]> = {};
+  for (const r of rows) (byWallet[r.walletId] ??= []).push(r);
+  return byWallet;
 }
 
 export type InvestmentTxnRow = {
