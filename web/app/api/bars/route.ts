@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBarsFor, type BarInterval, type BarRange } from "@/lib/yahoo";
+import { MAX_WATCHLIST } from "@/lib/markets-prefs";
 
 export const dynamic = "force-dynamic";
 // Yahoo fetches should hit Next's Data Cache (getBars sets its own revalidate),
@@ -10,7 +11,7 @@ const INTERVALS: BarInterval[] = ["5m", "15m", "30m", "1h", "1d", "1wk", "1mo"];
 const RANGES: BarRange[] = ["5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max"];
 
 /** At most this many symbols per request — the desk's grid never shows more. */
-const MAX_SYMBOLS = 24;
+const MAX_SYMBOLS = MAX_WATCHLIST;
 
 /**
  * GET /api/bars?symbols=AAPL,MSFT&range=6mo&interval=1d

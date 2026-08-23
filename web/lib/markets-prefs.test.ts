@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_PREFS, TIMEFRAMES, coercePrefs, normalizeSymbol } from "./markets-prefs";
+import {
+  DEFAULT_PREFS,
+  TIMEFRAMES,
+  coercePrefs,
+  composeWatchlist,
+  normalizeSymbol,
+  sourceFor,
+} from "./markets-prefs";
 
 /**
  * These two functions are the only guard between the `app_settings` KV blob and
@@ -89,5 +96,44 @@ describe("TIMEFRAMES", () => {
       const out = coercePrefs({ range: t.range, interval: t.interval });
       expect([out.range, out.interval]).toEqual([t.range, t.interval]);
     }
+  });
+});
+
+describe("composeWatchlist", () => {
+  it("puts pinned symbols first, then held ones by exposure", () => {
+    expect(composeWatchlist(["SPY"], ["NVDA", "AAPL"], [])).toEqual(["SPY", "NVDA", "AAPL"]);
+  });
+
+  it("shows a newly held symbol without anything being pinned", () => {
+    // The whole point of deriving: opening a position puts it on the desk.
+    expect(composeWatchlist([], ["NVDA"], [])).toEqual(["NVDA"]);
+  });
+
+  it("keeps a dismissed holding dismissed", () => {
+    // Without `hidden`, removing a held symbol would undo itself on the next read.
+    expect(composeWatchlist(["SPY"], ["NVDA", "AAPL"], ["NVDA"])).toEqual(["SPY", "AAPL"]);
+  });
+
+  it("does not duplicate a symbol that is both pinned and held", () => {
+    expect(composeWatchlist(["AAPL"], ["AAPL", "MSFT"], [])).toEqual(["AAPL", "MSFT"]);
+  });
+
+  it("drops a pinned symbol that was also dismissed", () => {
+    expect(composeWatchlist(["SPY"], [], ["SPY"])).toEqual([]);
+  });
+
+  it("caps the list so the Yahoo fan-out stays bounded", () => {
+    const held = Array.from({ length: 60 }, (_, i) => `S${i}`);
+    expect(composeWatchlist([], held, [], 48)).toHaveLength(48);
+  });
+});
+
+describe("sourceFor", () => {
+  it("charts a symbol under itself when nothing redirects it", () => {
+    expect(sourceFor("AAPL", {})).toBe("AAPL");
+  });
+
+  it("charts a redirected symbol under its source", () => {
+    expect(sourceFor("BRKB", { BRKB: "BRK-B" })).toBe("BRK-B");
   });
 });

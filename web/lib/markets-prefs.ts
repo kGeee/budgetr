@@ -9,8 +9,12 @@
 import { DEFAULT_HULL, type HullMode, type HullSettings, type HullSource } from "@/lib/hull";
 import type { BarInterval, BarRange } from "@/lib/yahoo";
 
-/** Hard cap so the grid (and the Yahoo fan-out behind it) stays bounded. */
-export const MAX_WATCHLIST = 24;
+/**
+ * Hard cap so the grid (and the Yahoo fan-out behind it) stays bounded. Sized to
+ * hold a real portfolio's worth of positions rather than a hand-picked list,
+ * since the desk now tracks everything held (see `lib/watchlist.ts`).
+ */
+export const MAX_WATCHLIST = 48;
 
 export type MarketsPrefs = {
   range: BarRange;
@@ -67,6 +71,48 @@ export function normalizeSymbol(raw: string): string | null {
   // `BRK-B`, `BTC-USD`, `^GSPC`, `ES=F`, `EURUSD=X`, `BMW.DE`.
   if (!/^[\^A-Z0-9][A-Z0-9.\-=]{0,14}$/.test(s)) return null;
   return s;
+}
+
+/**
+ * The desk's symbol list: pinned first (in the order they were pinned), then
+ * everything held by descending exposure, minus anything dismissed, capped.
+ *
+ * Pure and exported so it can be tested without a database — the storage half
+ * lives in lib/watchlist.ts, which supplies `held` fresh from holdings on every
+ * read. That's the whole reason a sold position leaves the desk and a new one
+ * joins it without anyone touching a setting.
+ */
+export function composeWatchlist(
+  pinned: string[],
+  held: string[],
+  hidden: string[],
+  limit = MAX_WATCHLIST,
+): string[] {
+  const dismissed = new Set(hidden);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of [...pinned, ...held]) {
+    if (dismissed.has(s) || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out.slice(0, limit);
+}
+
+/**
+ * Which symbol the bars are actually fetched under.
+ *
+ * A held position's ticker is not always the ticker its market trades under —
+ * a broker may report `BRKB` for `BRK-B`, a wallet may report a token symbol
+ * Yahoo has never heard of, and a foreign listing needs its exchange suffix.
+ * When the desk can't find data for a symbol it asks for a replacement, and the
+ * answer is stored here as display-symbol → source-symbol. The position keeps
+ * its own name everywhere; only the data request is redirected.
+ */
+export type SymbolSources = Record<string, string>;
+
+export function sourceFor(symbol: string, sources: SymbolSources): string {
+  return sources[symbol] ?? symbol;
 }
 
 const MODES: HullMode[] = ["Hma", "Ehma", "Thma"];

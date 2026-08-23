@@ -315,6 +315,75 @@ export async function getBarsFor(
   return out;
 }
 
+/** One candidate from Yahoo's symbol search. */
+export type SymbolMatch = {
+  symbol: string;
+  name: string | null;
+  /** Display exchange, e.g. "NasdaqGS" or "CCC" for crypto. */
+  exchange: string | null;
+  /** Display instrument type, e.g. "Equity", "ETF", "Cryptocurrency". */
+  type: string | null;
+};
+
+/**
+ * Search Yahoo for symbols matching a name or partial ticker.
+ *
+ * This is what the markets desk offers when a held position's ticker doesn't
+ * resolve to a chart — a broker's `BRKB`, a foreign listing missing its `.DE`
+ * suffix, a wallet token Yahoo lists under a different pair. The answer is
+ * stored as a source redirect (see lib/watchlist.ts), not as a rename.
+ *
+ * Cached for an hour: the universe of listed symbols does not move minute to
+ * minute, and the same failing symbol is searched on every visit to the desk.
+ */
+export async function searchSymbols(query: string, limit = 8): Promise<SymbolMatch[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  const url =
+    `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}` +
+    `&quotesCount=${Math.min(20, Math.max(1, limit))}&newsCount=0&enableFuzzyQuery=true` +
+    `&quotesQueryId=tss_match_phrase_query`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      next: { revalidate: 3600 },
+    });
+    if (!res.ok) return [];
+
+    const j = (await res.json()) as {
+      quotes?: Array<{
+        symbol?: string;
+        shortname?: string;
+        longname?: string;
+        exchDisp?: string;
+        exchange?: string;
+        typeDisp?: string;
+        quoteType?: string;
+        isYahooFinance?: boolean;
+      }>;
+    };
+
+    const out: SymbolMatch[] = [];
+    for (const q of j.quotes ?? []) {
+      // The search also returns industries and private companies, which have no
+      // symbol and no chart behind them.
+      if (!q.symbol || q.isYahooFinance === false) continue;
+      out.push({
+        symbol: q.symbol.toUpperCase(),
+        name: q.longname ?? q.shortname ?? null,
+        exchange: q.exchDisp ?? q.exchange ?? null,
+        type: q.typeDisp ?? q.quoteType ?? null,
+      });
+      if (out.length >= limit) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** A corporate split event fetched from Yahoo. Ratio is shares-after : before. */
 export type SplitEvent = { date: string; numerator: number; denominator: number };
 
