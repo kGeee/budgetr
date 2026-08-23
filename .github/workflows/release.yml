@@ -66,6 +66,10 @@ jobs:
           # Auto-discovery ON only when a cert is provided; otherwise force it
           # OFF so electron-builder can't sign with a stray keychain identity.
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+          # The purchase link, baked into the bundle at build time. Falls back
+          # to the CHECKOUT_URL constant in web/lib/site.ts when the repo
+          # variable is unset, so a shipped app always has a way to buy.
+          NEXT_PUBLIC_CHECKOUT_URL: ${{ vars.NEXT_PUBLIC_CHECKOUT_URL }}
           # Optional notarization secrets (only used when signing for real).
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}

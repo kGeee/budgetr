@@ -2,9 +2,11 @@
  * Public marketing-site config. Purchase + download are driven by env so the
  * same build works before and after the Polar product exists:
  *
- *   NEXT_PUBLIC_CHECKOUT_URL  — Polar hosted checkout link (the "Buy" CTA).
- *                               When unset, the CTA falls back to the free
- *                               GitHub download so the page is never a dead end.
+ *   NEXT_PUBLIC_CHECKOUT_URL  — Polar hosted checkout link. Overrides the
+ *                               CHECKOUT_URL constant below when non-empty.
+ *                               (Self-hosters remove licensing altogether with
+ *                               BUDGETR_LICENSE_DISABLED=1, not by blanking
+ *                               this.)
  *   NEXT_PUBLIC_DOWNLOAD_URL  — direct DMG link (defaults to the latest GitHub
  *                               Release asset).
  *   NEXT_PUBLIC_PRICE         — display price, e.g. "$29".
@@ -13,13 +15,32 @@
 
 const repo = "https://github.com/kGeee/budgetr";
 
+/**
+ * The Polar checkout, baked in rather than read from env alone.
+ *
+ * NEXT_PUBLIC_* is inlined at build time, and the DMG is built by GitHub
+ * Actions — which never had this variable set. So a desktop build could not
+ * reach the checkout no matter what was in a local .env.local: `hasCheckout()`
+ * was false in every shipped binary, and the licence gate's "Buy a licence"
+ * button quietly degraded to the marketing pricing page. The one place a
+ * purchase is genuinely the next step was the one place it couldn't happen.
+ *
+ * A URL is not a secret, so it belongs here beside the repo and DMG links,
+ * which are hardcoded for exactly the same reason. Env still overrides for
+ * self-hosters and for rotating the link without a code change.
+ */
+const CHECKOUT_URL = "https://polar.sh/checkout/polar_c_gKxB7i65pQyxZnJCMXElfVK0HIq2ua6b4Yb1q2ryyoI";
+
 export const SITE = {
   name: "budgetr",
   tagline: "Your whole financial life — private, on your Mac.",
   description:
     "Net worth, spending, income, investments and options — read-only and stored on your own machine. No cloud account, no data resale.",
   repoUrl: repo,
-  checkoutUrl: process.env.NEXT_PUBLIC_CHECKOUT_URL ?? "",
+  // `||`, not `??`: an unset GitHub Actions variable arrives as "" rather than
+  // undefined, and `??` would let that empty string win over the constant —
+  // reintroducing the very bug this baked-in default exists to fix.
+  checkoutUrl: process.env.NEXT_PUBLIC_CHECKOUT_URL || CHECKOUT_URL,
   /** The releases listing — for "all versions" links, not for a Download button. */
   downloadUrl: `${repo}/releases/latest`,
   directDmgUrl: `${repo}/releases/latest/download/budgetr-mac.dmg`,
