@@ -11,9 +11,10 @@ import {
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Card } from "@/components/ui/card";
-import { BuyLink } from "@/components/marketing/marketing-shell";
+import { DownloadLink } from "@/components/marketing/marketing-shell";
 import { HeroShot, ScreenshotShowcase } from "@/components/marketing/screenshots";
 import { SITE, hasCheckout, demoEnabled, DEMO_HREF } from "@/lib/site";
+import { TRIAL_DAYS } from "@/lib/license";
 
 /** The public landing page body (rendered inside <MarketingShell/>). */
 export function MarketingLanding() {
@@ -30,7 +31,7 @@ export function MarketingLanding() {
         </h1>
         <p className="mx-auto mt-6 max-w-xl text-lg text-[var(--muted)]">{SITE.description}</p>
         <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
-          <BuyLink />
+          <DownloadLink />
           {demo && (
             <Link
               href={DEMO_HREF}
@@ -49,7 +50,7 @@ export function MarketingLanding() {
         </div>
         <p className="mt-5 inline-flex items-center gap-2 text-xs text-[var(--muted)]">
           <ShieldCheck size={13} className="text-[var(--jade)]" />
-          macOS (Apple Silicon) · one-time purchase · your data never leaves your Mac
+          macOS (Apple Silicon) · free 14-day trial, no card · your data never leaves your Mac
         </p>
       </section>
 
@@ -134,11 +135,11 @@ export function MarketingLanding() {
           </h2>
           <p className="mx-auto mt-3 max-w-md text-[var(--muted)]">
             {hasCheckout()
-              ? "One-time purchase — every feature, free updates, and your data never leaves your Mac."
+              ? `Run it free for ${TRIAL_DAYS} days on your own accounts. If you keep it, it's a one-time purchase — every feature, free updates, and your data never leaves your Mac.`
               : "Free while in preview — every feature, and your data never leaves your Mac."}
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <BuyLink />
+            <DownloadLink />
             <Link
               href="/pricing"
               className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)]"

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Card } from "@/components/ui/card";
-import { BuyLink } from "@/components/marketing/marketing-shell";
+import { DownloadLink } from "@/components/marketing/marketing-shell";
 
 export const metadata: Metadata = {
   title: "Getting Started — budgetr",
@@ -73,7 +73,7 @@ export default function GettingStartedPage() {
       </div>
 
       <div className="mt-10 flex justify-center">
-        <BuyLink />
+        <DownloadLink />
       </div>
     </main>
   );

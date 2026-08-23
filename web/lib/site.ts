@@ -45,9 +45,17 @@ export function downloadHref(): string {
   return process.env.NEXT_PUBLIC_DOWNLOAD_URL || SITE.directDmgUrl;
 }
 
-/** Where the primary CTA should point: paid checkout if set, else the download. */
+/**
+ * Where the primary marketing CTA points: always the download.
+ *
+ * It used to jump straight to Polar whenever checkout was configured, which
+ * asked a stranger to pay $29 for a finance app they had not yet run. The funnel
+ * is now download → 14-day trial → the in-app licence gate, so the money is
+ * asked for once the app has had a chance to earn it. Buying is still one click
+ * from /pricing for someone who has already decided.
+ */
 export function primaryCtaHref(): string {
-  return hasCheckout() ? SITE.checkoutUrl : downloadHref();
+  return downloadHref();
 }
 
 /** Where the "try the live demo" CTA points — the read-only demo dashboard. */
@@ -60,4 +68,15 @@ export const DEMO_HREF = "/overview";
  * server components deciding whether to surface the live-demo CTA. */
 export function demoEnabled(): boolean {
   return Boolean(process.env.DEMO_DB);
+}
+
+/**
+ * Where "buy a licence" should point — the checkout itself.
+ *
+ * Used by the in-app licence gate, which is the one place a purchase is the
+ * right next step. Falls back to the pricing page when no checkout is
+ * configured, so the button is never a dead link.
+ */
+export function checkoutHref(): string {
+  return hasCheckout() ? SITE.checkoutUrl : `${SITE.siteUrl}/pricing`;
 }

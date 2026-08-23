@@ -14,14 +14,24 @@
 import { ensureFirstRunAt, getStoredLicenseKey } from "@/lib/app-config";
 import { LICENSE_PUBLIC_KEY } from "@/lib/license/public-key";
 import { evaluateEntitlement, verifyLicense, type Entitlement } from "@/lib/license/verify";
+import { checkoutHref } from "@/lib/site";
 
 export type { Entitlement, LicensePayload, LicenseStatus } from "@/lib/license/verify";
 
 /** Length of the free trial, in days. */
 export const TRIAL_DAYS = 14;
 
-/** Where to send users to buy a license (the marketing pricing page). */
-export const LICENSE_BUY_URL = "https://budgetr.dev/pricing";
+/**
+ * Where to send someone who wants to buy — the checkout itself, not the
+ * marketing page.
+ *
+ * This pointed at /pricing, which was harmless while that page's CTA was "Buy".
+ * Now that every marketing surface hands over the download instead, bouncing
+ * the gate through /pricing would offer a fresh download to someone who already
+ * has the app open. Resolves to Polar when checkout is configured, and falls
+ * back to /pricing when it isn't, so the button is never dead.
+ */
+export const LICENSE_BUY_URL = checkoutHref();
 
 /** Env escape hatch for self-hosters running their own instance. */
 function licenseDisabled(): boolean {
