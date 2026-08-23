@@ -18,7 +18,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Sparkles, X } from "lucide-react";
 import { PlaidSetupModal, type PlaidSetupInitial } from "@/components/plaid-setup-modal";
-import { hasCheckout, primaryCtaHref, SITE } from "@/lib/site";
+import { primaryCtaHref } from "@/lib/site";
 
 const DISMISS_KEY = "budgetr:demo-banner-dismissed";
 
@@ -76,7 +76,10 @@ export function DemoBanner({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded-lg bg-[var(--brass)] px-3 py-1.5 text-[13px] font-medium text-[var(--on-brass)] hover:opacity-90"
             >
-              {hasCheckout() ? `Get budgetr · ${SITE.price}` : "Download budgetr"}
+              {/* The demo is the pitch; the download is the next step. Asking for
+                  $29 from inside a sample dataset sells the app before it has
+                  touched the visitor's own numbers. */}
+              Download budgetr
               <ArrowUpRight size={14} />
             </a>
           ) : (

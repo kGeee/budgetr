@@ -2,11 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Trash2, Wallet } from "lucide-react";
+import { Filter, RefreshCw, RotateCcw, Trash2, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { connectWallet, resyncWallet, removeWallet } from "@/lib/actions";
-import type { WalletRow } from "@/lib/queries";
+import {
+  connectWallet,
+  resyncWallet,
+  removeWallet,
+  setWalletDustFloor,
+  unhideWalletToken,
+} from "@/lib/actions";
+import type { HiddenWalletToken, WalletRow } from "@/lib/queries";
 
 const CHAINS = [
   { id: "bitcoin", label: "Bitcoin", placeholder: "bc1… or 1…/3…" },
@@ -68,8 +74,8 @@ export function ConnectWalletButton() {
         setError(res.error);
         return;
       }
-      const { kept, droppedJunk, droppedDust, totalUsd } = res.sync;
-      const dropped = droppedJunk + droppedDust;
+      const { kept, droppedJunk, droppedDust, droppedHidden, totalUsd } = res.sync;
+      const dropped = droppedJunk + droppedDust + droppedHidden;
       setResult(
         `Imported ${kept} ${kept === 1 ? "token" : "tokens"} (~${fmtUsd(totalUsd)})` +
           (dropped > 0 ? ` · filtered ${dropped} junk/dust` : ""),
@@ -158,8 +164,15 @@ export function ConnectWalletButton() {
   );
 }
 
-/** Card listing connected wallets with re-sync + remove controls. */
-export function WalletsCard({ wallets }: { wallets: WalletRow[] }) {
+/** Card listing connected wallets with re-sync, junk-filter + remove controls. */
+export function WalletsCard({
+  wallets,
+  hiddenTokens = {},
+}: {
+  wallets: WalletRow[];
+  /** Hand-hidden tokens per wallet id — the junk filter's undo list. */
+  hiddenTokens?: Record<string, HiddenWalletToken[]>;
+}) {
   if (wallets.length === 0) return null;
   return (
     <Card className="p-0">
@@ -176,17 +189,18 @@ export function WalletsCard({ wallets }: { wallets: WalletRow[] }) {
       </div>
       <ul>
         {wallets.map((w) => (
-          <WalletRowItem key={w.id} wallet={w} />
+          <WalletRowItem key={w.id} wallet={w} hidden={hiddenTokens[w.id] ?? []} />
         ))}
       </ul>
     </Card>
   );
 }
 
-function WalletRowItem({ wallet: w }: { wallet: WalletRow }) {
+function WalletRowItem({ wallet: w, hidden }: { wallet: WalletRow; hidden: HiddenWalletToken[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(w.lastError);
+  const [openFilters, setOpenFilters] = useState(false);
 
   function sync() {
     setError(null);
@@ -211,44 +225,173 @@ function WalletRowItem({ wallet: w }: { wallet: WalletRow }) {
     : "never";
 
   return (
-    <li className="flex items-center justify-between gap-4 px-6 py-4 transition-colors hover:bg-[var(--panel-2)]">
-      <div className="min-w-0">
-        <p className="flex items-center gap-2 truncate text-sm font-medium">
-          <span className="truncate">{w.label}</span>
-          <span className="shrink-0 rounded-full border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
-            {w.chain}
-          </span>
-        </p>
-        <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
-          <span className="mono">{short}</span>
-          {" · "}
-          {w.lastTokenCount ?? 0} {w.lastTokenCount === 1 ? "token" : "tokens"}
-          {" · synced "}
-          {synced}
-        </p>
-        {error && <p className="mt-0.5 text-xs text-[var(--coral)]">{error}</p>}
+    <li className="px-6 py-4 transition-colors hover:bg-[var(--panel-2)]">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 truncate text-sm font-medium">
+            <span className="truncate">{w.label}</span>
+            <span className="shrink-0 rounded-full border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+              {w.chain}
+            </span>
+          </p>
+          <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+            <span className="mono">{short}</span>
+            {" · "}
+            {w.lastTokenCount ?? 0} {w.lastTokenCount === 1 ? "token" : "tokens"}
+            {hidden.length > 0 && ` · ${hidden.length} hidden`}
+            {" · synced "}
+            {synced}
+          </p>
+          {error && <p className="mt-0.5 text-xs text-[var(--coral)]">{error}</p>}
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="mono text-sm text-[var(--paper)]">{fmtUsd(w.lastValueUsd ?? 0)}</span>
+          <button
+            onClick={() => setOpenFilters((v) => !v)}
+            aria-expanded={openFilters}
+            aria-label={`Junk filter for ${w.label}`}
+            title="Junk filter — dust floor + hidden tokens"
+            className={`rounded-md p-1 transition hover:text-[var(--brass)] ${
+              openFilters || w.minValueUsd != null || hidden.length > 0
+                ? "text-[var(--brass)]"
+                : "text-[var(--faint)]"
+            }`}
+          >
+            <Filter size={14} />
+          </button>
+          <button
+            onClick={sync}
+            disabled={pending}
+            aria-label={`Re-sync ${w.label}`}
+            title="Re-sync balances"
+            className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--brass)] disabled:opacity-40"
+          >
+            <RefreshCw size={14} className={pending ? "animate-spin" : ""} />
+          </button>
+          <button
+            onClick={remove}
+            disabled={pending}
+            aria-label={`Disconnect ${w.label}`}
+            title="Disconnect wallet"
+            className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--coral)] disabled:opacity-40"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <span className="mono text-sm text-[var(--paper)]">{fmtUsd(w.lastValueUsd ?? 0)}</span>
-        <button
-          onClick={sync}
-          disabled={pending}
-          aria-label={`Re-sync ${w.label}`}
-          title="Re-sync balances"
-          className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--brass)] disabled:opacity-40"
-        >
-          <RefreshCw size={14} className={pending ? "animate-spin" : ""} />
-        </button>
-        <button
-          onClick={remove}
-          disabled={pending}
-          aria-label={`Disconnect ${w.label}`}
-          title="Disconnect wallet"
-          className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--coral)] disabled:opacity-40"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
+
+      {openFilters && <WalletFilterPanel wallet={w} hidden={hidden} onError={setError} />}
     </li>
+  );
+}
+
+/**
+ * Junk-filter controls for one wallet: the dust floor every imported token has to
+ * clear, and the undo list for tokens hidden by hand from the portfolio. Both
+ * changes re-sync the wallet so the holdings list matches immediately.
+ */
+function WalletFilterPanel({
+  wallet: w,
+  hidden,
+  onError,
+}: {
+  wallet: WalletRow;
+  hidden: HiddenWalletToken[];
+  onError: (msg: string | null) => void;
+}) {
+  const router = useRouter();
+  const [floor, setFloor] = useState(w.minValueUsd != null ? String(w.minValueUsd) : "");
+  const [pending, start] = useTransition();
+
+  const parsed = floor.trim() === "" ? null : Number(floor);
+  const floorValid = parsed === null || (Number.isFinite(parsed) && parsed >= 0);
+  const floorChanged = (w.minValueUsd ?? null) !== (parsed && parsed > 0 ? parsed : null);
+
+  function applyFloor() {
+    if (!floorValid) return;
+    onError(null);
+    start(async () => {
+      const res = await setWalletDustFloor(w.id, parsed);
+      if (!res.ok) onError(res.error);
+      router.refresh();
+    });
+  }
+
+  function unhide(holdingId: string) {
+    onError(null);
+    start(async () => {
+      const res = await unhideWalletToken(holdingId);
+      if (!res.ok) onError(res.error);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="mt-3 space-y-3 rounded-lg border border-line bg-[var(--panel-2)] p-3">
+      <div>
+        <p className="text-xs font-medium">Dust floor</p>
+        <p className="mt-0.5 text-[11px] text-[var(--faint)]">
+          Skip tokens worth less than this at sync. Blank uses the default of $1.
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            value={floor}
+            onChange={(e) => setFloor(e.target.value)}
+            placeholder="1"
+            inputMode="decimal"
+            aria-label={`Dust floor for ${w.label}`}
+            className="mono h-8 w-24 rounded-md border border-line bg-[var(--ink)] px-2 text-sm text-[var(--paper)] outline-none transition-colors placeholder:text-[var(--faint)] focus:border-[var(--brass-dim)]"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={applyFloor}
+            disabled={pending || !floorValid || !floorChanged}
+          >
+            {pending ? "Syncing…" : "Apply & re-sync"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="border-t border-line pt-3">
+        <p className="text-xs font-medium">
+          Hidden tokens{hidden.length > 0 && ` (${hidden.length})`}
+        </p>
+        {hidden.length === 0 ? (
+          <p className="mt-0.5 text-[11px] text-[var(--faint)]">
+            None. Hide junk from a wallet holding on the Investments page — it stays hidden on re-sync.
+          </p>
+        ) : (
+          <ul className="mt-2 space-y-1">
+            {hidden.map((t) => (
+              <li key={t.holdingId} className="flex items-center justify-between gap-3 text-xs">
+                <span className="min-w-0 truncate">
+                  <span className="text-[var(--paper)]">{t.label ?? "Unnamed token"}</span>
+                  {t.contractAddress && (
+                    <span className="mono ml-2 text-[10px] text-[var(--faint)]">
+                      {t.contractAddress.slice(0, 6)}…{t.contractAddress.slice(-4)}
+                    </span>
+                  )}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  {t.hiddenValueUsd != null && (
+                    <span className="mono text-[var(--faint)]">{fmtUsd(t.hiddenValueUsd)}</span>
+                  )}
+                  <button
+                    onClick={() => unhide(t.holdingId)}
+                    disabled={pending}
+                    title="Un-hide and re-sync"
+                    aria-label={`Un-hide ${t.label ?? "token"}`}
+                    className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--brass)] disabled:opacity-40"
+                  >
+                    <RotateCcw size={13} />
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }

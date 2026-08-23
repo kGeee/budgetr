@@ -221,7 +221,7 @@ CREATE TABLE "manual_holdings" (
 	"wallet_id" text,
 	"contract_address" text,
 	"created_at" integer NOT NULL,
-	"updated_at" integer NOT NULL,
+	"updated_at" integer NOT NULL, "last_value_usd" real,
 	FOREIGN KEY ("wallet_id") REFERENCES "wallets"("id") ON UPDATE no action ON DELETE no action
 );
 CREATE TABLE "net_worth_milestones" (
@@ -408,6 +408,17 @@ CREATE TABLE "vendor_groups" (
 	"name" text NOT NULL,
 	"created_at" integer NOT NULL
 );
+CREATE TABLE "wallet_token_rules" (
+	"holding_id" text PRIMARY KEY NOT NULL,
+	"wallet_id" text NOT NULL,
+	"label" text,
+	"contract_address" text,
+	"hidden" integer DEFAULT false NOT NULL,
+	"cost_basis" real,
+	"hidden_value_usd" real,
+	"created_at" integer NOT NULL,
+	"updated_at" integer NOT NULL
+);
 CREATE TABLE "wallets" (
 	"id" text PRIMARY KEY NOT NULL,
 	"chain" text NOT NULL,
@@ -417,7 +428,7 @@ CREATE TABLE "wallets" (
 	"last_error" text,
 	"created_at" integer NOT NULL,
 	"updated_at" integer NOT NULL
-, "last_value_usd" real, "last_token_count" integer);
+, "last_value_usd" real, "last_token_count" integer, "min_value_usd" real);
 CREATE INDEX "attachments_txn_idx" ON "attachments" ("transaction_id");
 CREATE UNIQUE INDEX "budget_rollover_cat_month_idx" ON "budget_rollovers" ("category_id","month");
 CREATE UNIQUE INDEX "budgets_category_id_unique" ON "budgets" ("category_id");

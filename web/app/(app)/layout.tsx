@@ -10,7 +10,7 @@ import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 import { DemoBanner } from "@/components/demo-banner";
 import { TrialBanner } from "@/components/trial-banner";
 import { LicenseGate } from "@/components/license-gate";
-import { BuyLink } from "@/components/marketing/marketing-shell";
+import { DownloadLink } from "@/components/marketing/marketing-shell";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
 import { getEntitlement } from "@/lib/license";
 import { getFinnhubKey, getPlaidConfig, isDemoMode } from "@/lib/app-config";
@@ -123,7 +123,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <ThemeToggle initialTheme={theme} />
               <ObfuscationToggle initialHidden={obfHidden} />
               {/* Read-only demo: no live Sync — offer the download instead. */}
-              {webDemo ? <BuyLink label="Download" className="!px-3 !py-1.5" /> : <SyncButton />}
+              {webDemo ? <DownloadLink label="Download" className="!px-3 !py-1.5" /> : <SyncButton />}
             </div>
           </header>
           <main className="flex-1 px-5 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 lg:pt-10">

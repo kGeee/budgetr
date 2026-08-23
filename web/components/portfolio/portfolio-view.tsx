@@ -18,6 +18,7 @@ import {
   DeleteManualHoldingButton,
   EditCostBasisButton,
   EditManualHoldingButton,
+  HideWalletTokenButton,
 } from "@/components/manual-holding-dialog";
 import { setHoldingSector } from "@/lib/actions";
 import { formatCurrency, formatMoney } from "@/lib/utils";
@@ -1542,9 +1543,14 @@ function HoldingRowView({
                     value={h.value}
                     fromWallet={h.fromWallet}
                   />
-                  {/* Wallet holdings are removed by disconnecting the wallet
-                      (Accounts page), not per-row, so no delete here. */}
-                  {!h.fromWallet && (
+                  {/* A wallet row would be re-created by the next sync, so it's
+                      hidden (a persisted rule) rather than deleted. */}
+                  {h.fromWallet ? (
+                    <HideWalletTokenButton
+                      id={h.id}
+                      name={h.securityName ?? h.ticker ?? "holding"}
+                    />
+                  ) : (
                     <DeleteManualHoldingButton
                       id={h.id}
                       name={h.securityName ?? h.ticker ?? "holding"}
@@ -2265,9 +2271,14 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
                   value={h.value}
                   fromWallet={h.fromWallet}
                 />
-                {/* Wallet holdings are removed by disconnecting the wallet
-                    (Accounts page), not per-row, so no delete here. */}
-                {!h.fromWallet && (
+                {/* A wallet row would be re-created by the next sync, so it's
+                    hidden (a persisted rule) rather than deleted. */}
+                {h.fromWallet ? (
+                  <HideWalletTokenButton
+                    id={h.id}
+                    name={h.securityName ?? h.ticker ?? "holding"}
+                  />
+                ) : (
                   <DeleteManualHoldingButton
                     id={h.id}
                     name={h.securityName ?? h.ticker ?? "holding"}

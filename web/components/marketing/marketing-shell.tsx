@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
-import { SITE, hasCheckout, primaryCtaHref } from "@/lib/site";
+import { SITE, primaryCtaHref } from "@/lib/site";
 
 /**
  * Public marketing chrome — a translucent top nav + footer wrapping every
@@ -28,7 +28,7 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
               Getting started
             </Link>
           </nav>
-          <BuyLink className="ml-auto sm:ml-0" />
+          <DownloadLink className="ml-auto sm:ml-0" />
         </div>
       </header>
 
@@ -57,11 +57,17 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Primary purchase/download CTA — paid checkout when configured, else the free
- * GitHub download. External link (Polar / GitHub) so it opens directly. */
-export function BuyLink({ className = "", label }: { className?: string; label?: string }) {
-  const paid = hasCheckout();
-  const text = label ?? (paid ? `Buy · ${SITE.price}` : "Download");
+/**
+ * The primary marketing CTA: download the app.
+ *
+ * This used to read "Buy · $29" and open Polar, which asked for money before the
+ * visitor had seen the app run on their own data. Every marketing surface now
+ * hands over the build; the purchase is asked for by the in-app licence gate
+ * when the 14-day trial ends. External link (GitHub Releases) so it downloads
+ * directly.
+ */
+export function DownloadLink({ className = "", label }: { className?: string; label?: string }) {
+  const text = label ?? "Download for macOS";
   return (
     <a
       href={primaryCtaHref()}

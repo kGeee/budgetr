@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { EyeOff, Pencil, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   addManualHolding,
   clearHoldingCostBasisOverride,
   deleteManualHolding,
+  hideWalletToken,
   setHoldingCostBasisOverride,
   updateManualHolding,
 } from "@/lib/actions";
@@ -192,7 +193,10 @@ export function EditManualHoldingButton({
   quantity: number | null;
   costBasis: number | null;
   value: number | null;
-  /** Wallet-imported: quantity is synced from chain, so only cost basis is editable. */
+  /**
+   * Wallet-imported: quantity and value are chain-synced (and rewritten by every
+   * re-sync), so only cost basis is editable. It persists via wallet_token_rules.
+   */
   fromWallet?: boolean;
 }) {
   const router = useRouter();
@@ -214,7 +218,12 @@ export function EditManualHoldingButton({
               ...(fromWallet ? {} : { quantity: num(quantity) }),
               costBasis: num(cost),
             }
-          : { name: name.trim() || initialName, manualValue: num(value) },
+          : {
+              name: name.trim() || initialName,
+              // Same for a wallet's fixed-value (long-tail) tokens: the value is a
+              // sync snapshot, so cost basis is the only thing worth editing.
+              ...(fromWallet ? { costBasis: num(cost) } : { manualValue: num(value) }),
+            },
       );
       setOpen(false);
       router.refresh();
@@ -255,6 +264,15 @@ export function EditManualHoldingButton({
                   />
                 </Field>
                 <Field label="Cost basis (opt)">
+                  <Input value={cost} onChange={setCost} mono />
+                </Field>
+              </div>
+            ) : fromWallet ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Current value" hint="Synced from chain">
+                  <Input value={value} onChange={setValue} mono readOnly />
+                </Field>
+                <Field label="Cost basis (opt)" hint="What you paid">
                   <Input value={cost} onChange={setCost} mono />
                 </Field>
               </div>
@@ -303,6 +321,37 @@ export function DeleteManualHoldingButton({ id, name }: { id: string; name: stri
       className="rounded-md p-1 text-[var(--faint)] opacity-0 transition hover:text-[var(--coral)] group-hover:opacity-100 disabled:opacity-40"
     >
       <Trash2 size={13} />
+    </button>
+  );
+}
+
+/**
+ * Manual junk filter for a wallet-imported token: hides it from the portfolio and
+ * writes a rule so re-syncs never bring it back. Unhide from the wallet's card on
+ * the Accounts page. (Wallet rows can't be plain-deleted — the next sync would
+ * just re-create them.)
+ */
+export function HideWalletTokenButton({ id, name }: { id: string; name: string }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+
+  function hide() {
+    if (!confirm(`Hide "${name}"? It stays hidden on future syncs — undo from the wallet on Accounts.`)) return;
+    start(async () => {
+      await hideWalletToken(id);
+      router.refresh();
+    });
+  }
+
+  return (
+    <button
+      onClick={hide}
+      disabled={pending}
+      aria-label={`Hide ${name}`}
+      title="Hide this token (stays hidden on re-sync)"
+      className="rounded-md p-1 text-[var(--faint)] opacity-0 transition hover:text-[var(--coral)] group-hover:opacity-100 disabled:opacity-40"
+    >
+      <EyeOff size={13} />
     </button>
   );
 }

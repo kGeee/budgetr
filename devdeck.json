@@ -1,0 +1,60 @@
+{
+  "actions": [
+    {
+      "id": "restart-server",
+      "label": "Restart server",
+      "description": "Reload the dev.budgetr.server + caddy LaunchAgents. Builds only if .next is missing.",
+      "command": "web/desktop/install.sh"
+    },
+    {
+      "id": "rebuild-restart",
+      "label": "Rebuild & restart server",
+      "description": "Force a production build of web/, then reload both LaunchAgents.",
+      "command": "bash",
+      "args": ["-c", "npm --prefix web run build && web/desktop/install.sh"],
+      "confirm": "Rebuilds web/ and reloads the LaunchAgents. budgetr.localhost is down for the duration of the build."
+    },
+    {
+      "id": "release",
+      "label": "Release",
+      "description": "Merge a branch into main, bump web/package.json, tag, and push. The tag push triggers the signed + notarized DMG workflow.",
+      "command": "scripts/release.sh",
+      "args": ["{branch}", "{version}", "{dryRun}", "{noWatch}"],
+      "inputs": [
+        {
+          "name": "branch",
+          "label": "Branch to merge",
+          "type": "branch",
+          "required": true,
+          "placeholder": "Pick a branch"
+        },
+        {
+          "name": "version",
+          "label": "Version",
+          "type": "string",
+          "required": true,
+          "pattern": "\\d+\\.\\d+\\.\\d+",
+          "placeholder": "0.14.0"
+        },
+        {
+          "name": "dryRun",
+          "label": "Dry run (print, change nothing)",
+          "type": "boolean",
+          "required": false,
+          "flag": "--dry-run",
+          "default": "false"
+        },
+        {
+          "name": "noWatch",
+          "label": "Skip watching the release workflow",
+          "type": "boolean",
+          "required": false,
+          "flag": "--no-watch",
+          "default": "false"
+        }
+      ],
+      "danger": true,
+      "confirm": "Merges into main, creates a tag, and pushes both — which starts the public GitHub release. Use Dry run first if unsure."
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { BuyLink } from "@/components/marketing/marketing-shell";
-import { SITE, hasCheckout } from "@/lib/site";
+import { DownloadLink } from "@/components/marketing/marketing-shell";
+import { SITE, checkoutHref, hasCheckout } from "@/lib/site";
+import { TRIAL_DAYS } from "@/lib/license";
 
 export const metadata: Metadata = {
   title: "Pricing — budgetr",
@@ -47,7 +48,9 @@ export default function PricingPage() {
         <p className="eyebrow">Lifetime license</p>
         <p className="mt-3 font-display text-6xl tabular">{SITE.price}</p>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          {hasCheckout() ? "One-time · free updates · 14-day refund" : "Free while in preview"}
+          {hasCheckout()
+            ? `One-time · free updates · ${TRIAL_DAYS}-day trial · 14-day refund`
+            : "Free while in preview"}
         </p>
         <ul className="mt-6 space-y-2.5 text-left text-sm">
           {[
@@ -63,8 +66,28 @@ export default function PricingPage() {
             </li>
           ))}
         </ul>
-        <div className="mt-8 flex justify-center">
-          <BuyLink />
+        <div className="mt-8 flex flex-col items-center gap-3">
+          <DownloadLink />
+          {/* Trying first is the recommended path, so the trial is the promise
+              under the button — but someone who has already made up their mind
+              shouldn't have to install the app to hand over money. */}
+          {hasCheckout() ? (
+            <>
+              <p className="text-xs text-[var(--muted)]">
+                Runs free for {TRIAL_DAYS} days. No card, no account.
+              </p>
+              <a
+                href={checkoutHref()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[var(--muted)] underline-offset-2 transition hover:text-[var(--paper)] hover:underline"
+              >
+                Already decided? Buy a license now
+              </a>
+            </>
+          ) : (
+            <p className="text-xs text-[var(--muted)]">Free while in preview.</p>
+          )}
         </div>
       </Card>
 

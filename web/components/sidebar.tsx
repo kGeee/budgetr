@@ -58,6 +58,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
   {
     label: "Investing",
     items: [
+      { href: "/markets", label: "Markets" },
       { href: "/investments/options", label: "Options" },
       { href: "/investments/analysis", label: "Analysis" },
       { href: "/fundamentals", label: "Fundamentals" },
