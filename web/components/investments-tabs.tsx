@@ -25,6 +25,7 @@ type Tab = { href: string; label: string; path?: string };
 
 const SECTION: Tab[] = [
   { href: "/investments", label: "Portfolio" },
+  { href: "/markets", label: "Markets" },
   { href: "/investments/options", label: "Options" },
   { href: "/investments/analysis", label: "Analysis" },
   { href: "/fundamentals", label: "Fundamentals" },

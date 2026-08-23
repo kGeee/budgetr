@@ -4,6 +4,7 @@ export * from "./dashboards";
 export * from "./fire";
 export * from "./import";
 export * from "./license";
+export * from "./markets";
 export * from "./onboarding";
 export * from "./receipt";
 export * from "./recurring";

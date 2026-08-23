@@ -120,6 +120,201 @@ export async function getDailyOHLCV(ticker: string, months = 12): Promise<OHLCVP
   }
 }
 
+// ── Charting bars (arbitrary range × interval) ───────────────────────────────
+
+/**
+ * The timeframes the markets desk offers. `1h` is Yahoo's `60m` under a name
+ * that reads like a chart button; everything else is passed through verbatim.
+ */
+export type BarInterval = "5m" | "15m" | "30m" | "1h" | "1d" | "1wk" | "1mo";
+
+/** Lookback windows Yahoo's chart endpoint accepts. */
+export type BarRange = "5d" | "1mo" | "3mo" | "6mo" | "1y" | "2y" | "5y" | "10y" | "max";
+
+/** One chart bar. `t` is epoch **milliseconds** at the bar's open. */
+export type ChartBar = {
+  t: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+};
+
+/** What Yahoo knows about the symbol itself, for the chart header. */
+export type BarMeta = {
+  symbol: string;
+  currency: string | null;
+  exchangeName: string | null;
+  instrumentType: string | null;
+  /** Latest traded price Yahoo reports (may be more recent than the last bar). */
+  regularMarketPrice: number | null;
+  /** Previous session's close, for the day-change readout. */
+  previousClose: number | null;
+};
+
+export type BarSeries = { bars: ChartBar[]; meta: BarMeta | null };
+
+const YAHOO_INTERVAL: Record<BarInterval, string> = {
+  "5m": "5m",
+  "15m": "15m",
+  "30m": "30m",
+  "1h": "60m",
+  "1d": "1d",
+  "1wk": "1wk",
+  "1mo": "1mo",
+};
+
+/**
+ * Yahoo caps how far back intraday data goes: ~60 days for sub-hourly bars,
+ * ~730 days for hourly. Asking for more returns an error rather than a clamped
+ * window, so we clamp before asking.
+ */
+const MAX_RANGE: Partial<Record<BarInterval, BarRange>> = {
+  "5m": "1mo",
+  "15m": "1mo",
+  "30m": "1mo",
+  "1h": "2y",
+};
+
+const RANGE_ORDER: BarRange[] = ["5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max"];
+
+/** The requested range, or the widest one this interval actually supports. */
+export function clampRange(range: BarRange, interval: BarInterval): BarRange {
+  const cap = MAX_RANGE[interval];
+  if (!cap) return range;
+  return RANGE_ORDER.indexOf(range) > RANGE_ORDER.indexOf(cap) ? cap : range;
+}
+
+/**
+ * OHLCV bars for one symbol at an arbitrary range × interval, oldest-first.
+ *
+ * Separate from `getDailyOHLCV` because a chart needs three things that
+ * function deliberately drops: intraday intervals, epoch timestamps (a
+ * date-only string can't label a 15-minute bar), and the `meta` block that
+ * carries the live price and previous close. Returns empty rather than throwing
+ * so one bad symbol in a watchlist can't take the whole desk down.
+ *
+ * Cache: intraday bars revalidate every minute, daily-and-slower every 10, which
+ * is as live as a delayed free feed is worth polling.
+ */
+export async function getBars(
+  ticker: string,
+  range: BarRange = "6mo",
+  interval: BarInterval = "1d",
+): Promise<BarSeries> {
+  const sym = ticker.trim().toUpperCase();
+  if (!sym) return { bars: [], meta: null };
+
+  const iv = YAHOO_INTERVAL[interval] ?? "1d";
+  const r = clampRange(range, interval);
+  const intraday = interval.endsWith("m") || interval === "1h";
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+    sym,
+  )}?range=${r}&interval=${iv}&includePrePost=false`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      next: { revalidate: intraday ? 60 : 600 },
+    });
+    if (!res.ok) return { bars: [], meta: null };
+
+    const j = (await res.json()) as {
+      chart?: {
+        result?: Array<{
+          meta?: {
+            symbol?: string;
+            currency?: string;
+            fullExchangeName?: string;
+            exchangeName?: string;
+            instrumentType?: string;
+            regularMarketPrice?: number;
+            chartPreviousClose?: number;
+            previousClose?: number;
+          };
+          timestamp?: number[];
+          indicators?: {
+            quote?: Array<{
+              open?: (number | null)[];
+              high?: (number | null)[];
+              low?: (number | null)[];
+              close?: (number | null)[];
+              volume?: (number | null)[];
+            }>;
+          };
+        }>;
+      };
+    };
+
+    const result = j.chart?.result?.[0];
+    if (!result) return { bars: [], meta: null };
+
+    const ts = result.timestamp ?? [];
+    const q = result.indicators?.quote?.[0];
+    const bars: ChartBar[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      const open = q?.open?.[i];
+      const high = q?.high?.[i];
+      const low = q?.low?.[i];
+      const close = q?.close?.[i];
+      // Yahoo pads holidays and halted sessions with nulls; a candle needs all
+      // four legs, so an incomplete bar is dropped rather than interpolated.
+      if (![open, high, low, close].every((v) => typeof v === "number" && Number.isFinite(v))) continue;
+      bars.push({
+        t: ts[i] * 1000,
+        open: open as number,
+        high: high as number,
+        low: low as number,
+        close: close as number,
+        volume: typeof q?.volume?.[i] === "number" ? (q!.volume![i] as number) : null,
+      });
+    }
+
+    const m = result.meta;
+    const meta: BarMeta = {
+      symbol: m?.symbol ?? sym,
+      currency: m?.currency ?? null,
+      exchangeName: m?.fullExchangeName ?? m?.exchangeName ?? null,
+      instrumentType: m?.instrumentType ?? null,
+      regularMarketPrice: typeof m?.regularMarketPrice === "number" ? m.regularMarketPrice : null,
+      previousClose:
+        typeof m?.previousClose === "number"
+          ? m.previousClose
+          : typeof m?.chartPreviousClose === "number"
+            ? m.chartPreviousClose
+            : null,
+    };
+
+    return { bars, meta };
+  } catch {
+    return { bars: [], meta: null };
+  }
+}
+
+/**
+ * `getBars` for a whole watchlist, capped at 6 in flight so a 20-symbol list
+ * doesn't open 20 sockets to Yahoo at once. Symbols that fail come back with an
+ * empty series rather than rejecting the batch.
+ */
+export async function getBarsFor(
+  tickers: string[],
+  range: BarRange = "6mo",
+  interval: BarInterval = "1d",
+): Promise<Record<string, BarSeries>> {
+  const syms = [...new Set(tickers.map((t) => t.trim().toUpperCase()).filter(Boolean))];
+  const out: Record<string, BarSeries> = {};
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(6, syms.length) }, async () => {
+      for (let i = next++; i < syms.length; i = next++) {
+        out[syms[i]] = await getBars(syms[i], range, interval);
+      }
+    }),
+  );
+  return out;
+}
+
 /** A corporate split event fetched from Yahoo. Ratio is shares-after : before. */
 export type SplitEvent = { date: string; numerator: number; denominator: number };
 
