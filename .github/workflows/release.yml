@@ -17,8 +17,10 @@
 #     to the ad-hoc path above. See README for enrollment steps.
 #
 # Signing model (Windows):
-#   * Same CSC_LINK / CSC_KEY_PASSWORD secrets (a .p12 / .pfx with an Authenticode
-#     code-signing cert). When unset, the NSIS installer is produced unsigned —
+#   * Authenticode uses SEPARATE secrets: WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD
+#     (a .p12 / .pfx with a Windows code-signing cert). Do NOT reuse Mac's
+#     CSC_LINK (Developer ID) — that must not Authenticode-sign the NSIS
+#     installer. When WIN_CSC_* are unset, the build stays unsigned —
 #     SmartScreen will warn on first launch. Do not invent or commit a cert.
 
 name: Release
@@ -163,20 +165,39 @@ jobs:
         run: npm run setup
 
       - name: Build Windows installer
+        # Authenticode is optional and must use WIN_CSC_* — never Mac CSC_LINK.
         # Same empty-secret trap as macOS: a defined-but-empty CSC_LINK makes
-        # electron-builder treat it as a cert path and fail. Strip when unset so
-        # the build succeeds unsigned (SmartScreen will warn; that's expected).
+        # electron-builder treat it as a cert path and fail. When WIN_CSC_LINK
+        # is unset, strip CSC_* entirely so the NSIS build stays unsigned
+        # (SmartScreen will warn; that's expected for the first artifacts).
         shell: bash
         run: |
-          if [ -z "$CSC_LINK" ]; then
+          if [ -z "$WIN_CSC_LINK" ]; then
             unset CSC_LINK CSC_KEY_PASSWORD
+          else
+            export CSC_LINK="$WIN_CSC_LINK"
+            export CSC_KEY_PASSWORD="$WIN_CSC_KEY_PASSWORD"
           fi
           npm run package:win
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          # Auto-discovery ON only when a Windows Authenticode cert is provided.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.WIN_CSC_LINK != '' }}
           NEXT_PUBLIC_CHECKOUT_URL: ${{ vars.NEXT_PUBLIC_CHECKOUT_URL }}
+
+      - name: Assert Windows installer artifact
+        # cwd is web/ (job default). fail_on_unmatched_files stays false below so
+        # optional latest.yml / blockmap globs don't fail the job — but the
+        # NSIS installer itself is required.
+        shell: bash
+        run: |
+          if [ ! -f dist/budgetr-win.exe ]; then
+            echo "Required artifact missing: web/dist/budgetr-win.exe" >&2
+            ls -la dist || true
+            exit 1
+          fi
+          ls -lh dist/budgetr-win.exe
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
