@@ -82,13 +82,20 @@ struct TransactionsView: View {
         }
         .overlay {
             if filtered.isEmpty {
-                ContentUnavailableView(
-                    searchText.isEmpty ? "No transactions yet" : "No results",
-                    systemImage: searchText.isEmpty ? "tray" : "magnifyingglass",
-                    description: Text(searchText.isEmpty
-                        ? "Import budgetr.db or run a sync."
-                        : "Try a different search term.")
-                )
+                if searchText.isEmpty && FirstRunImport.storeIsEmpty(context) {
+                    EmptyStorePrompt(
+                        title: "No transactions yet",
+                        detail: "Import budgetr.db to load your ledger."
+                    )
+                } else {
+                    ContentUnavailableView(
+                        searchText.isEmpty ? "No transactions yet" : "No results",
+                        systemImage: searchText.isEmpty ? "tray" : "magnifyingglass",
+                        description: Text(searchText.isEmpty
+                            ? "Import budgetr.db to load your ledger."
+                            : "Try a different search term.")
+                    )
+                }
             }
         }
     }

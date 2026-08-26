@@ -8,6 +8,8 @@ import SwiftUI
 /// and loans are held as positive balances (Plaid's convention), so they are
 /// subtracted here and shown in coral.
 struct AccountsView: View {
+    @Environment(\.managedObjectContext) private var context
+
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
     private var accounts: FetchedResults<CDAccount>
 
@@ -37,12 +39,19 @@ struct AccountsView: View {
     var body: some View {
         ScrollView {
             if accounts.isEmpty {
-                ContentUnavailableView(
-                    "No accounts yet",
-                    systemImage: "building.columns",
-                    description: Text("Import budgetr.db to load them.")
-                )
-                .padding(.top, 80)
+                if FirstRunImport.storeIsEmpty(context) {
+                    EmptyStorePrompt(
+                        title: "No accounts yet",
+                        detail: "Import budgetr.db to load your linked accounts."
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "No accounts yet",
+                        systemImage: "building.columns",
+                        description: Text("Import budgetr.db to load them.")
+                    )
+                    .padding(.top, 80)
+                }
             } else {
                 VStack(alignment: .leading, spacing: 16) {
                     header

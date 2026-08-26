@@ -51,7 +51,10 @@ struct DashboardView: View {
             let m = model
 
             if transactions.isEmpty {
-                EmptyStore()
+                EmptyStorePrompt(
+                    title: "Nothing imported yet",
+                    detail: "Import budgetr.db to see this month's spending."
+                )
             } else {
                 VStack(alignment: .leading, spacing: 18) {
                     Header(model: m)
@@ -281,24 +284,6 @@ private struct CategoryCard: View {
     }
 }
 
-
-private struct EmptyStore: View {
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "tray")
-                .font(.system(size: 34))
-                .foregroundStyle(.secondary)
-            Text("Nothing imported yet")
-                .font(.title3.weight(.medium))
-            Text("Use Import in the toolbar and pick web/data/budgetr.db.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .padding(40)
-    }
-}
 
 // ── Bridging ─────────────────────────────────────────────────────────
 
