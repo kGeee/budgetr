@@ -1,14 +1,15 @@
-# budgetr — desktop (macOS)
+# budgetr — desktop (macOS + Windows)
 
 budgetr is a server-backed app (SQLite, Plaid, live prices), so a desktop window
-needs a running server behind it. There are two ways to get budgetr in your Dock;
-pick one.
+needs a running server behind it. The supported product path is the **Electron
+app** — a self-contained installer that starts its own server and shows a native
+window. Non-developers should download a Release artifact, not clone this repo.
 
-- **Electron app** (recommended) — a self-contained `budgetr.app` that starts its
-  own server and shows a native window. One build, drag to Applications, done.
-- **LaunchAgent + PWA** (lightweight) — keep `next start` alive with a macOS
-  LaunchAgent and install the page as a browser PWA. No Electron, much smaller,
-  but relies on your browser. See [the bottom of this file](#alternative-launchagent--pwa).
+- **macOS:** `budgetr-mac.dmg` from [GitHub Releases](https://github.com/kGeee/budgetr/releases/latest)
+- **Windows:** `budgetr-win.exe` (per-user NSIS, x64) from the same Releases page
+
+There is also a lightweight **LaunchAgent + PWA** path on macOS only — see
+[the bottom of this file](#alternative-launchagent--pwa).
 
 ---
 
@@ -18,35 +19,47 @@ A thin [Electron](https://www.electronjs.org/) shell around the existing Next.js
 app. It runs the **same web build** locally — `next start` as a child process —
 and points a native window at it (on a free local port it picks automatically, so
 it never collides with whatever's already on :3000). There is no second
-codebase: the desktop app is the web app, packaged for the Dock.
+codebase: the desktop app is the web app, packaged for the Dock / Start Menu.
 
 ```
 desktop/electron/
   main.js        # main process: spawns the server, opens the window
+  preload.js     # narrow IPC bridge (privacy gate, open data folder, quit)
   loading.html   # dark splash shown while the server warms up
 desktop/scripts/
-  make-icns.sh   # builds build/icon.icns from public/icons/icon-512.png
-desktop/build/   # generated icon (git-ignored)
+  make-icns.sh   # builds build/icon.icns from public/icons/icon-512.png (macOS)
+  make-ico.mjs   # builds build/icon.ico from the PWA icons (Windows CI + local)
+desktop/build/   # generated icons (git-ignored)
 ```
 
-## Build your own `.app`
+## Build your own package
 
 From the `web/` directory:
 
 ```bash
 npm install
-npm run package
+npm run package:mac   # → dist/budgetr-mac.dmg (+ zip)
+npm run package:win   # → dist/budgetr-win.exe (NSIS, x64, per-user)
 ```
 
-This produces, in `web/dist/`:
+`npm run package` is an alias for `package:mac` (keeps existing muscle memory).
 
-- `budgetr.app` — the application bundle
-- `budgetr-mac.dmg` — a drag-to-Applications installer
+### Windows notes
 
-Then drag **budgetr.app** to `/Applications` (or open the `.dmg` and do the same).
+- Target is **NSIS x64**, per-user install (`allowElevation: false`) — no admin/UAC.
+- Receipt OCR (Swift helper) is **Mac-only** and is not bundled on Windows.
+- First launch shows a hard privacy / permissions / data-folder gate before the
+  dashboard. Completion is stored as `privacy-gate-done` under
+  `%APPDATA%\budgetr\` (Electron `userData`).
+- Optional Authenticode: set the same `CSC_LINK` / `CSC_KEY_PASSWORD` secrets
+  used for Mac. Without them the installer builds unsigned and SmartScreen will
+  warn on first launch.
 
-> First launch is unsigned, so macOS Gatekeeper will block it. Right-click the
-> app → **Open** → **Open**, once. (See "Distribution" below for why.)
+### macOS notes
+
+> First launch of an unsigned/ad-hoc build is blocked by Gatekeeper. Right-click
+> the app → **Open** → **Open**, once. Signed+notarized Release builds open with
+> a normal double-click.
 
 ## Develop against the shell
 
@@ -60,6 +73,9 @@ a server you're already running yourself, set
 `ELECTRON_START_URL=http://localhost:3000`. The spawned server's output is written
 to `server.log` in the app's user-data dir for debugging.
 
+The Windows privacy gate is **not** forced in `dev:electron` / `npm run dev` /
+`start.bat` — only packaged Windows builds set `BUDGETR_DESKTOP=1`.
+
 ## How it fits together
 
 - **Server**: `main.js` spawns Next using Electron's bundled Node
@@ -67,11 +83,14 @@ to `server.log` in the app's user-data dir for debugging.
   On quit, the server process is killed.
 - **Database**: in a packaged app the bundle is read-only, so the SQLite file is
   relocated to the per-user data directory
-  (`~/Library/Application Support/budgetr/budgetr.db`) and **migrations run on
-  launch**. In `dev:electron` it uses the project's usual `./data/budgetr.db`.
-- **Secrets / config**: the packaged app bundles your local `.env` and
-  `.env.local` (Plaid, Finnhub, the encryption key). Each person builds with
-  their own credentials.
+  (`~/Library/Application Support/budgetr/` on macOS, `%APPDATA%\budgetr\` on
+  Windows) and **migrations run on launch**. In `dev:electron` it uses the
+  project's usual `./data/budgetr.db`.
+- **Secrets / config**: a publicly distributed build must **not** bake secrets
+  into the bundle. Packaged apps create `<userData>/budgetr.env` on first launch
+  with a generated `APP_ENCRYPTION_KEY` and empty Plaid/Finnhub placeholders.
+- **Window chrome**: macOS uses a frameless `hiddenInset` title bar; Windows uses
+  a native frame (min/max/close + drag) so the window never looks broken.
 
 ## The two gotchas
 
@@ -81,16 +100,16 @@ own**. They can't both be satisfied in one `node_modules` at once, so:
 
 | You want to… | Run |
 | --- | --- |
-| Build/run the desktop app | `npm run package` / `npm run dev:electron` (rebuilds for Electron automatically) |
+| Build/run the desktop app | `npm run package:mac` / `package:win` / `dev:electron` (rebuilds for Electron automatically) |
 | Go back to web dev (`npm run dev`) | `npm run web:rebuild` |
 
 If `npm run dev` ever crashes with a `better-sqlite3`/`NODE_MODULE_VERSION`
 error, you most recently did desktop work — run `npm run web:rebuild`.
 
-**2. Bundle size.** The packaged `.app` includes a full `node_modules`
-(~300 MB+). That's normal for Electron and fine for "build your own"; it just
+**2. Bundle size.** The packaged app includes a full `node_modules`
+(~300 MB+). That's normal for Electron and fine for distribution; it just
 isn't a small download. (This is the main reason the LaunchAgent + PWA path below
-still exists.)
+still exists on macOS.)
 
 ## Pinned versions — don't bump blindly
 
@@ -111,20 +130,20 @@ still exists.)
 
 ## Distribution
 
-For **"share the source, build your own"** (the supported path) you need nothing
-beyond the above.
+Release tags (`v*`) run `.github/workflows/release.yml`:
 
-To hand someone a **prebuilt binary** that opens without the Gatekeeper prompt,
-you'd sign and notarize it with an Apple Developer ID certificate — out of scope
-here. Also note: a built `.app` contains the `.env`/`.env.local` you built it
-with, i.e. **your secrets**. Don't redistribute your own build.
+- **macOS** job → `budgetr-mac.dmg` / zip + `latest-mac.yml`
+- **Windows** job → `budgetr-win.exe` + `latest.yml` (when produced)
+
+Optional signing via `CSC_LINK` / `CSC_KEY_PASSWORD`. Without those secrets both
+platforms still build; macOS is ad-hoc signed, Windows is unsigned (SmartScreen).
 
 ---
 
 # Alternative: LaunchAgent + PWA
 
 No Electron, no 300 MB bundle — keep the server alive with a macOS LaunchAgent
-and install the page as a PWA from your browser.
+and install the page as a PWA from your browser. (macOS only.)
 
 ## 1. Build + start the always-on server
 
