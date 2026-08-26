@@ -23,12 +23,15 @@ inside the app (or press `⌘,`), paste in your Plaid keys, and relaunch — see
 **Option 2 — download the app (Windows, x64).**
 Grab `budgetr-win.exe` from the [latest release](../../releases/latest) and run
 it. The installer is per-user (no administrator prompt). On first launch,
-budgetr walks you through privacy / where-data-lives screens before the
-dashboard opens. Your ledger and keys live in `%APPDATA%\budgetr\`.
+budgetr walks you through where-your-data-lives screens before the dashboard
+opens (local SQLite under `%APPDATA%\budgetr\`, bring-your-own Plaid keys,
+read-only — the app cannot move money). Your ledger and keys stay on this PC.
 
-> **SmartScreen:** unsigned release builds will show a Windows SmartScreen
-> warning. Choose **More info → Run anyway**. Once an Authenticode signing
-> certificate is configured on the release pipeline, that warning goes away.
+> **First open — SmartScreen is expected.** The first Windows release artifacts
+> are intentionally unsigned. Windows may show a SmartScreen / “Windows
+> protected your PC” warning. That does **not** mean the download is broken —
+> choose **More info → Run anyway**. A signed Authenticode build can come later;
+> until then, this warning on first open is normal.
 
 **Option 3 — run from source with one double-click (macOS / Linux).**
 [Download this repo](../../archive/refs/heads/main.zip) (or `git clone` it),

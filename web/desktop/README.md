@@ -52,8 +52,9 @@ npm run package:win   # → dist/budgetr-win.exe (NSIS, x64, per-user)
   dashboard. Completion is stored as `privacy-gate-done` under
   `%APPDATA%\budgetr\` (Electron `userData`).
 - Optional Authenticode: set the same `CSC_LINK` / `CSC_KEY_PASSWORD` secrets
-  used for Mac. Without them the installer builds unsigned and SmartScreen will
-  warn on first launch.
+  used for Mac. **Unsigned first artifacts are fine** — without those secrets
+  the installer still builds; Windows SmartScreen will warn on first launch
+  (More info → Run anyway). Do not invent or commit a cert.
 
 ### macOS notes
 
