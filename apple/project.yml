@@ -68,6 +68,7 @@ targets:
       - path: Budgetr/Domain/MonthSummary.swift
       - path: Budgetr/Domain/BudgetPacing.swift
       - path: Budgetr/Domain/CategoryMapping.swift
+      - path: Budgetr/Domain/CategorySpend.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app.tests

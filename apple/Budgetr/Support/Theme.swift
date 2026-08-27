@@ -128,17 +128,44 @@ struct TitledPanel<Content: View>: View {
 }
 
 /// A meter bar — budgets, allocation, anything with a share.
+///
+/// When `fraction` exceeds 1.0 the fill covers the track and a coral overflow
+/// segment continues past the end so 10× over is visually distinct from 1.01×.
+/// Parents should leave a little trailing room (see `overflowReserve`).
 struct MeterBar: View {
     let fraction: Double
     var color: Color = T.jade
+    /// Extra width reserved past the track for overflow, as a fraction of the
+    /// track. Caps how far a huge overrun draws (still readable at 10×).
+    var overflowReserve: CGFloat = 0.35
 
     var body: some View {
         GeometryReader { geo in
+            let total = geo.size.width
+            let ratio = max(0, fraction)
+            // Under budget: track is the full width. Over: shrink the track so
+            // the overflow segment has somewhere to go without clipping.
+            let track = ratio > 1 ? total / (1 + overflowReserve) : total
+            let fillInTrack = min(1, ratio) * track
+            let overflowWidth = ratio > 1
+                ? min(1, ratio - 1) * (total - track)
+                : 0
+
             ZStack(alignment: .leading) {
-                Capsule().fill(T.panel2)
+                Capsule()
+                    .fill(T.panel2)
+                    .frame(width: track)
+
                 Capsule()
                     .fill(color)
-                    .frame(width: max(0, min(1, fraction)) * geo.size.width)
+                    .frame(width: fillInTrack)
+
+                if overflowWidth > 0 {
+                    Capsule()
+                        .fill(color.opacity(0.55))
+                        .frame(width: overflowWidth)
+                        .offset(x: track)
+                }
             }
         }
         .frame(height: 5)
