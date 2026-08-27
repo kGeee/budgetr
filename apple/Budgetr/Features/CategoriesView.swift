@@ -46,16 +46,29 @@ struct CategoriesView: View {
             },
             uniquingKeysWith: { a, _ in a }
         )
+        let groupById = Dictionary(
+            categories.compactMap { c -> (String, String)? in
+                guard let id = c.id, let group = c.group else { return nil }
+                return (id, group)
+            },
+            uniquingKeysWith: { a, _ in a }
+        )
 
         let totals = CategorySpend.totals(
             lines: transactions.map(\.spendLine),
             month: month,
-            plaidPrimaryToCategoryId: plaidMap
+            plaidPrimaryToCategoryId: plaidMap,
+            categoryGroupById: groupById
         )
 
         var counts: [String: Int] = [:]
         for txn in transactions where (txn.date ?? "").hasPrefix(month) && txn.amount > 0 {
             let key = idx.resolvedId(for: txn) ?? "__none__"
+            let group = key == "__none__" ? nil : groupById[key]
+            guard CategoryMapping.countsTowardSpend(
+                resolvedGroup: group,
+                plaidPrimary: txn.category
+            ) else { continue }
             counts[key, default: 0] += 1
         }
 
@@ -133,9 +146,18 @@ struct CategoriesView: View {
             }
 
             if let budget = row.budget, budget > 0 {
-                MeterBar(fraction: row.spent / budget, color: over ? T.coral : tint)
+                let ratio = row.spent / budget
+                HStack(alignment: .center, spacing: 10) {
+                    MeterBar(fraction: ratio, color: over ? T.coral : tint)
+                    if let mult = BudgetUtilisation.multiplierLabel(spent: row.spent, limit: budget) {
+                        Text(mult)
+                            .font(F.monoSemibold(10))
+                            .foregroundStyle(T.coral)
+                            .fixedSize()
+                    }
+                }
                 Text(over
-                     ? "\((row.spent - budget).money()) over \(budget.money())"
+                     ? "\((row.spent - budget).money()) over"
                      : "\((budget - row.spent).money()) left of \(budget.money())")
                     .font(F.mono(10))
                     .foregroundStyle(over ? T.coral : T.faint)

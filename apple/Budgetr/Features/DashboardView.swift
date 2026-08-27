@@ -30,11 +30,31 @@ struct DashboardView: View {
         // stored value instead put overridden and un-overridden rows of the same
         // category in different buckets — which reads as several identical
         // "Uncategorised" bars on the chart.
-        let idx = CategoryIndex(categories: Array(categories))
+        //
+        // Transfers (and Reimbursable, which lives in the transfer group) are
+        // dropped here so month spent / "where it went" match the web app.
+        let cats = Array(categories)
+        let idx = CategoryIndex(categories: cats)
+        let groupById = Dictionary(
+            cats.compactMap { c -> (String, String)? in
+                guard let id = c.id, let group = c.group else { return nil }
+                return (id, group)
+            },
+            uniquingKeysWith: { a, _ in a }
+        )
+        let spendEntries: [MonthSummary.Entry] = transactions.compactMap { txn in
+            let id = idx.resolvedId(for: txn)
+            let group = id.flatMap { groupById[$0] }
+            guard CategoryMapping.countsTowardSpend(
+                resolvedGroup: group,
+                plaidPrimary: txn.category
+            ) else { return nil }
+            return txn.summaryEntry(using: idx)
+        }
         return DashboardModel(
-            transactions: transactions.map { $0.summaryEntry(using: idx) },
+            transactions: spendEntries,
             categoryNames: Dictionary(
-                categories.map { ($0.id ?? "", $0.name ?? "") },
+                cats.map { ($0.id ?? "", $0.name ?? "") },
                 uniquingKeysWith: { a, _ in a }
             ),
             // currentBalance is a nullable Double in the model, and that

@@ -104,10 +104,13 @@ struct BudgetsView: View {
 
     private func budgetRow(_ row: BudgetModel.Row) -> some View {
         let tint = row.utilisation == .over ? T.coral : row.utilisation == .warn ? T.brass : T.jade
+        let ratio = row.limit > 0 ? row.spent / row.limit : 0
+        let leftover = row.limit - row.spent
+        let multiplier = BudgetUtilisation.multiplierLabel(spent: row.spent, limit: row.limit)
 
         return Panel {
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
                     Text(row.name)
                         .font(F.medium(14))
                         .foregroundStyle(T.paper)
@@ -117,15 +120,21 @@ struct BudgetsView: View {
                         .foregroundStyle(tint)
                 }
 
-                MeterBar(fraction: row.limit > 0 ? row.spent / row.limit : 0, color: tint)
-
-                if row.utilisation != .ok {
-                    Text(row.utilisation == .over ? "Over budget" : "Approaching limit")
-                        .font(F.mono(10))
-                        .foregroundStyle(tint)
-                        .textCase(.uppercase)
-                        .tracking(1.2)
+                HStack(alignment: .center, spacing: 10) {
+                    MeterBar(fraction: ratio, color: tint)
+                    if let multiplier {
+                        Text(multiplier)
+                            .font(F.monoSemibold(11))
+                            .foregroundStyle(T.coral)
+                            .fixedSize()
+                    }
                 }
+
+                Text(leftover < 0
+                     ? "\(abs(leftover).money()) over"
+                     : "\(leftover.money()) left")
+                    .font(F.mono(10))
+                    .foregroundStyle(leftover < 0 ? T.coral : T.faint)
             }
         }
     }
@@ -173,17 +182,27 @@ private struct BudgetModel {
             },
             uniquingKeysWith: { a, _ in a }
         )
+        let groupById = Dictionary(
+            categories.compactMap { c -> (String, String)? in
+                guard let id = c.id, let group = c.group else { return nil }
+                return (id, group)
+            },
+            uniquingKeysWith: { a, _ in a }
+        )
 
         let month = MonthSummary.monthKey(of: now, calendar: calendar)
         let totals = CategorySpend.totals(
             lines: transactions,
             month: month,
-            plaidPrimaryToCategoryId: plaidMap
+            plaidPrimaryToCategoryId: plaidMap,
+            categoryGroupById: groupById
         )
 
         // Only categories with a budget row — same rule as the Expo companion.
         let budgetRows = budgets.compactMap { b -> Row? in
             guard let cat = b.category, let id = cat.id, b.amount > 0 else { return nil }
+            // Transfer-group categories shouldn't hold spend envelopes.
+            if cat.group == CategoryMapping.transferGroup { return nil }
             let spent = CategorySpend.spent(for: id, in: totals)
             return Row(
                 id: id,
@@ -197,7 +216,13 @@ private struct BudgetModel {
         self.rows = budgetRows
         self.totalLimit = budgetRows.reduce(0) { $0 + $1.limit }
 
-        let monthEntries = transactions.filter { $0.date.hasPrefix(month) && $0.amount > 0 }
+        // Month totals exclude transfers / reimbursable — same filter as Overview.
+        let spendOnly = CategorySpend.spendLines(
+            transactions,
+            plaidPrimaryToCategoryId: plaidMap,
+            categoryGroupById: groupById
+        )
+        let monthEntries = spendOnly.filter { $0.date.hasPrefix(month) && $0.amount > 0 }
         let allMonthSpent = monthEntries.reduce(0) { $0 + $1.amount }
         self.totalSpent = allMonthSpent
         self.leftToSpend = totalLimit - allMonthSpent
