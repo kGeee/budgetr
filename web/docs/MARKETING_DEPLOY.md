@@ -1,16 +1,15 @@
-# Marketing site deployment + Polar
+# Marketing site deployment + Whop
 
 The public marketing site (landing, `/pricing`, `/getting-started`, `/thanks`)
 is the **same Next.js app** built in "marketing-only" mode. Purchases run through
-a **hosted Polar checkout** — the app itself has no license server and never
-phones home (data stays on the user's Mac). Polar (a merchant of record, so it
-handles VAT/sales tax) takes payment, issues + emails the license key, and
-redirects the buyer to `/thanks`.
+a **hosted Whop checkout** — the app itself has no license server and never
+phones home (data stays on the user's Mac). Whop takes payment and redirects the
+buyer to the macOS DMG download after purchase.
 
 So there are two setup tracks, both mostly configuration:
 
-1. **Polar** — create the product, get the checkout link, point its success URL
-   at `/thanks`.
+1. **Whop** — create the product, get the checkout link, set the post-purchase
+   redirect to the latest GitHub Release DMG.
 2. **Vercel** — deploy this repo in marketing mode with the right env vars.
 
 ---
@@ -31,8 +30,8 @@ Setting **`MARKETING_ONLY=1`** flips the same build into the public site:
 > (applies to build *and* runtime) — not only in `build.env`.
 
 The purchase/download CTA is driven entirely by env (`lib/site.ts`): with a
-checkout URL set the button is "Buy · $29"; with none it falls back to the free
-GitHub download, so the page is never a dead end.
+checkout URL set the pricing page surfaces a "Buy a license" link; with none it
+falls back to the free GitHub download, so the page is never a dead end.
 
 ### Live demo (`DEMO_DB=1`)
 
@@ -62,7 +61,7 @@ visitors can try budgetr before downloading:
 | --- | --- | --- | --- |
 | `MARKETING_ONLY` | ✅ | Enables marketing mode (build + runtime). | `1` |
 | `DEMO_DB` | optional | Serves a **live, read-only demo dashboard** on the marketing site (the "Try the live demo" CTA → `/overview`). Backed by an **in-memory** SQLite DB seeded per cold start (no persistent filesystem needed — safe on Vercel serverless), re-seeded with current dates each time. Unset ⇒ dashboard routes 404 as before. | `1` |
-| `NEXT_PUBLIC_CHECKOUT_URL` | ✅ (to sell) | Polar hosted checkout link — the "Buy" CTA. Unset ⇒ free-download fallback. | `https://buy.polar.sh/polar_cl_xxxxxxxx` |
+| `NEXT_PUBLIC_CHECKOUT_URL` | ✅ (to sell) | Whop hosted checkout link — the "Buy" CTA. Unset ⇒ free-download fallback. | `https://whop.com/checkout/ch_xxxxxxxx/` |
 | `NEXT_PUBLIC_SITE_URL` | ✅ | Canonical origin for OpenGraph / `metadataBase`. | `https://budgetr.app` |
 | `NEXT_PUBLIC_PRICE` | optional | Display price (default `$29`). | `$29` |
 | `NEXT_PUBLIC_DOWNLOAD_URL` | optional | Free-download target (default: latest GitHub Release). | `https://github.com/kGeee/budgetr/releases/latest` |
@@ -72,39 +71,32 @@ them you must redeploy (a rebuild), not just restart.
 
 ---
 
-## Part A — Polar
+## Part A — Whop
 
-1. Create an **organization** at <https://polar.sh> (Polar is a merchant of
-   record — it collects and remits VAT/sales tax for you).
-2. **Products → New product** → **one-time payment** (fixed price). Set the price
-   (match `NEXT_PUBLIC_PRICE`), name ("budgetr — lifetime license"), and a
-   description.
-3. Leave Polar's own **License Key** benefit off — budgetr mints its own. The
-   checkout webhook (step below) signs an Ed25519 license key that the app
-   verifies offline, so the key is enforced, not just proof of purchase.
-4. Create a **Checkout Link** for the product (Product → Share / Checkout Links)
-   → this URL is `NEXT_PUBLIC_CHECKOUT_URL`.
-5. Set the checkout's **Success URL** to `https://budgetr.dev/thanks` so buyers
-   land on our page (which mirrors the DMG download + setup steps). Polar appends
-   `?checkout_id=…` to it; the page ignores it.
-6. The DMG is delivered by public GitHub Release, so no file upload is needed —
-   but you can also add a **File Download** benefit or a note linking the DMG in
-   Polar's order confirmation email.
-7. Go **live**: create a **production** organization/token (Polar has separate
-   sandbox and production environments — sandbox checkout links only take test
-   cards).
+1. Create a **product** at <https://whop.com> for the lifetime license (match
+   `NEXT_PUBLIC_PRICE`, e.g. $29 one-time).
+2. Create a **checkout link** for the product → this URL is
+   `NEXT_PUBLIC_CHECKOUT_URL` (also baked into `lib/site.ts` for DMG builds).
+3. Set the checkout's **post-purchase redirect** to the latest GitHub Release
+   DMG (`https://github.com/kGeee/budgetr/releases/latest/download/budgetr-mac.dmg`)
+   so buyers land on the download immediately after paying.
+4. Optionally keep `/thanks` as a secondary landing page — it mirrors the DMG
+   download + setup steps for anyone who bookmarks it.
 
-**The webhook is required** — it's what turns an order into a working license.
-Point Polar at `/api/license/webhook` (`app/api/license/webhook/route.ts`). Polar
-signs with the **Standard Webhooks** spec (HMAC over the raw body); the route
-verifies it, then on a paid order mints a perpetual Ed25519 license keyed to the
-order id (so retries re-mint the same key) and emails it via Resend.
+The DMG for the free trial is always served from public GitHub Releases; Whop
+handles paid checkout only.
+
+**License key delivery (webhook)** — if you mint Ed25519 keys server-side, point
+your checkout provider's webhook at `/api/license/webhook`
+(`app/api/license/webhook/route.ts`). The route verifies the signature, then on
+a paid order mints a perpetual Ed25519 license keyed to the order id (so retries
+re-mint the same key) and emails it via Resend.
 
 It needs three env vars, **on the checkout deployment only**:
 
 | Var | Purpose |
 | --- | --- |
-| `POLAR_WEBHOOK_SECRET` | verifies the Standard Webhooks signature |
+| `POLAR_WEBHOOK_SECRET` | verifies the Standard Webhooks signature (legacy Polar integration) |
 | `LICENSE_SIGNING_KEY` | the PEM private key that signs licenses |
 | `RESEND_API_KEY` | delivers the key to the buyer |
 
@@ -130,7 +122,7 @@ CLI needed.
    | `MARKETING_ONLY` | `1` |
    | `NEXT_PUBLIC_SITE_URL` | `https://budgetr.dev` |
    | `NEXT_PUBLIC_PRICE` | `$29` (optional) |
-   | `NEXT_PUBLIC_CHECKOUT_URL` | _(add once the Polar checkout link is live)_ |
+   | `NEXT_PUBLIC_CHECKOUT_URL` | `https://whop.com/checkout/ch_3Yc4SnEzTyrKeua/` |
 4. **Deploy.**
 5. **Domain** → Project → Settings → **Domains** → add `budgetr.dev` (and
    `www.budgetr.dev` → redirect to apex). Vercel shows the DNS records to set at
