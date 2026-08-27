@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import {
   LEARN_ARTICLES,
-  LEARN_PRODUCT_CLOSER,
   getLearnArticle,
   getLearnArticleIndex,
   getNextLearnArticle,
@@ -59,8 +58,11 @@ export default async function LearnArticlePage({ params }: { params: Promise<Par
       </h1>
 
       <div className="mt-10 space-y-5">
-        {article.paragraphs.map((paragraph) => (
-          <p key={paragraph} className="max-w-xl text-lg leading-relaxed text-[var(--paper)]/90">
+        {article.paragraphs.map((paragraph, i) => (
+          <p
+            key={`${slug}-${i}`}
+            className="max-w-xl text-lg leading-relaxed text-[var(--paper)]/90"
+          >
             {paragraph}
           </p>
         ))}
@@ -69,18 +71,20 @@ export default async function LearnArticlePage({ params }: { params: Promise<Par
       {isLast ? (
         <section className="mt-16 border-t border-line pt-10">
           <h2 className="display-2 font-display text-2xl text-[var(--paper)] sm:text-3xl">
-            {LEARN_PRODUCT_CLOSER.title}
+            Do this on your Mac.
           </h2>
-          <p className="mt-4 max-w-md text-[var(--muted)]">{LEARN_PRODUCT_CLOSER.body}</p>
+          <p className="mt-4 max-w-md text-[var(--muted)]">
+            Your ledger is a SQLite file on this Mac. budgetr does not have a copy.
+          </p>
           <p className="mt-6">
             <Link
               href={DEMO_HREF}
               className="inline-flex items-center gap-1.5 font-medium text-[var(--brass)] underline decoration-[var(--brass-dim)] underline-offset-4 transition hover:decoration-[var(--brass)]"
             >
-              {LEARN_PRODUCT_CLOSER.demoLabel}
+              Try the live demo (sample data)
               <ArrowRight size={15} />
             </Link>
-            <span className="text-[var(--faint)]"> · </span>
+            <span className="text-[var(--faint)]">: </span>
             <Link
               href={DEMO_HREF}
               className="font-medium text-[var(--brass)] underline decoration-[var(--brass-dim)] underline-offset-4 transition hover:decoration-[var(--brass)]"
