@@ -28,7 +28,7 @@ export const TRIAL_DAYS = 14;
  * This pointed at /pricing, which was harmless while that page's CTA was "Buy".
  * Now that every marketing surface hands over the download instead, bouncing
  * the gate through /pricing would offer a fresh download to someone who already
- * has the app open. Resolves to Polar when checkout is configured, and falls
+ * has the app open. Resolves to Whop when checkout is configured, and falls
  * back to /pricing when it isn't, so the button is never dead.
  */
 export const LICENSE_BUY_URL = checkoutHref();

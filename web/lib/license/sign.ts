@@ -4,7 +4,7 @@
  *
  * The key comes from the LICENSE_SIGNING_KEY env var (the PEM contents of
  * scripts/license/signing-key.private.pem). Set it ONLY on the marketing/checkout
- * deployment that runs the Polar webhook — never on a self-hosted app, or anyone
+ * deployment that runs the checkout webhook — never on a self-hosted app, or anyone
  * with that env could mint their own licenses. Server-only.
  */
 

@@ -1,8 +1,8 @@
 /**
  * Public marketing-site config. Purchase + download are driven by env so the
- * same build works before and after the Polar product exists:
+ * same build works before and after the Whop product exists:
  *
- *   NEXT_PUBLIC_CHECKOUT_URL  — Polar hosted checkout link. Overrides the
+ *   NEXT_PUBLIC_CHECKOUT_URL  — Whop hosted checkout link. Overrides the
  *                               CHECKOUT_URL constant below when non-empty.
  *                               (Self-hosters remove licensing altogether with
  *                               BUDGETR_LICENSE_DISABLED=1, not by blanking
@@ -16,7 +16,7 @@
 const repo = "https://github.com/kGeee/budgetr";
 
 /**
- * The Polar checkout, baked in rather than read from env alone.
+ * The Whop checkout, baked in rather than read from env alone.
  *
  * NEXT_PUBLIC_* is inlined at build time, and the DMG is built by GitHub
  * Actions — which never had this variable set. So a desktop build could not
@@ -29,7 +29,7 @@ const repo = "https://github.com/kGeee/budgetr";
  * which are hardcoded for exactly the same reason. Env still overrides for
  * self-hosters and for rotating the link without a code change.
  */
-const CHECKOUT_URL = "https://polar.sh/checkout/polar_c_gKxB7i65pQyxZnJCMXElfVK0HIq2ua6b4Yb1q2ryyoI";
+const CHECKOUT_URL = "https://whop.com/checkout/ch_3Yc4SnEzTyrKeua/";
 
 export const SITE = {
   name: "budgetr",
@@ -69,7 +69,7 @@ export function downloadHref(): string {
 /**
  * Where the primary marketing CTA points: always the download.
  *
- * It used to jump straight to Polar whenever checkout was configured, which
+ * It used to jump straight to checkout whenever checkout was configured, which
  * asked a stranger to pay $29 for a finance app they had not yet run. The funnel
  * is now download → 14-day trial → the in-app licence gate, so the money is
  * asked for once the app has had a chance to earn it. Buying is still one click

@@ -3,8 +3,7 @@
  * dependency surface and the marketing/webhook deploy lean). Configure with:
  *   RESEND_API_KEY     — Resend API key (server env only)
  *   LICENSE_FROM_EMAIL — verified sender, e.g. "budgetr <license@budgetr.dev>"
- * Returns a result rather than throwing so the webhook can decide whether to ask
- * Polar to retry.
+ * Returns a result rather than throwing so the webhook can decide whether to retry.
  */
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";

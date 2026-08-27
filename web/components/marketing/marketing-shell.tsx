@@ -60,7 +60,7 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
 /**
  * The primary marketing CTA: download the app.
  *
- * This used to read "Buy · $29" and open Polar, which asked for money before the
+ * This used to read "Buy · $29" and open checkout, which asked for money before the
  * visitor had seen the app run on their own data. Every marketing surface now
  * hands over the build; the purchase is asked for by the in-app licence gate
  * when the 14-day trial ends. External link (GitHub Releases) so it downloads

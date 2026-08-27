@@ -46,6 +46,12 @@ describe("verifyPolarWebhook", () => {
     expect(verifyPolarWebhook(body, headers, "whsec_" + Buffer.from("nope").toString("base64")).ok).toBe(false);
   });
 
+  it("accepts a Whop ws_ secret as UTF-8 (not base64-decoded)", () => {
+    const whopSecret = "ws_" + "a".repeat(64);
+    const headers = { id: "msg_1", timestamp: TS, signature: sign(whopSecret, "msg_1", TS, body, true) };
+    expect(verifyPolarWebhook(body, headers, whopSecret).ok).toBe(true);
+  });
+
   it("rejects missing headers with a reason", () => {
     const r = verifyPolarWebhook(body, { id: null, timestamp: TS, signature: "v1,x" }, SECRET);
     expect(r.ok).toBe(false);
