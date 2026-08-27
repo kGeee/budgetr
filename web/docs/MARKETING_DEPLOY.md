@@ -82,23 +82,29 @@ them you must redeploy (a rebuild), not just restart.
    so buyers land on the download immediately after paying.
 4. Optionally keep `/thanks` as a secondary landing page — it mirrors the DMG
    download + setup steps for anyone who bookmarks it.
+5. In Whop **Developer → Webhooks**, point at
+   `https://budgetr.dev/api/license/webhook`, enable `payment.succeeded`, and
+   copy the signing secret into `WHOP_WEBHOOK_SECRET`.
 
 The DMG for the free trial is always served from public GitHub Releases; Whop
 handles paid checkout only.
 
-**License key delivery (webhook)** — if you mint Ed25519 keys server-side, point
-your checkout provider's webhook at `/api/license/webhook`
-(`app/api/license/webhook/route.ts`). The route verifies the signature, then on
-a paid order mints a perpetual Ed25519 license keyed to the order id (so retries
+**License key delivery (webhook)** — point Whop at `/api/license/webhook`
+(`app/api/license/webhook/route.ts`) and subscribe to `payment.succeeded`. Whop
+signs with the **Standard Webhooks** spec (same as Polar); the route verifies it,
+then mints a perpetual Ed25519 license keyed to the payment id (so retries
 re-mint the same key) and emails it via Resend.
 
-It needs three env vars, **on the checkout deployment only**:
+It needs these env vars, **on the checkout deployment only**:
 
 | Var | Purpose |
 | --- | --- |
-| `POLAR_WEBHOOK_SECRET` | verifies the Standard Webhooks signature (legacy Polar integration) |
+| `WHOP_WEBHOOK_SECRET` | verifies Whop webhook signatures (`ws_…`) |
 | `LICENSE_SIGNING_KEY` | the PEM private key that signs licenses |
 | `RESEND_API_KEY` | delivers the key to the buyer |
+
+`POLAR_WEBHOOK_SECRET` is still accepted for legacy Polar orders but is not
+required once checkout is on Whop.
 
 Never set these on a self-hosted install — anyone holding `LICENSE_SIGNING_KEY`
 can mint their own licenses. With them unset the route no-ops with a 503, so it's

@@ -1,24 +1,31 @@
 import { NextResponse } from "next/server";
-import { verifyPolarWebhook } from "@/lib/license/webhook";
-import { isMintingConfigured, mintLicenseKey } from "@/lib/license/sign";
-import { isEmailConfigured, sendLicenseEmail } from "@/lib/license/email";
+import { deliverLicense } from "@/lib/license/deliver";
+import { verifyStandardWebhook } from "@/lib/license/webhook";
 
 /**
- * Polar checkout webhook → mint + email an Ed25519 license key.
+ * Checkout webhooks → mint + email an Ed25519 license key.
  *
- * Wired to the vendor's checkout deployment only (needs POLAR_WEBHOOK_SECRET +
- * LICENSE_SIGNING_KEY + RESEND_API_KEY). On a self-hosted install these are unset
- * and the route no-ops with 503, so it's inert there and never exposes the key.
+ * Handles both:
+ *  - Whop `payment.succeeded` (current checkout at whop.com)
+ *  - Polar `order.paid` / `order.created` / `order.updated` (legacy orders)
  *
- * Flow: verify the Standard Webhooks signature → on a paid order, derive the
- * buyer email + order id, mint a perpetual license (id derived from the order so
- * retries re-mint the same key), and email it via Resend.
+ * Wired to the vendor's checkout deployment only (needs WHOP_WEBHOOK_SECRET or
+ * POLAR_WEBHOOK_SECRET + LICENSE_SIGNING_KEY + RESEND_API_KEY). On a self-hosted
+ * install these are unset and the route no-ops with 503.
  */
-export const runtime = "nodejs"; // node:crypto for signature verification
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const WHOP_DELIVER_ON = new Set(["payment.succeeded"]);
+const POLAR_DELIVER_ON = new Set(["order.paid", "order.created", "order.updated"]);
+
+function webhookHeaders(req: Request) {
+  const h = (name: string) => req.headers.get(`webhook-${name}`) ?? req.headers.get(`svix-${name}`);
+  return { id: h("id"), timestamp: h("timestamp"), signature: h("signature") };
+}
+
 // Polar order shapes vary slightly by event; pull the email/id defensively.
-function extractOrder(data: Record<string, unknown>): { email?: string; orderId?: string; paid: boolean } {
+function extractPolarOrder(data: Record<string, unknown>): { email?: string; orderId?: string; paid: boolean } {
   const customer = (data.customer ?? {}) as Record<string, unknown>;
   const email =
     (customer.email as string) ??
@@ -26,29 +33,23 @@ function extractOrder(data: Record<string, unknown>): { email?: string; orderId?
     ((data.user as Record<string, unknown>)?.email as string) ??
     undefined;
   const orderId = (data.id as string) ?? (data.order_id as string) ?? undefined;
-  // order.paid implies paid; for order.created/updated, gate on status.
   const status = data.status as string | undefined;
   const paid = status == null || status === "paid" || status === "succeeded";
   return { email, orderId, paid };
 }
 
+function extractWhopPayment(data: Record<string, unknown>): { email?: string; orderId?: string; paid: boolean } {
+  const user = (data.user ?? {}) as Record<string, unknown>;
+  const email = user.email as string | undefined;
+  const orderId = (data.id as string) ?? undefined;
+  const status = data.status as string | undefined;
+  const paid = status == null || status === "succeeded";
+  return { email, orderId, paid };
+}
+
 export async function POST(req: Request) {
   const raw = await req.text();
-
-  const secret = process.env.POLAR_WEBHOOK_SECRET?.trim();
-  if (!secret) {
-    // Not the checkout deployment — nothing to do.
-    return NextResponse.json({ error: "webhook not configured" }, { status: 503 });
-  }
-
-  // Standard Webhooks uses `webhook-*`; fall back to `svix-*` (the underlying
-  // library still emits those) so a header-naming quirk can't cause a 401.
-  const h = (name: string) => req.headers.get(`webhook-${name}`) ?? req.headers.get(`svix-${name}`);
-  const verdict = verifyPolarWebhook(raw, { id: h("id"), timestamp: h("timestamp"), signature: h("signature") }, secret);
-  if (!verdict.ok) {
-    console.error(`[license webhook] rejected: ${verdict.reason}`);
-    return NextResponse.json({ error: verdict.reason }, { status: 401 });
-  }
+  const headers = webhookHeaders(req);
 
   let event: { type?: string; data?: Record<string, unknown> };
   try {
@@ -57,31 +58,38 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid payload" }, { status: 400 });
   }
 
-  // Deliver on a completed one-time purchase.
-  const DELIVER_ON = new Set(["order.paid", "order.created", "order.updated"]);
-  if (!event.type || !DELIVER_ON.has(event.type)) {
-    return NextResponse.json({ ok: true, ignored: event.type ?? null });
+  const type = event.type ?? "";
+  const isWhop = WHOP_DELIVER_ON.has(type);
+  const isPolar = POLAR_DELIVER_ON.has(type);
+
+  if (!isWhop && !isPolar) {
+    return NextResponse.json({ ok: true, ignored: type || null });
   }
 
-  const { email, orderId, paid } = extractOrder(event.data ?? {});
+  const secret = (
+    isWhop ? process.env.WHOP_WEBHOOK_SECRET : process.env.POLAR_WEBHOOK_SECRET
+  )?.trim();
+
+  if (!secret) {
+    return NextResponse.json({ error: "webhook not configured" }, { status: 503 });
+  }
+
+  const verdict = verifyStandardWebhook(raw, headers, secret);
+  if (!verdict.ok) {
+    console.error(`[license webhook] rejected (${isWhop ? "whop" : "polar"}): ${verdict.reason}`);
+    return NextResponse.json({ error: verdict.reason }, { status: 401 });
+  }
+
+  const { email, orderId, paid } = isWhop
+    ? extractWhopPayment(event.data ?? {})
+    : extractPolarOrder(event.data ?? {});
+
   if (!paid) return NextResponse.json({ ok: true, ignored: "unpaid" });
   if (!email) return NextResponse.json({ error: "no buyer email in event" }, { status: 422 });
-  if (!isMintingConfigured() || !isEmailConfigured()) {
-    return NextResponse.json({ error: "minting/email not configured" }, { status: 503 });
-  }
 
-  try {
-    const key = mintLicenseKey({ email, orderId, edition: "personal", days: null });
-    const sent = await sendLicenseEmail({ to: email, key });
-    if (!sent.ok) {
-      // 500 → Polar retries later (the derived key is stable, so it's safe).
-      return NextResponse.json({ error: `email failed: ${sent.error}` }, { status: 500 });
-    }
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "delivery failed" },
-      { status: 500 },
-    );
+  const result = await deliverLicense({ email, orderId });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
   return NextResponse.json({ ok: true, delivered: email });
