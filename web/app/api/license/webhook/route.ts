@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { deliverLicense } from "@/lib/license/deliver";
 import { verifyStandardWebhook } from "@/lib/license/webhook";
+import { parseWhopPayment } from "@/lib/license/whop-payment";
 
 /**
  * Checkout webhooks → mint + email an Ed25519 license key.
@@ -38,15 +39,6 @@ function extractPolarOrder(data: Record<string, unknown>): { email?: string; ord
   return { email, orderId, paid };
 }
 
-function extractWhopPayment(data: Record<string, unknown>): { email?: string; orderId?: string; paid: boolean } {
-  const user = (data.user ?? {}) as Record<string, unknown>;
-  const email = user.email as string | undefined;
-  const orderId = (data.id as string) ?? undefined;
-  const status = data.status as string | undefined;
-  const paid = status == null || status === "succeeded";
-  return { email, orderId, paid };
-}
-
 export async function POST(req: Request) {
   const raw = await req.text();
   const headers = webhookHeaders(req);
@@ -81,10 +73,18 @@ export async function POST(req: Request) {
   }
 
   const { email, orderId, paid } = isWhop
-    ? extractWhopPayment(event.data ?? {})
+    ? (() => {
+        const whop = parseWhopPayment(event.data ?? {});
+        return { email: whop.email, orderId: whop.orderId, paid: whop.paid && whop.forBudgetr };
+      })()
     : extractPolarOrder(event.data ?? {});
 
-  if (!paid) return NextResponse.json({ ok: true, ignored: "unpaid" });
+  if (!paid) {
+    return NextResponse.json({
+      ok: true,
+      ignored: isWhop ? "unpaid-or-not-budgetr" : "unpaid",
+    });
+  }
   if (!email) return NextResponse.json({ error: "no buyer email in event" }, { status: 422 });
 
   const result = await deliverLicense({ email, orderId });

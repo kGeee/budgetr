@@ -73,27 +73,38 @@ them you must redeploy (a rebuild), not just restart.
 
 ## Part A — Whop
 
-1. Create a **product** at <https://whop.com> for the lifetime license (match
-   `NEXT_PUBLIC_PRICE`, e.g. $29 one-time).
-2. Create a **checkout link** for the product → this URL is
-   `NEXT_PUBLIC_CHECKOUT_URL` (also baked into `lib/site.ts` for DMG builds).
-3. Set the checkout's **post-purchase redirect** to the latest GitHub Release
+budgetr's Whop listing (production):
+
+| Resource | ID |
+| --- | --- |
+| Company | `biz_MtlMZvFT8t41Sk` |
+| Product | `prod_KsEESYFxS0cQW` |
+| Plan | `plan_DZoy04FGD4McW` |
+| Checkout link | `https://whop.com/checkout/ch_3Yc4SnEzTyrKeua/` |
+
+1. The **checkout link** above is `NEXT_PUBLIC_CHECKOUT_URL` (also baked into
+   `lib/site.ts` for DMG builds).
+2. Set the checkout's **post-purchase redirect** to the latest GitHub Release
    DMG (`https://github.com/kGeee/budgetr/releases/latest/download/budgetr-mac.dmg`)
    so buyers land on the download immediately after paying.
-4. Optionally keep `/thanks` as a secondary landing page — it mirrors the DMG
+3. Optionally keep `/thanks` as a secondary landing page — it mirrors the DMG
    download + setup steps for anyone who bookmarks it.
-5. In Whop **Developer → Webhooks**, point at
-   `https://budgetr.dev/api/license/webhook`, enable `payment.succeeded`, and
-   copy the signing secret into `WHOP_WEBHOOK_SECRET`.
+4. **License delivery (required)** — in Whop **Developer → Webhooks**:
+   - **URL:** `https://budgetr.dev/api/license/webhook`
+   - **Event:** `payment.succeeded`
+   - Copy the signing secret (`ws_…`) into Vercel as **`WHOP_WEBHOOK_SECRET`**
+     on the marketing/checkout project (alongside **`LICENSE_SIGNING_KEY`** and
+     **`RESEND_API_KEY`**). Do not strip the `ws_` prefix or base64-encode it.
 
 The DMG for the free trial is always served from public GitHub Releases; Whop
 handles paid checkout only.
 
-**License key delivery (webhook)** — point Whop at `/api/license/webhook`
-(`app/api/license/webhook/route.ts`) and subscribe to `payment.succeeded`. Whop
-signs with the **Standard Webhooks** spec (same as Polar); the route verifies it,
-then mints a perpetual Ed25519 license keyed to the payment id (so retries
-re-mint the same key) and emails it via Resend.
+When Whop posts `payment.succeeded`, `/api/license/webhook`
+(`app/api/license/webhook/route.ts`) verifies the Standard Webhooks signature,
+ignores non-budgetr product/plan ids when present, mints a perpetual Ed25519
+license keyed to the Whop payment id (`pay_…` → same key on retry), and emails
+it via Resend. The Mac app verifies that key offline — no Whop-native license
+keys.
 
 It needs these env vars, **on the checkout deployment only**:
 
@@ -103,8 +114,9 @@ It needs these env vars, **on the checkout deployment only**:
 | `LICENSE_SIGNING_KEY` | the PEM private key that signs licenses |
 | `RESEND_API_KEY` | delivers the key to the buyer |
 
-`POLAR_WEBHOOK_SECRET` is still accepted for legacy Polar orders but is not
-required once checkout is on Whop.
+With **`WHOP_WEBHOOK_SECRET`** unset the Whop branch of the route no-ops with
+**503** (same pattern as Polar). **`POLAR_WEBHOOK_SECRET`** is still accepted
+for legacy Polar orders but is not required once checkout is on Whop.
 
 Never set these on a self-hosted install — anyone holding `LICENSE_SIGNING_KEY`
 can mint their own licenses. With them unset the route no-ops with a 503, so it's
@@ -122,13 +134,19 @@ CLI needed.
 1. <https://vercel.com/new> → **Import** `kGeee/budgetr`.
 2. **Root Directory → `web`** (that's where `package.json` / `next.config.ts`
    live). Framework auto-detects as **Next.js**.
-3. **Environment Variables** (add to Production + Preview):
+3. **Environment Variables** (add to Production on the **marketing/checkout**
+   Vercel project — server-only secrets must never ship on user installs):
    | Name | Value |
    | --- | --- |
    | `MARKETING_ONLY` | `1` |
    | `NEXT_PUBLIC_SITE_URL` | `https://budgetr.dev` |
    | `NEXT_PUBLIC_PRICE` | `$29` (optional) |
    | `NEXT_PUBLIC_CHECKOUT_URL` | `https://whop.com/checkout/ch_3Yc4SnEzTyrKeua/` |
+   | `WHOP_WEBHOOK_SECRET` | `ws_…` from Whop Developer → Webhooks |
+   | `LICENSE_SIGNING_KEY` | PEM of `scripts/license/signing-key.private.pem` |
+   | `RESEND_API_KEY` | Resend API key |
+   | `LICENSE_FROM_EMAIL` | `budgetr <license@budgetr.dev>` (optional) |
+   | `POLAR_WEBHOOK_SECRET` | optional — legacy Polar orders only |
 4. **Deploy.**
 5. **Domain** → Project → Settings → **Domains** → add `budgetr.dev` (and
    `www.budgetr.dev` → redirect to apex). Vercel shows the DNS records to set at
