@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Hanken_Grotesk, Spline_Sans_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import { THEME_SCRIPT } from "@/lib/theme";
 import { SITE } from "@/lib/site";
 import "./globals.css";
@@ -88,6 +89,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             wrong palette; the toggle keeps the cookie + <html> attribute in sync. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         {children}
+        <Analytics />
       </body>
     </html>
   );
