@@ -43,21 +43,18 @@ export default async function LearnGuidePage({ params }: { params: Promise<Param
         {guide.hook}
       </h1>
 
-      <p className="mt-10 font-display text-3xl tracking-tight text-[var(--brass)] sm:text-4xl">
+      <p className="mt-8 font-display text-2xl tracking-tight text-[var(--brass)] sm:text-3xl">
         {guide.gold}
       </p>
       {guide.goldNote ? (
         <p className="mt-3 text-sm text-[var(--muted)]">{guide.goldNote}</p>
       ) : null}
 
-      <div className="mt-14 space-y-8">
-        {guide.teach.map((line) => (
-          <h2
-            key={line}
-            className="display-2 font-display text-2xl tracking-tight text-[var(--paper)] sm:text-3xl"
-          >
-            {line}
-          </h2>
+      <div className="mt-10 space-y-5">
+        {guide.teach.map((paragraph) => (
+          <p key={paragraph} className="max-w-xl text-lg leading-relaxed text-[var(--paper)]/90">
+            {paragraph}
+          </p>
         ))}
       </div>
 
