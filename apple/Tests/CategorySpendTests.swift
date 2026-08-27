@@ -42,7 +42,7 @@ final class CategorySpendTests: XCTestCase {
             month: "2026-08",
             plaidPrimaryToCategoryId: [:]
         )
-        XCTAssertEqual(totals["__none__"], 100, accuracy: 0.001)
+        XCTAssertEqual(CategorySpend.spent(for: "__none__", in: totals), 100, accuracy: 0.001)
     }
 
     func testBudgetsAndCategoriesWouldAgree() {
