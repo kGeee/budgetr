@@ -11,10 +11,10 @@ import { SITE } from "@/lib/site";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.siteUrl),
-  title: "budgetr — private personal finance for macOS",
+  title: "budgetr — Private personal finance for Apple Silicon",
   description: SITE.description,
   openGraph: {
-    title: "budgetr — private personal finance for macOS",
+    title: SITE.tagline,
     description: SITE.description,
     url: SITE.siteUrl,
     siteName: "budgetr",
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "budgetr — private personal finance for macOS",
+    title: SITE.tagline,
     description: SITE.description,
   },
 };

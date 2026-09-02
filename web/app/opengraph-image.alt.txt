@@ -1,1 +1,1 @@
-budgetr — your whole financial life, private and on your Mac. Net worth, spending, investments and options, read-only and stored on your own machine.
+budgetr — Your ledger is a SQLite file on this Mac. Net worth, spending, and investments live in a local database. No budgetr account. No budgetr server for your finances.
