@@ -9,7 +9,7 @@
 // writable per-user directory rather than the read-only app bundle, and (2)
 // migrations run on launch so a fresh install comes up with the right schema.
 
-const { app, BrowserWindow, dialog, shell, Menu, nativeTheme, session } = require("electron");
+const { app, BrowserWindow, dialog, shell, Menu, nativeTheme, session, ipcMain } = require("electron");
 const path = require("node:path");
 const net = require("node:net");
 const fs = require("node:fs");
@@ -17,6 +17,10 @@ const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 
 const HOST = "127.0.0.1";
+const IS_MAC = process.platform === "darwin";
+const IS_WIN = process.platform === "win32";
+/** Marker written after the Windows first-run privacy gate is completed. */
+const PRIVACY_GATE_MARKER = "privacy-gate-done";
 // Allow pointing the shell at an already-running server (e.g. your own
 // `next dev`) instead of having Electron spawn one.
 const EXTERNAL_URL = process.env.ELECTRON_START_URL || null;
@@ -95,6 +99,26 @@ function userEnvPath() {
   return path.join(app.getPath("userData"), "budgetr.env");
 }
 
+function privacyGateMarkerPath() {
+  return path.join(app.getPath("userData"), PRIVACY_GATE_MARKER);
+}
+
+/** Packaged Windows only — Mac keeps its existing Gatekeeper/notarization path. */
+function isPrivacyGatePending() {
+  if (!app.isPackaged || !IS_WIN) return false;
+  return !fs.existsSync(privacyGateMarkerPath());
+}
+
+function markPrivacyGateComplete() {
+  const dir = app.getPath("userData");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    privacyGateMarkerPath(),
+    `completed ${new Date().toISOString()}\n`,
+    "utf8",
+  );
+}
+
 function loadUserEnv() {
   const envPath = userEnvPath();
   if (!fs.existsSync(envPath)) {
@@ -158,6 +182,10 @@ function startServer(dbPath, port) {
   if (app.isPackaged) {
     env.ELECTRON_RUN_AS_NODE = "1";
     env.DATABASE_PATH = dbPath;
+    // Lets the Next server know it's behind the desktop shell (privacy gate,
+    // resolved userData path for the Windows first-run screens).
+    env.BUDGETR_DESKTOP = "1";
+    env.BUDGETR_USER_DATA = app.getPath("userData");
   }
 
   // Stream the server's output to a log file so a startup failure is
@@ -289,14 +317,21 @@ function createWindow() {
     // Match the app canvas (--ink) so there's no white flash before paint. The
     // saved theme is applied a moment later once the cookie is read (below).
     backgroundColor: "#080b0a",
-    // "Frameless" but still usable: drops the title bar, keeps the macOS
-    // traffic-light controls inset over the content.
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    // macOS: frameless with inset traffic lights. Windows/Linux: native frame
+    // so min/max/close and dragging work without a custom title bar.
+    ...(IS_MAC
+      ? {
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {
+          autoHideMenuBar: true,
+        }),
     show: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
@@ -321,28 +356,27 @@ function createWindow() {
     });
   }
 
-  // The window is frameless (titleBarStyle: hiddenInset) with no title bar to
-  // grab, so out of the box you can't move it and the macOS traffic lights sit
-  // on top of the sidebar. Inject desktop-only CSS (never shipped to the web
-  // app) to (1) make the top header a drag handle while keeping its controls
-  // clickable, and (2) push the sidebar's contents below the traffic lights.
-  // Re-injected on every load since a full navigation clears inserted CSS.
-  mainWindow.webContents.on("did-finish-load", () => {
-    mainWindow.webContents
-      .insertCSS(
-        // Scoped to the layout's own top bar / sidebar (body > div > …) so it
-        // never hits nested <header>/<aside> in drawers like transaction-detail.
-        `
-        body > div > div > header { -webkit-app-region: drag; }
-        body > div > div > header button, body > div > div > header a,
-        body > div > div > header input, body > div > div > header select,
-        body > div > div > header label,
-        body > div > div > header [role="button"] { -webkit-app-region: no-drag; }
-        body > div > aside > div { padding-top: 44px; }
-        `,
-      )
-      .catch(() => {});
-  });
+  // macOS-only: the window is frameless (titleBarStyle: hiddenInset) with no
+  // title bar to grab, so we inject desktop-only CSS to make the header a drag
+  // handle and clear the traffic lights. Windows uses a native frame instead.
+  if (IS_MAC) {
+    mainWindow.webContents.on("did-finish-load", () => {
+      mainWindow.webContents
+        .insertCSS(
+          // Scoped to the layout's own top bar / sidebar (body > div > …) so it
+          // never hits nested <header>/<aside> in drawers like transaction-detail.
+          `
+          body > div > div > header { -webkit-app-region: drag; }
+          body > div > div > header button, body > div > div > header a,
+          body > div > div > header input, body > div > div > header select,
+          body > div > div > header label,
+          body > div > div > header [role="button"] { -webkit-app-region: no-drag; }
+          body > div > aside > div { padding-top: 44px; }
+          `,
+        )
+        .catch(() => {});
+    });
+  }
 
   // Open target=_blank / external links in the system browser, not a new window.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -363,7 +397,7 @@ function createWindow() {
  */
 function buildMenu() {
   const template = [
-    ...(process.platform === "darwin"
+    ...(IS_MAC
       ? [
           {
             label: app.name,
@@ -424,8 +458,42 @@ function buildMenu() {
         },
       ],
     },
+    ...(!IS_MAC
+      ? [
+          {
+            label: "Help",
+            submenu: [
+              {
+                label: "Check for Updates…",
+                click: () => checkForUpdates({ manual: true }),
+              },
+            ],
+          },
+        ]
+      : []),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+let desktopIpcWired = false;
+
+function wireDesktopIpc() {
+  if (desktopIpcWired) return;
+  desktopIpcWired = true;
+  ipcMain.handle("desktop:get-user-data-path", () => app.getPath("userData"));
+  ipcMain.handle("desktop:open-data-folder", async () => {
+    // Open the folder itself (Explorer / Finder), matching the privacy-gate copy.
+    const dir = app.getPath("userData");
+    fs.mkdirSync(dir, { recursive: true });
+    await shell.openPath(dir);
+  });
+  ipcMain.handle("desktop:complete-privacy-gate", () => {
+    markPrivacyGateComplete();
+    return true;
+  });
+  ipcMain.handle("desktop:quit", () => {
+    app.quit();
+  });
 }
 
 // ── Auto-update ─────────────────────────────────────────────────────────────
@@ -536,6 +604,7 @@ async function boot() {
   const dbPath = databasePath();
 
   buildMenu();
+  wireDesktopIpc();
 
   if (app.isPackaged) {
     try {
@@ -570,7 +639,11 @@ async function boot() {
 
   try {
     await waitForServer(serverUrl);
-    if (mainWindow) await mainWindow.loadURL(serverUrl);
+    if (mainWindow) {
+      // Packaged Windows: land on the privacy gate before any app chrome.
+      const startPath = isPrivacyGatePending() ? "/desktop-setup" : "/";
+      await mainWindow.loadURL(`${serverUrl}${startPath}`);
+    }
     // Check for updates once the app has settled, then every 6 hours.
     if (app.isPackaged) {
       setTimeout(() => checkForUpdates(), 8000);

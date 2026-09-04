@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Sidebar, MobileNav } from "@/components/sidebar";
 import { SyncButton } from "@/components/sync-button";
 import { RegisterSW } from "@/components/register-sw";
@@ -12,6 +12,7 @@ import { TrialBanner } from "@/components/trial-banner";
 import { LicenseGate } from "@/components/license-gate";
 import { DownloadLink } from "@/components/marketing/marketing-shell";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
+import { isPrivacyGatePending } from "@/lib/desktop-privacy-gate";
 import { getEntitlement } from "@/lib/license";
 import { getFinnhubKey, getPlaidConfig, isDemoMode } from "@/lib/app-config";
 import { demoEnabled } from "@/lib/site";
@@ -39,6 +40,10 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  // Packaged Windows privacy gate — block all app chrome until the three
+  // first-run screens are completed (distinct from the skippable Plaid wizard).
+  if (isPrivacyGatePending()) redirect("/desktop-setup");
+
   // The read-only web demo (DEMO_DB) serves the real dashboard on the marketing
   // site backed by an in-memory demo DB. A marketing-only deploy WITHOUT the demo
   // still 404s the private dashboard before touching any DB.

@@ -16,7 +16,9 @@
     "test:watch": "vitest",
     "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts",
     "dev:electron": "npm run web:rebuild && electron desktop/electron/main.js",
-    "package": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run build:ocr && npm run electron:rebuild && CSC_IDENTITY_AUTO_DISCOVERY=${CSC_IDENTITY_AUTO_DISCOVERY:-false} electron-builder --mac --publish never",
+    "package": "npm run package:mac",
+    "package:mac": "npm run web:rebuild && next build --webpack && bash desktop/scripts/make-icns.sh && npm run build:ocr && npm run electron:rebuild && CSC_IDENTITY_AUTO_DISCOVERY=${CSC_IDENTITY_AUTO_DISCOVERY:-false} electron-builder --mac --publish never",
+    "package:win": "npm run web:rebuild && next build --webpack && node desktop/scripts/make-ico.mjs && npm run electron:rebuild && electron-builder --win --x64 --publish never",
     "electron:rebuild": "electron-rebuild -f -o better-sqlite3",
     "web:rebuild": "npm rebuild better-sqlite3",
     "db:generate": "drizzle-kit generate",
@@ -99,22 +101,47 @@
       "icon": "desktop/build/icon.icns",
       "artifactName": "budgetr-mac.${ext}",
       "hardenedRuntime": true,
-      "notarize": true
+      "notarize": true,
+      "extraResources": [
+        {
+          "from": "desktop/bin/receipt-ocr",
+          "to": "receipt-ocr"
+        }
+      ]
     },
     "dmg": {
       "title": "budgetr",
       "artifactName": "budgetr-mac.${ext}"
     },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "desktop/build/icon.ico",
+      "artifactName": "budgetr-win.${ext}",
+      "signingHashAlgorithms": [
+        "sha256"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "budgetr",
+      "artifactName": "budgetr-win.${ext}"
+    },
     "publish": {
       "provider": "github",
       "owner": "kGeee",
       "repo": "budgetr"
-    },
-    "extraResources": [
-      {
-        "from": "desktop/bin/receipt-ocr",
-        "to": "receipt-ocr"
-      }
-    ]
+    }
   }
 }

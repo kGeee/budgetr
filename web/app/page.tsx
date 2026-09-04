@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { MarketingShell } from "@/components/marketing/marketing-shell";
 import { MarketingLanding } from "@/components/marketing/landing";
+import { isPrivacyGatePending } from "@/lib/desktop-privacy-gate";
 import { SITE } from "@/lib/site";
 
 // The root "/" is claimed by two deployments of one codebase: the public
@@ -28,6 +29,9 @@ export const metadata: Metadata = {
 };
 
 export default function RootPage() {
+  // Packaged Windows: hard privacy gate before any app chrome (including the
+  // skippable Plaid onboarding wizard).
+  if (isPrivacyGatePending()) redirect("/desktop-setup");
   if (!process.env.MARKETING_ONLY) redirect("/overview");
   return (
     <MarketingShell>

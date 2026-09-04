@@ -1,5 +1,6 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { RegisterSW } from "@/components/register-sw";
+import { isPrivacyGatePending } from "@/lib/desktop-privacy-gate";
 
 // First-run onboarding gets its own bare shell — no sidebar, no dashboard
 // header. It's a private feature (touches the local DB) so it stays out of the
@@ -9,6 +10,9 @@ import { RegisterSW } from "@/components/register-sw";
 export const dynamic = "force-dynamic";
 
 export default function OnboardingLayout({ children }: { children: React.ReactNode }) {
+  // Privacy gate runs before the skippable Plaid wizard.
+  if (isPrivacyGatePending()) redirect("/desktop-setup");
+
   // On a marketing-only deployment (MARKETING_ONLY set), the private onboarding
   // flow isn't served — mirror the guard in app/(app)/layout.tsx.
   if (process.env.MARKETING_ONLY) notFound();

@@ -20,7 +20,20 @@ notarized, so it opens with a normal double-click — no Gatekeeper warning and 
 inside the app (or press `⌘,`), paste in your Plaid keys, and relaunch — see
 [Settings & where your data lives](#settings--where-your-data-lives).
 
-**Option 2 — run from source with one double-click (macOS / Linux).**
+**Option 2 — download the app (Windows, x64).**
+Grab `budgetr-win.exe` from the [latest release](../../releases/latest) and run
+it. The installer is per-user (no administrator prompt). On first launch,
+budgetr walks you through where-your-data-lives screens before the dashboard
+opens (local SQLite under `%APPDATA%\budgetr\`, bring-your-own Plaid keys,
+read-only — the app cannot move money). Your ledger and keys stay on this PC.
+
+> **First open — SmartScreen is expected.** The first Windows release artifacts
+> are intentionally unsigned. Windows may show a SmartScreen / “Windows
+> protected your PC” warning. That does **not** mean the download is broken —
+> choose **More info → Run anyway**. A signed Authenticode build can come later;
+> until then, this warning on first open is normal.
+
+**Option 3 — run from source with one double-click (macOS / Linux).**
 [Download this repo](../../archive/refs/heads/main.zip) (or `git clone` it),
 then double-click **`Start budgetr.command`** (macOS) or run `./start.sh`
 (Linux). The launcher takes care of everything — it even downloads its own
@@ -28,12 +41,12 @@ private copy of Node.js if your machine doesn't have one — then opens
 budgetr in your browser. Nothing is installed system-wide; delete the folder
 and it's gone.
 
-**Option 3 — Windows.** Install [Node.js LTS](https://nodejs.org), then
-double-click **`start.bat`**.
+**Option 4 — Windows from source (developers).** Install [Node.js LTS](https://nodejs.org), then
+double-click **`start.bat`**. Prefer Option 2 if you just want to use the app.
 
-**Option 4 — Docker / homelab.** See [`web/README.md`](web/README.md#docker-self-hosting).
+**Option 5 — Docker / homelab.** See [`web/README.md`](web/README.md#docker-self-hosting).
 
-**Option 5 — developers.**
+**Option 6 — developers.**
 
 ```bash
 cd web
@@ -56,7 +69,8 @@ API keys. Where it is depends on how you run budgetr:
 
 | How you run it | Settings file (API keys) | Your data (SQLite) |
 | --- | --- | --- |
-| **Desktop app (DMG)** | `~/Library/Application Support/budgetr/budgetr.env` — or just use **Settings → Open Settings File** (`⌘,`) in the app | same folder (`budgetr.db`); **Settings → Show Data Folder** |
+| **Desktop app (macOS DMG)** | `~/Library/Application Support/budgetr/budgetr.env` — or **Settings → Open Settings File** (`⌘,`) | same folder (`budgetr.db`); **Settings → Show Data Folder** |
+| **Desktop app (Windows installer)** | `%APPDATA%\budgetr\budgetr.env` — or **Settings → Open Settings File** (`Ctrl+,`) | same folder (`budgetr.db`); **Settings → Show Data Folder** |
 | **From source** (`Start budgetr.command`, `start.sh`, `start.bat`, `npm run dev`) | `web/.env.local` (created for you on first run) | `web/data/budgetr.db` |
 | **Docker** | `web/.env.local`, passed in via `env_file` | the `budgetr-data` volume |
 
