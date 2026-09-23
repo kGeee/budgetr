@@ -7,6 +7,8 @@ import SwiftUI
 /// mixed into the list. A bill whose predicted date has passed is the one thing
 /// on this screen that needs you, and the web app learned to say so.
 struct RecurringView: View {
+    @Environment(\.managedObjectContext) private var context
+
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "predictedNextDate", ascending: true)])
     private var streams: FetchedResults<CDRecurringStream>
 
@@ -26,7 +28,12 @@ struct RecurringView: View {
 
     var body: some View {
         ScrollView {
-            if streams.isEmpty {
+            if FirstRunImport.storeIsEmpty(context) {
+                EmptyStorePrompt(
+                    title: "No recurring streams",
+                    detail: "Import budgetr.db — recurring bills are detected during sync."
+                )
+            } else if streams.isEmpty {
                 ContentUnavailableView(
                     "No recurring streams",
                     systemImage: "arrow.trianglehead.2.clockwise",

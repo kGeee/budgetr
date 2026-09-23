@@ -29,7 +29,12 @@ struct ReviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if let txn = current {
+                if FirstRunImport.storeIsEmpty(context) {
+                    EmptyStorePrompt(
+                        title: "Nothing to review",
+                        detail: "Import budgetr.db to load transactions."
+                    )
+                } else if let txn = current {
                     Eyebrow("\(queue.count) left to review")
                     card(txn)
                 } else {
