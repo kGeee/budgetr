@@ -51,8 +51,8 @@ struct AppShell: View {
 private struct PhoneTabs: View {
     var body: some View {
         TabView {
-            tab(DashboardView(), "Overview", "square.grid.2x2")
-            tab(TransactionsView(), "Ledger", "arrow.left.arrow.right")
+            tab(DashboardView(), "Home", "square.grid.2x2")
+            tab(TransactionsView(), "Transactions", "arrow.left.arrow.right")
             tab(BudgetsView(), "Budgets", "wallet.bifold")
             tab(ReviewView(), "Review", "checkmark.circle")
             tab(MoreView(), "More", "ellipsis")
