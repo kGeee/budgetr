@@ -1,5 +1,5 @@
 import { PageHead } from "@/components/page-head";
-import { RulesManager } from "@/components/rules-manager";
+import { RulesManager } from "@/components/transactions/rules-manager";
 import { getAccounts, getCategories, getTagRules } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";

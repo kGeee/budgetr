@@ -3,12 +3,12 @@ import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { PageHead } from "@/components/page-head";
 import { CategoryChart, MonthlySpendChart } from "@/components/charts";
-import { TransactionsTable } from "@/components/transactions-table";
+import { TransactionsTable } from "@/components/transactions/transactions-table";
 import {
   MergeVendorButton,
   VendorGroupDetail,
   VendorMergeProvider,
-} from "@/components/vendor-merge-dialog";
+} from "@/components/transactions/vendor-merge-dialog";
 import { Card } from "@/components/ui/card";
 import {
   getCategories,

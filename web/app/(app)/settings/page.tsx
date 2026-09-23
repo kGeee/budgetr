@@ -9,7 +9,7 @@ import { ApiKeysForm } from "@/components/api-keys-form";
 import { CompanionCard } from "@/components/companion-card";
 import { ConnectionList } from "@/components/connection-status";
 import { getConnectionSummary } from "@/lib/connection-health";
-import { LicensePanel } from "@/components/license-panel";
+import { LicensePanel } from "@/components/license/license-panel";
 import { getSyncStatus } from "@/lib/companion/store";
 import { PendingSwitch } from "@/components/pending-toggle";
 import { getDisplayCurrencySetting, getPendingSummary } from "@/lib/queries";

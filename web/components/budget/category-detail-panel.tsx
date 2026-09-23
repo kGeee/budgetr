@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { X } from "lucide-react";
 import { MonthlySpendChart } from "@/components/charts";
-import { TransactionsTable } from "@/components/transactions-table";
+import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { getCategoryDetail } from "@/lib/actions";
 import type { CategoryDay, CategoryMonth, CategoryRow, TransactionRow } from "@/lib/queries";
 

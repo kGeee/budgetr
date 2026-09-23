@@ -1,5 +1,5 @@
 import { PageHead } from "@/components/page-head";
-import { SavingsGoals } from "@/components/savings-goals";
+import { SavingsGoals } from "@/components/budget/savings-goals";
 import { getSavingsGoals } from "@/lib/queries";
 import { formatCurrency } from "@/lib/utils";
 

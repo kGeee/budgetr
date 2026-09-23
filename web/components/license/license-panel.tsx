@@ -1,5 +1,5 @@
 import { BadgeCheck, Clock, ShieldAlert } from "lucide-react";
-import { LicenseForm, LicenseRemoveButton } from "@/components/license-form";
+import { LicenseForm, LicenseRemoveButton } from "@/components/license/license-form";
 import { LICENSE_BUY_URL, TRIAL_DAYS, type Entitlement } from "@/lib/license";
 
 /**

@@ -1,7 +1,7 @@
 import { PageHead } from "@/components/page-head";
-import { MatchesReview } from "@/components/matches-review";
-import { TransactionsTable } from "@/components/transactions-table";
-import { TransactionsFilterBar } from "@/components/transactions-filter-bar";
+import { MatchesReview } from "@/components/transactions/matches-review";
+import { TransactionsTable } from "@/components/transactions/transactions-table";
+import { TransactionsFilterBar } from "@/components/transactions/transactions-filter-bar";
 import {
   getAccounts,
   getCategories,

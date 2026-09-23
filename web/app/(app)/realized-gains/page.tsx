@@ -1,6 +1,6 @@
 import { PageHead } from "@/components/page-head";
 import { InvestmentsTabs } from "@/components/investments-tabs";
-import { RealizedGainsView } from "@/components/realized-gains-view";
+import { RealizedGainsView } from "@/components/portfolio/realized-gains-view";
 import {
   getCostBasisMethods,
   getInvestmentTransactions,

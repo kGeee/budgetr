@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Sparkles } from "lucide-react";
-import { CategoryIcon } from "@/components/category-pill";
-import { TransactionDetail } from "@/components/transaction-detail";
+import { CategoryIcon } from "@/components/budget/category-pill";
+import { TransactionDetail } from "@/components/transactions/transaction-detail";
 import { setReviewed, setTransactionCategory, suggestForTransaction } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 import type { CategoryRow, CategorySuggestion, TransactionRow } from "@/lib/queries";

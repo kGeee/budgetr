@@ -11,7 +11,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, TrendingUp, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { PayoffDiagram } from "@/components/payoff-diagram";
+import { PayoffDiagram } from "@/components/options/payoff-diagram";
 import { formatCurrency } from "@/lib/utils";
 import { formatOptionExpiry, formatStrike, parseOccSymbol } from "@/lib/options";
 import type { PutCandidate } from "@/lib/wheel-scanner";

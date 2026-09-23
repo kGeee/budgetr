@@ -1,5 +1,5 @@
 import { BrandMark } from "@/components/brand-mark";
-import { PlaidLink } from "@/components/plaid-link";
+import { PlaidLink } from "@/components/onboarding/plaid-link";
 import { DashboardView, type ResolvedWidget } from "@/components/dashboard-view";
 import { DataFreshnessBanner } from "@/components/data-freshness";
 import { getDataFreshness } from "@/lib/data-freshness";

@@ -15,7 +15,7 @@ import Link from "next/link";
 import { ArrowUpRight, Radar, LineChart, Activity, RotateCw } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { OptionsAnalytics } from "@/components/options/options-analytics";
-import { useLivePrices } from "@/components/live-prices";
+import { useLivePrices } from "@/components/portfolio/live-prices";
 import { formatCurrency } from "@/lib/utils";
 import {
   daysToExpiry,
@@ -28,7 +28,7 @@ import {
   type ParsedOption,
 } from "@/lib/options";
 import { CONTRACT_SIZE } from "@/lib/payoff";
-import type { HoldingRow } from "@/components/portfolio-view";
+import type { HoldingRow } from "@/components/portfolio/portfolio-view";
 import type { OptionQuote } from "@/lib/yahoo";
 
 type Leg = { h: HoldingRow; p: ParsedOption; contracts: number; dte: number };

@@ -1,5 +1,5 @@
 import { PageHead } from "@/components/page-head";
-import { OnboardingWizard } from "@/components/onboarding-wizard";
+import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { getFinnhubKey, getPlaidConfig } from "@/lib/app-config";
 import { hasPlaidCredentials } from "@/lib/plaid";
 import { getItems } from "@/lib/queries";

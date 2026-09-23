@@ -1,6 +1,6 @@
 import { PageHead } from "@/components/page-head";
 import { OptionsToolTabs } from "@/components/investments-tabs";
-import { WheelView } from "@/components/wheel-view";
+import { WheelView } from "@/components/options/wheel-view";
 import { buildWheelReport } from "@/lib/wheel";
 
 export const dynamic = "force-dynamic";

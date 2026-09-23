@@ -48,11 +48,11 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { IvSurface } from "@/components/iv-surface";
-import { OptionsAnalytics } from "@/components/options-analytics";
-import { StrategyBuilder } from "@/components/strategy-builder";
-import { useLivePrices } from "@/components/live-prices";
-import type { HoldingRow } from "@/components/portfolio-view";
+import { IvSurface } from "@/components/options/iv-surface";
+import { OptionsAnalytics } from "@/components/options/options-analytics";
+import { StrategyBuilder } from "@/components/options/strategy-builder";
+import { useLivePrices } from "@/components/portfolio/live-prices";
+import type { HoldingRow } from "@/components/portfolio/portfolio-view";
 import { formatCurrency } from "@/lib/utils";
 import {
   daysToExpiry,

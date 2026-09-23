@@ -1,7 +1,7 @@
 import { PageHead } from "@/components/page-head";
-import { CategoryManager } from "@/components/category-manager";
+import { CategoryManager } from "@/components/budget/category-manager";
 import { CategorySpendSummary } from "@/components/budget/category-spend-summary";
-import { CategoriesSpendChart } from "@/components/categories-spend-chart";
+import { CategoriesSpendChart } from "@/components/budget/categories-spend-chart";
 import { Card } from "@/components/ui/card";
 import {
   getArchivedCategories,

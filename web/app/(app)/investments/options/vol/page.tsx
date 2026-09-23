@@ -2,7 +2,7 @@ import { PageHead } from "@/components/page-head";
 import { Card } from "@/components/ui/card";
 import { OptionsToolTabs } from "@/components/investments-tabs";
 import { FundamentalsHandoff, TickerSwitcher } from "@/components/ticker-switcher";
-import { FixedStrikeVolView } from "@/components/fixed-strike-vol-view";
+import { FixedStrikeVolView } from "@/components/options/fixed-strike-vol-view";
 import { getCboeOptionChain } from "@/lib/cboe";
 import { getOptionChain } from "@/lib/yahoo";
 import { getQuotes } from "@/lib/finnhub";

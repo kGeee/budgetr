@@ -3,8 +3,8 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Paperclip, Split } from "lucide-react";
-import { CategoryPill } from "@/components/category-pill";
-import { TransactionDetail } from "@/components/transaction-detail";
+import { CategoryPill } from "@/components/budget/category-pill";
+import { TransactionDetail } from "@/components/transactions/transaction-detail";
 import { setReviewed } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 import type { CategoryRow, TransactionRow } from "@/lib/queries";

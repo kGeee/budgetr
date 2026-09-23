@@ -6,8 +6,8 @@ import { ArrowDownRight, ArrowUpRight, CalendarDays, Receipt, Sparkles, Trophy }
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHead } from "@/components/page-head";
 import { CategoryChart, MonthlySpendChart } from "@/components/charts";
-import { CategoryIcon } from "@/components/category-pill";
-import { PeriodSpendChart } from "@/components/period-spend-chart";
+import { CategoryIcon } from "@/components/budget/category-pill";
+import { PeriodSpendChart } from "@/components/budget/period-spend-chart";
 import { formatMoney } from "@/lib/utils";
 import type {
   BiggestPurchase,

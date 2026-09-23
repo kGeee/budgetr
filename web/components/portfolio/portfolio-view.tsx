@@ -5,21 +5,21 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { PayoffDiagram } from "@/components/payoff-diagram";
+import { PayoffDiagram } from "@/components/options/payoff-diagram";
 import {
   PIE_COLORS,
   Sparkline,
   TickerPriceChart,
   type SectorSlice,
 } from "@/components/charts";
-import { ValueHistory } from "@/components/value-history";
+import { ValueHistory } from "@/components/portfolio/value-history";
 import {
   AddManualHoldingButton,
   DeleteManualHoldingButton,
   EditCostBasisButton,
   EditManualHoldingButton,
   HideWalletTokenButton,
-} from "@/components/manual-holding-dialog";
+} from "@/components/portfolio/manual-holding-dialog";
 import { setHoldingSector } from "@/lib/actions";
 import { formatCurrency, formatMoney } from "@/lib/utils";
 import {
@@ -32,8 +32,8 @@ import {
   parseOccSymbol,
   riskLevel,
 } from "@/lib/options";
-import { AssetAllocation, type AllocRow } from "@/components/asset-allocation";
-import { DividendPanel } from "@/components/dividend-panel";
+import { AssetAllocation, type AllocRow } from "@/components/portfolio/asset-allocation";
+import { DividendPanel } from "@/components/portfolio/dividend-panel";
 import type { InvestmentTxnRow } from "@/lib/queries";
 import type { DividendSummary } from "@/lib/dividends";
 import type { DividendCalendarEntry, PricePoint as YahooPricePoint } from "@/lib/yahoo";
@@ -47,7 +47,7 @@ import {
   useLivePrices,
   type LiveStatus,
   type LiveQuote,
-} from "@/components/live-prices";
+} from "@/components/portfolio/live-prices";
 
 export type HoldingRow = {
   id: string;

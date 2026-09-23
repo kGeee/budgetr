@@ -23,8 +23,8 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2, Loader2, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiKeysForm } from "@/components/api-keys-form";
-import { PlaidLink } from "@/components/plaid-link";
-import { Stepper, Step, Walk, A } from "@/components/onboarding-steps";
+import { PlaidLink } from "@/components/onboarding/plaid-link";
+import { Stepper, Step, Walk, A } from "@/components/onboarding/onboarding-steps";
 import { exitDemoMode } from "@/lib/actions-onboarding";
 
 export type PlaidSetupInitial = {

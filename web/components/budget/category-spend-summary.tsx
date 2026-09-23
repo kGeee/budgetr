@@ -1,4 +1,4 @@
-import { CategoryIcon } from "@/components/category-pill";
+import { CategoryIcon } from "@/components/budget/category-pill";
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import type { CategorySpendVsAverage } from "@/lib/queries";

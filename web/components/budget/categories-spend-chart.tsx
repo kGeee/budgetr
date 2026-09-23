@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { X } from "lucide-react";
-import { DailySpendChart } from "@/components/daily-spend-chart";
-import { TransactionsTable } from "@/components/transactions-table";
+import { DailySpendChart } from "@/components/budget/daily-spend-chart";
+import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { getTransactionsForDate } from "@/lib/actions";
 import type { CategoryRow, TransactionRow } from "@/lib/queries";
 

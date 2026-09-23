@@ -2,9 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { PageHead } from "@/components/page-head";
-import { CategoryIcon } from "@/components/category-pill";
+import { CategoryIcon } from "@/components/budget/category-pill";
 import { MonthlySpendChart } from "@/components/charts";
-import { TransactionsTable } from "@/components/transactions-table";
+import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { Card } from "@/components/ui/card";
 import {
   getCategories,

@@ -34,9 +34,9 @@ import {
 import { computeGreeks } from "@/lib/greeks";
 import { analyzePayoff, CONTRACT_SIZE, type PayoffAnalysis, type PayoffLeg } from "@/lib/payoff";
 import { expectedMove, probabilityOfProfit } from "@/lib/option-analytics";
-import { PayoffDiagram } from "@/components/payoff-diagram";
-import type { HoldingRow } from "@/components/portfolio-view";
-import type { LiveQuote } from "@/components/live-prices";
+import { PayoffDiagram } from "@/components/options/payoff-diagram";
+import type { HoldingRow } from "@/components/portfolio/portfolio-view";
+import type { LiveQuote } from "@/components/portfolio/live-prices";
 import type { OptionQuote } from "@/lib/yahoo";
 
 type Leg = { h: HoldingRow; p: ParsedOption };

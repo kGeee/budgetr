@@ -1,6 +1,6 @@
 import { PageHead } from "@/components/page-head";
 import { OptionsToolTabs } from "@/components/investments-tabs";
-import { ScannerView } from "@/components/scanner-view";
+import { ScannerView } from "@/components/options/scanner-view";
 import { scanWheelPuts } from "@/lib/wheel-scanner-data";
 
 // DB (holdings/universe) stays fresh; the CBOE/Yahoo chain fetches ride the

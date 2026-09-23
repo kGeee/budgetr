@@ -4,8 +4,8 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, ArrowUpRight, Check, ChevronDown, Pencil, Plus, RotateCcw, X } from "lucide-react";
-import { CategoryIcon } from "@/components/category-pill";
-import { CategoryDetailPanel } from "@/components/category-detail-panel";
+import { CategoryIcon } from "@/components/budget/category-pill";
+import { CategoryDetailPanel } from "@/components/budget/category-detail-panel";
 import { Button } from "@/components/ui/button";
 import {
   archiveCategory,

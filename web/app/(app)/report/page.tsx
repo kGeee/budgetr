@@ -11,8 +11,8 @@ import {
 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { CategoryChart, MonthlySpendChart, NetWorthChart } from "@/components/charts";
-import { CategoryIcon } from "@/components/category-pill";
-import { SpendHeatmap } from "@/components/spend-heatmap";
+import { CategoryIcon } from "@/components/budget/category-pill";
+import { SpendHeatmap } from "@/components/budget/spend-heatmap";
 import { ReportPrintButton } from "@/components/report-print-button";
 import {
   buildReportData,

@@ -17,10 +17,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { CashflowChart, CategoryChart, NetWorthChart } from "@/components/charts";
-import { SpendHeatmap } from "@/components/spend-heatmap";
-import { ReviewInbox } from "@/components/review-inbox";
-import { UpcomingBills } from "@/components/upcoming-bills";
-import { CategoryIcon } from "@/components/category-pill";
+import { SpendHeatmap } from "@/components/budget/spend-heatmap";
+import { ReviewInbox } from "@/components/transactions/review-inbox";
+import { UpcomingBills } from "@/components/budget/upcoming-bills";
+import { CategoryIcon } from "@/components/budget/category-pill";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   WidgetControls,

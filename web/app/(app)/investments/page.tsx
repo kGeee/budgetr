@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Upload } from "lucide-react";
 import { PageHead } from "@/components/page-head";
-import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
+import { PortfolioView, type HoldingRow } from "@/components/portfolio/portfolio-view";
 import {
   getAllocationTargets,
   getAssetClassOverrides,

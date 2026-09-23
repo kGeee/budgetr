@@ -1,6 +1,6 @@
 import { CalendarClock } from "lucide-react";
 import { PageHead } from "@/components/page-head";
-import { RecurringView } from "@/components/recurring-view";
+import { RecurringView } from "@/components/transactions/recurring-view";
 import { getRecurringStreams } from "@/lib/queries";
 import { todayIso } from "@/lib/data-freshness";
 

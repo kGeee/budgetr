@@ -1,8 +1,8 @@
 import { Card } from "@/components/ui/card";
-import { PlaidLink } from "@/components/plaid-link";
+import { PlaidLink } from "@/components/onboarding/plaid-link";
 import { PageHead } from "@/components/page-head";
 import { AccountVisibilityToggle } from "@/components/account-visibility-toggle";
-import { ConnectWalletButton, WalletsCard } from "@/components/connect-wallet-dialog";
+import { ConnectWalletButton, WalletsCard } from "@/components/portfolio/connect-wallet-dialog";
 import { ConnectionAlert, ConnectionChip } from "@/components/connection-status";
 import { DisconnectInstitution } from "@/components/disconnect-institution";
 import { getConnectionSummary, getHealthByInstitution } from "@/lib/connection-health";

@@ -25,8 +25,8 @@ import {
 } from "recharts";
 import { ChevronDown, Compass, Plus, Shield, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { PayoffDiagram } from "@/components/payoff-diagram";
-import { PnlMatrix, type MatrixMode } from "@/components/pnl-matrix";
+import { PayoffDiagram } from "@/components/options/payoff-diagram";
+import { PnlMatrix, type MatrixMode } from "@/components/options/pnl-matrix";
 import { formatCurrency } from "@/lib/utils";
 import { daysToExpiry, formatOptionExpiry, formatStrike } from "@/lib/options";
 import { computeGreeks } from "@/lib/greeks";

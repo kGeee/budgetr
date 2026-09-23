@@ -7,7 +7,7 @@ import {
   subMonths,
   subYears,
 } from "date-fns";
-import { ReviewView } from "@/components/review-view";
+import { ReviewView } from "@/components/transactions/review-view";
 import { IncompletePeriodNotice } from "@/components/data-freshness";
 import {
   getLatestTransactionDate,

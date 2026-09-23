@@ -19,8 +19,8 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { CategoryIcon } from "@/components/category-pill";
-import { SplitBillButton } from "@/components/split-bill-modal";
+import { CategoryIcon } from "@/components/budget/category-pill";
+import { SplitBillButton } from "@/components/transactions/split-bill-modal";
 import {
   addTagToTransaction,
   applyCategoryToVendor,
