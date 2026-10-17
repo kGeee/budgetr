@@ -1448,18 +1448,23 @@ export type CategoryDay = { date: string; spent: number; received: number };
 
 /** Day-by-day total spending across all spending categories, last N days, oldest first. */
 export function getDailySpend(days = 30): { date: string; spent: number }[] {
+  // Over spend_rows, so a split bill counts only your share (the fronted part
+  // sits in the transfer-group cat_reimbursable) and confirmed transfer/refund
+  // legs drop out — the same rules as category and budget spend. This series
+  // is also the phone's spendByDay, where a full fronted bill read as spend.
   return db
     .all<{ date: string; spent: number }>(sql`
-      SELECT t.date AS date,
-             SUM(t.amount) AS spent
-      FROM transactions t
-      JOIN categories cat ON cat.id = ${effectiveCatId("t")}
-      WHERE ${settledOnly()}
-        AND t.amount > 0
+      WITH ${spendRowsCte}
+      SELECT sr.date AS date,
+             SUM(sr.amount) AS spent
+      FROM spend_rows sr
+      JOIN categories cat ON cat.id = sr.category_id
+      WHERE ${settledOnly("sr")}
+        AND sr.amount > 0
         AND cat."group" = 'spending'
-        AND t.date >= date('now', ${`-${days} days`})
-      GROUP BY t.date
-      ORDER BY t.date ASC`)
+        AND sr.date >= date('now', ${`-${days} days`})
+      GROUP BY sr.date
+      ORDER BY sr.date ASC`)
     .map((r) => ({ date: r.date, spent: Number(r.spent) }));
 }
 
@@ -1475,17 +1480,18 @@ export function getDailySpendRange(
 ): { date: string; spent: number }[] {
   return db
     .all<{ date: string; spent: number }>(sql`
-      SELECT t.date AS date,
-             SUM(t.amount) AS spent
-      FROM transactions t
-      JOIN categories cat ON cat.id = ${effectiveCatId("t")}
-      WHERE ${settledOnly()}
-        AND t.amount > 0
+      WITH ${spendRowsCte}
+      SELECT sr.date AS date,
+             SUM(sr.amount) AS spent
+      FROM spend_rows sr
+      JOIN categories cat ON cat.id = sr.category_id
+      WHERE ${settledOnly("sr")}
+        AND sr.amount > 0
         AND cat."group" = 'spending'
-        AND t.date >= ${start}
-        AND t.date <= ${end}
-      GROUP BY t.date
-      ORDER BY t.date ASC`)
+        AND sr.date >= ${start}
+        AND sr.date <= ${end}
+      GROUP BY sr.date
+      ORDER BY sr.date ASC`)
     .map((r) => ({ date: r.date, spent: Number(r.spent) }));
 }
 

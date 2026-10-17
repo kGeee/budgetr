@@ -12,6 +12,7 @@
 
 import {
   OUTBOX_VERSION,
+  MIN_OUTBOX_VERSION,
   SUMMARY_VERSION,
   type Op,
   type OutboxBatch,
@@ -176,6 +177,8 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
     reqInt(a.ts, `${path}.ts`);
   });
 
+  if (s.outboxVersion !== undefined) reqInt(s.outboxVersion, '$.outboxVersion');
+
   if (s.spendByDay !== undefined) validateSpark(s.spendByDay, '$.spendByDay');
 
   if (s.categories !== undefined) {
@@ -207,6 +210,7 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
       reqInt(p.openCount, `${path}.openCount`);
       if (p.color != null) reqStr(p.color, `${path}.color`);
       if (p.lastSettledAt != null) reqInt(p.lastSettledAt, `${path}.lastSettledAt`);
+      if (p.handle != null) reqStr(p.handle, `${path}.handle`);
     });
   }
 
@@ -365,6 +369,20 @@ function assertValidOp(op: unknown, path: string): asserts op is Op {
         'receipt image is too large',
       );
       return;
+    case 'addPerson':
+      reqStr(op.personId, `${path}.personId`);
+      reqStr(op.name, `${path}.name`);
+      req((op.name as string).trim().length > 0, `${path}.name`, 'must not be blank');
+      req((op.name as string).length <= 80, `${path}.name`, 'is too long');
+      if (op.handle != null) {
+        reqStr(op.handle, `${path}.handle`);
+        req((op.handle as string).length <= 80, `${path}.handle`, 'is too long');
+      }
+      if (op.color != null) {
+        reqStr(op.color, `${path}.color`);
+        req(/^#[0-9a-fA-F]{6}$/.test(op.color as string), `${path}.color`, 'must be a #rrggbb hex');
+      }
+      return;
     default:
       // Unknown op kinds are a hard error: the desktop must never guess at an
       // intent it doesn't understand. New op kinds require an OUTBOX_VERSION bump.
@@ -376,10 +394,18 @@ export function assertValidOutbox(b: unknown): asserts b is OutboxBatch {
   req(isRecord(b), '$', 'must be an object');
   reqInt(b.v, '$.v');
   if (b.v > OUTBOX_VERSION) throw new ContractVersionError('outbox', b.v, OUTBOX_VERSION);
-  req(b.v === OUTBOX_VERSION, '$.v', `unsupported version ${b.v}`);
+  req(b.v >= MIN_OUTBOX_VERSION, '$.v', `unsupported version ${b.v}`);
   reqStr(b.deviceId, '$.deviceId');
   reqStr(b.batchId, '$.batchId');
   reqInt(b.createdAt, '$.createdAt');
   reqArr(b.ops, '$.ops');
-  b.ops.forEach((op, i) => assertValidOp(op, `$.ops[${i}]`));
+  const version = b.v as number;
+  b.ops.forEach((op, i) => {
+    assertValidOp(op, `$.ops[${i}]`);
+    // A v2 batch can't carry a v3 op — the version is the sender's promise
+    // about what it may contain.
+    if (isRecord(op) && op.kind === 'addPerson') {
+      req(version >= 3, `$.ops[${i}].kind`, 'addPerson needs outbox v3');
+    }
+  });
 }

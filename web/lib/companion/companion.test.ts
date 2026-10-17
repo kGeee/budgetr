@@ -122,13 +122,16 @@ describe("applyOps", () => {
     expect(store.getAppliedOpIds()).toContain("op-recat-1");
   });
 
-  it("acks ops whose targets vanished without erroring the batch", () => {
+  it("leaves ops whose targets vanished unacked, so the phone keeps them, without erroring the batch", () => {
     const ops: import("@budgetr/core").Op[] = [
       { id: "op-gone-txn", ts: NOW, kind: "recategorize", txnId: "txn-deleted", toCategory: "cat_dining" },
       { id: "op-gone-cat", ts: NOW, kind: "recategorize", txnId: "txn-1", toCategory: "cat_deleted" },
     ];
-    expect(applyOps(ops).mutated).toBe(0);
-    expect(store.getAppliedOpIds()).toEqual(expect.arrayContaining(["op-gone-txn", "op-gone-cat"]));
+    const res = applyOps(ops);
+    expect(res.mutated).toBe(0);
+    expect(res.deferred).toEqual(["op-gone-txn", "op-gone-cat"]);
+    expect(store.getAppliedOpIds()).not.toContain("op-gone-txn");
+    expect(store.getAppliedOpIds()).not.toContain("op-gone-cat");
   });
 
   it("dismissAlert writes dismissed_alerts keyed by alertKey, idempotently", () => {
@@ -349,18 +352,25 @@ describe("applyOps — shared expenses", () => {
     expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expense_shares`)!.n).toBe(before);
   });
 
-  it("acks a split naming a person who has since been deleted", () => {
+  it("keeps a split naming an unknown person queued instead of acking it", () => {
+    const before = db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expense_shares`)!.n;
     const res = applyOps([
       {
         id: "op-split-gone",
         ts: NOW + 1,
         kind: "splitBill",
         txnId: "txn-dinner",
-        shares: [{ personId: "p-deleted", cents: 100 }],
+        // One known, one not: never stored as a partial split.
+        shares: [
+          { personId: "p-eesh", cents: 100 },
+          { personId: "p-deleted", cents: 100 },
+        ],
       },
     ]);
-    expect(res.mutated).toBe(0);
-    expect(store.getAppliedOpIds()).toContain("op-split-gone");
+    expect(res).toMatchObject({ mutated: 0, applied: [], deferred: ["op-split-gone"] });
+    expect(store.getAppliedOpIds()).not.toContain("op-split-gone");
+    expect(core.buildSummary(buildReadModel(NOW)).appliedOpIds).not.toContain("op-split-gone");
+    expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expense_shares`)!.n).toBe(before);
   });
 
   it("records a repayment once, even if the suggestion is confirmed twice", () => {
@@ -390,5 +400,163 @@ describe("applyOps — shared expenses", () => {
     expect(bill.itemized).toBe(true);
     // Names reach the phone cleaned, the same as everywhere else.
     expect(bill.merchant).toBe("Ippudo");
+  });
+
+  it("adds someone from the phone and splits with them in the same batch", () => {
+    db.insert(schema.transactions)
+      .values({
+        id: "txn-tacos",
+        accountId: "acc-chk",
+        amount: 40,
+        date: new Date().toISOString().slice(0, 10),
+        name: "TACOS",
+        pending: false,
+        userCategoryId: "cat_dining",
+      })
+      .run();
+    const res = applyOps([
+      { id: "op-add-1", ts: NOW + 3, kind: "addPerson", personId: "p-phone-1", name: "Rowan", handle: "@rowan" },
+      { id: "op-split-tacos", ts: NOW + 3, kind: "splitBill", txnId: "txn-tacos", shares: [{ personId: "p-phone-1", cents: 2000 }] },
+    ]);
+    expect(res.mutated).toBe(2);
+    const row = db.get<{ name: string; handle: string }>(sql`SELECT name, handle FROM people WHERE id = 'p-phone-1'`);
+    expect(row).toEqual({ name: "Rowan", handle: "@rowan" });
+    const owed = db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expense_shares WHERE person_id = 'p-phone-1'`);
+    expect(owed!.n).toBe(1);
+
+    // Re-delivery is a no-op, never a second Rowan.
+    expect(applyOps([{ id: "op-add-1b", ts: NOW + 4, kind: "addPerson", personId: "p-phone-1", name: "Rowan" }]).mutated).toBe(0);
+    expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM people WHERE name = 'Rowan'`)!.n).toBe(1);
+
+    // Handles travel so the phone can open a prefilled Venmo request.
+    const summary = core.buildSummary(buildReadModel(NOW));
+    expect(summary.people!.find((p) => p.id === "p-phone-1")!.handle).toBe("@rowan");
+  });
+
+  it("treats a name the desktop already has as that person", () => {
+    db.insert(schema.transactions)
+      .values({
+        id: "txn-pizza",
+        accountId: "acc-chk",
+        amount: 30,
+        date: new Date().toISOString().slice(0, 10),
+        name: "PIZZA",
+        pending: false,
+        userCategoryId: "cat_dining",
+      })
+      .run();
+    applyOps([
+      { id: "op-add-dupe", ts: NOW + 5, kind: "addPerson", personId: "p-phone-dupe", name: "eesh", handle: "@eesh" },
+      { id: "op-split-pizza", ts: NOW + 5, kind: "splitBill", txnId: "txn-pizza", shares: [{ personId: "p-phone-dupe", cents: 1000 }] },
+    ]);
+    expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM people WHERE id = 'p-phone-dupe'`)!.n).toBe(0);
+    const share = db.get<{ person: string }>(
+      sql`SELECT es.person_id AS person FROM expense_shares es JOIN shared_expenses se ON se.id = es.shared_expense_id WHERE se.transaction_id = 'txn-pizza'`,
+    );
+    expect(share?.person).toBe("p-eesh");
+    // The handle fills a gap but never overwrites one.
+    expect(db.get<{ handle: string }>(sql`SELECT handle FROM people WHERE id = 'p-eesh'`)!.handle).toBe("@eesh");
+  });
+});
+
+/**
+ * The phone resends every op until the desktop lists it in appliedOpIds, so an
+ * addPerson and the edits naming that person routinely land in different
+ * batches. These assert on the desktop's own tables — an op id showing up in
+ * appliedOpIds is not proof the edit happened.
+ */
+describe("applyOps — across batches", () => {
+  type Op = import("@budgetr/core").Op;
+  const today = new Date().toISOString().slice(0, 10);
+  const sharesOn = (txnId: string) =>
+    db.all<{ personId: string; amount: number }>(
+      sql`SELECT es.person_id AS personId, es.amount AS amount FROM expense_shares es
+          JOIN shared_expenses se ON se.id = es.shared_expense_id WHERE se.transaction_id = ${txnId}`,
+    );
+  const settlementsFor = (txnId: string) =>
+    db.all<{ personId: string; amount: number }>(
+      sql`SELECT person_id AS personId, amount FROM settlements WHERE transaction_id = ${txnId}`,
+    );
+
+  beforeAll(() => {
+    db.insert(schema.people)
+      .values({ id: "p-maya", name: "Maya", archived: false, createdAt: new Date(NOW * 1000) })
+      .run();
+    db.insert(schema.transactions)
+      .values([
+        { id: "txn-ramen", accountId: "acc-chk", amount: 50, date: today, name: "RAMEN", pending: false, userCategoryId: "cat_dining" },
+        { id: "txn-venmo-maya", accountId: "acc-chk", amount: -25, date: today, name: "VENMO MAYA", pending: false },
+        { id: "txn-sushi", accountId: "acc-chk", amount: 60, date: today, name: "SUSHI", pending: false, userCategoryId: "cat_dining" },
+        { id: "txn-venmo-maya-2", accountId: "acc-chk", amount: -10, date: today, name: "VENMO MAYA", pending: false },
+        { id: "txn-bbq", accountId: "acc-chk", amount: 80, date: today, name: "BBQ", pending: false, userCategoryId: "cat_dining" },
+      ])
+      .run();
+  });
+
+  it("applies a split and a payback in batch N+1 to the person an addPerson in batch N mapped to", () => {
+    const addMaya: Op = { id: "op-add-maya", ts: NOW + 10, kind: "addPerson", personId: "p-phone-maya", name: "maya" };
+
+    // Batch N: only the addPerson. "maya" is the Maya the desktop already has.
+    expect(applyOps([addMaya]).applied).toEqual(["op-add-maya"]);
+    expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM people WHERE id = 'p-phone-maya'`)!.n).toBe(0);
+
+    // Batch N+1: the phone resends the addPerson (it may not have seen the ack
+    // yet) along with edits that name its own minted id.
+    const res = applyOps([
+      addMaya,
+      { id: "op-split-ramen", ts: NOW + 11, kind: "splitBill", txnId: "txn-ramen", shares: [{ personId: "p-phone-maya", cents: 2500 }] },
+      { id: "op-settle-maya", ts: NOW + 12, kind: "recordSettlement", personId: "p-phone-maya", cents: 2500, txnId: "txn-venmo-maya" },
+    ]);
+    expect(res).toMatchObject({ mutated: 2, applied: ["op-split-ramen", "op-settle-maya"], deferred: [] });
+
+    expect(sharesOn("txn-ramen")).toEqual([{ personId: "p-maya", amount: 25 }]);
+    expect(settlementsFor("txn-venmo-maya")).toEqual([{ personId: "p-maya", amount: 25 }]);
+    const maya = core.buildSummary(buildReadModel(NOW)).people!.find((p) => p.id === "p-maya")!;
+    expect(maya.cents).toBe(0); // owed 25, repaid 25
+  });
+
+  it("still resolves an addPerson applied before the mapping was persisted", () => {
+    // Batch N under the old code: the addPerson id was recorded but no alias
+    // survived. Simulated by applying it and then dropping the stored map.
+    applyOps([{ id: "op-add-maya-old", ts: NOW + 20, kind: "addPerson", personId: "p-phone-maya-old", name: "Maya" }]);
+    db.run(sql`DELETE FROM app_settings WHERE key = 'companion.personAliases'`);
+
+    applyOps([
+      { id: "op-add-maya-old", ts: NOW + 20, kind: "addPerson", personId: "p-phone-maya-old", name: "Maya" },
+      { id: "op-split-sushi", ts: NOW + 21, kind: "splitBill", txnId: "txn-sushi", shares: [{ personId: "p-phone-maya-old", cents: 3000 }] },
+      { id: "op-settle-maya-2", ts: NOW + 22, kind: "recordSettlement", personId: "p-phone-maya-old", cents: 1000, txnId: "txn-venmo-maya-2" },
+    ]);
+    expect(sharesOn("txn-sushi")).toEqual([{ personId: "p-maya", amount: 30 }]);
+    expect(settlementsFor("txn-venmo-maya-2")).toEqual([{ personId: "p-maya", amount: 10 }]);
+  });
+
+  it("holds a split that arrives before its person, then applies it once they exist", () => {
+    const split: Op = { id: "op-split-bbq", ts: NOW + 31, kind: "splitBill", txnId: "txn-bbq", shares: [{ personId: "p-phone-jo", cents: 4000 }] };
+
+    // Batch N: the split alone (say the addPerson was in a batch the relay
+    // hasn't delivered yet). Nothing is written and nothing is acked.
+    expect(applyOps([split])).toMatchObject({ mutated: 0, applied: [], deferred: ["op-split-bbq"] });
+    expect(sharesOn("txn-bbq")).toEqual([]);
+    expect(core.buildSummary(buildReadModel(NOW)).appliedOpIds).not.toContain("op-split-bbq");
+
+    // Batch N+1: the phone resent the split, and the addPerson is here now.
+    const res = applyOps([
+      { id: "op-add-jo", ts: NOW + 30, kind: "addPerson", personId: "p-phone-jo", name: "Jo" },
+      split,
+    ]);
+    expect(res.applied).toEqual(["op-add-jo", "op-split-bbq"]);
+    expect(sharesOn("txn-bbq")).toEqual([{ personId: "p-phone-jo", amount: 40 }]);
+    expect(core.buildSummary(buildReadModel(NOW)).appliedOpIds).toEqual(expect.arrayContaining(["op-add-jo", "op-split-bbq"]));
+  });
+
+  it("acks a receipt scan only once it has been answered", async () => {
+    const { processScans, getScanResults } = await import("./scans");
+    const scan: Op = { id: "op-scan-gone", ts: NOW + 40, kind: "scanReceipt", txnId: "txn-deleted", imageBase64: "AAAA" };
+    expect(applyOps([scan]).applied).toEqual([]);
+    expect(store.getAppliedOpIds()).not.toContain("op-scan-gone");
+
+    await processScans([scan]);
+    expect(getScanResults().find((s) => s.opId === "op-scan-gone")?.error).toBe("That transaction is gone.");
+    expect(store.getAppliedOpIds()).toContain("op-scan-gone");
   });
 });

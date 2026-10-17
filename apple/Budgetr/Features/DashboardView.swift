@@ -1,14 +1,16 @@
-import Charts
 import CoreData
 import SwiftUI
 
-/// The dashboard: where the money went this month, and whether that's a problem.
+/// Spending — where the money went this month, and whether that's a problem.
 ///
-/// Replaces the Phase-2 placeholder that listed what it would one day show. The
-/// arithmetic lives in `MonthSummary` so it can be tested against the web app's
-/// output; this file only decides what to draw.
+/// The companion's home screen, natively: the month-to-date hero with a
+/// like-for-like delta, three stat wells, one chart card that switches between
+/// daily bars, cumulative pace and the category mix, and a grid of categories
+/// you tap into. The arithmetic lives in `MonthSummary` so it can be tested
+/// against the web app's output; this file only decides what to draw.
 struct DashboardView: View {
     @Environment(\.managedObjectContext) private var context
+    @EnvironmentObject private var app: AppModel
 
     /// Every transaction. Fetched whole because the summary needs last month
     /// too, and the local store is a few thousand rows — small enough that a
@@ -16,7 +18,7 @@ struct DashboardView: View {
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "date", ascending: false)])
     private var transactions: FetchedResults<CDTransaction>
 
-    @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
+    @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "sortOrder", ascending: true)])
     private var categories: FetchedResults<CDCategory>
 
     @FetchRequest(sortDescriptors: [])
@@ -25,301 +27,580 @@ struct DashboardView: View {
     @FetchRequest(sortDescriptors: [])
     private var budgets: FetchedResults<CDBudget>
 
-    private var model: DashboardModel {
-        // Resolve through the same rule the ledger uses. Grouping on the raw
-        // stored value instead put overridden and un-overridden rows of the same
-        // category in different buckets — which reads as several identical
-        // "Uncategorised" bars on the chart.
-        let idx = CategoryIndex(categories: Array(categories))
-        return DashboardModel(
-            transactions: transactions.map { $0.summaryEntry(using: idx) },
-            categoryNames: Dictionary(
-                categories.map { ($0.id ?? "", $0.name ?? "") },
-                uniquingKeysWith: { a, _ in a }
-            ),
-            // currentBalance is a nullable Double in the model, and that
-            // nullability is load-bearing elsewhere ("no cost basis" is not
-            // "$0 cost basis"), so it's unwrapped here rather than flattened
-            // in the schema. An account with no balance contributes nothing.
-            accounts: accounts.map { ($0.type ?? "", $0.currentBalance?.doubleValue ?? 0) },
-            budgetTotal: budgets.reduce(0) { $0 + $1.amount }
-        )
-    }
+    @State private var mode: ChartMode = .daily
+    @State private var openCategory: SpendingModel.CategoryRow?
+    @State private var showingAll = false
+    @State private var showingAccounts = false
+
+    private static let tileLimit = 6
 
     var body: some View {
-        ScrollView {
-            let m = model
+        let m = SpendingModel(
+            transactions: Array(transactions),
+            categories: Array(categories),
+            accounts: Array(accounts),
+            budgets: Array(budgets)
+        )
 
+        BScreen("Spending", eyebrow: m.eyebrow, trailing: {
+            if !transactions.isEmpty {
+                IconChip(systemName: "building.columns", label: "Accounts") { showingAccounts = true }
+            }
+        }) {
             if transactions.isEmpty {
-                EmptyStore()
+                WelcomeCard().rise(0)
             } else {
-                VStack(alignment: .leading, spacing: 18) {
-                    Header(model: m)
-                    if !m.byDay.isEmpty { DailySpendCard(model: m) }
-                    if m.budgetTotal > 0 { PaceCard(model: m) }
-                    if !m.byCategory.isEmpty { CategoryCard(model: m) }
-                }
-                .padding(20)
+                hero(m).rise(0)
+                tiles(m).rise(1)
+                chartCard(m).rise(2)
+                categoryGrid(m).rise(3)
             }
         }
-        .background(T.ink)
-        .navigationTitle("Overview")
+        .sheet(item: $openCategory) { row in
+            CategorySheet(row: row)
+        }
+        .sheet(isPresented: $showingAccounts) {
+            NavigationStack { AccountsView() }
+                .bSheet([.large])
+        }
+    }
+
+    // ── Hero ─────────────────────────────────────────────────────────
+
+    private func hero(_ m: SpendingModel) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            AnimatedMoney(value: m.spent, font: F.display(46))
+
+            HStack(spacing: 8) {
+                if let delta = m.deltaPct {
+                    // Up is bad here — this is spending, not income.
+                    Text("\(delta > 0 ? "▲" : "▼") \(Int(abs(delta).rounded()))%")
+                        .font(F.monoSemibold(12.5))
+                        .foregroundStyle(delta > 0 ? T.coral : T.jade)
+                    Text("vs \(m.prior.moneyCompact()) by this day last month")
+                        .font(F.body(12.5))
+                        .foregroundStyle(T.faint)
+                } else {
+                    Text("spent this month — no comparable month yet")
+                        .font(F.body(12.5))
+                        .foregroundStyle(T.faint)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // ── Stat wells ───────────────────────────────────────────────────
+
+    private func tiles(_ m: SpendingModel) -> some View {
+        let left = m.budgetTotal - m.spent
+        return HStack(spacing: 8) {
+            Button {
+                Haptics.tap()
+                showingAccounts = true
+            } label: {
+                StatTile(
+                    label: "Net worth",
+                    value: m.netWorth.moneyCompact(),
+                    note: "\(m.accountCount) accounts"
+                )
+            }
+            .buttonStyle(.pressScale)
+
+            StatTile(
+                label: left < 0 ? "Over budget" : "Left to spend",
+                value: m.budgetTotal > 0 ? abs(left).moneyCompact() : "—",
+                tint: left < 0 ? T.coral : T.paper,
+                note: m.budgetTotal > 0 ? "of \(m.budgetTotal.moneyCompact())" : "no budgets set"
+            )
+
+            StatTile(
+                label: "To review",
+                value: "\(m.unreviewed)",
+                tint: m.unreviewed > 0 ? T.brass : T.jade,
+                note: m.unreviewed > 0 ? "transactions" : "all clear"
+            )
+        }
+    }
+
+    // ── One chart slot, three readings ───────────────────────────────
+
+    private func chartCard(_ m: SpendingModel) -> some View {
+        Card(padding: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    Eyebrow(mode.heading)
+                    Spacer(minLength: 0)
+                    Segmented(options: ChartMode.options, selection: $mode)
+                        .frame(width: 176)
+                }
+
+                ZStack {
+                    switch mode {
+                    case .daily:
+                        if m.days.contains(where: { $0.value > 0 }) {
+                            ScrubBars(points: m.days, height: 100)
+                        } else {
+                            chartEmpty("No spending recorded this month.")
+                        }
+                    case .pace:
+                        if m.cumulative.count > 1 {
+                            PaceChart(
+                                cumulative: m.cumulative,
+                                budget: m.budgetTotal,
+                                daysInMonth: m.daysInMonth,
+                                dayOfMonth: m.dayOfMonth,
+                                height: 112
+                            )
+                        } else {
+                            chartEmpty("Not enough of the month yet to draw a pace.")
+                        }
+                    case .mix:
+                        if m.mix.isEmpty {
+                            chartEmpty("No categorised spending yet this month.")
+                        } else {
+                            mix(m)
+                        }
+                    }
+                }
+                .frame(height: 128)
+                .frame(maxWidth: .infinity)
+                .id(mode)
+                .transition(.opacity)
+
+                if mode == .pace && m.budgetTotal > 0 {
+                    Text(m.pacing.isAheadOfPace
+                         ? "On this pace you'll finish at \(m.pacing.projectedMonthEnd.moneyWhole()) — \((m.pacing.projectedMonthEnd - m.budgetTotal).moneyCompact()) over."
+                         : "Under pace — projected \(m.pacing.projectedMonthEnd.moneyWhole()) of \(m.budgetTotal.moneyWhole()).")
+                        .font(F.body(12))
+                        .foregroundStyle(m.pacing.isAheadOfPace ? T.coral : T.muted)
+                        .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    private func mix(_ m: SpendingModel) -> some View {
+        HStack(spacing: 16) {
+            MixDonut(slices: m.mix, size: 116)
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(m.mix) { slice in
+                    HStack(spacing: 7) {
+                        RoundedRectangle(cornerRadius: 2).fill(slice.color).frame(width: 8, height: 8)
+                        Text(slice.name)
+                            .font(F.body(11.5))
+                            .foregroundStyle(T.muted)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(slice.value.moneyCompact())
+                            .font(F.mono(11.5))
+                            .foregroundStyle(T.paper)
+                    }
+                }
+            }
+        }
+    }
+
+    private func chartEmpty(_ text: String) -> some View {
+        Text(text)
+            .font(F.body(12))
+            .foregroundStyle(T.faint)
+            .multilineTextAlignment(.center)
+    }
+
+    // ── Categories ───────────────────────────────────────────────────
+
+    private func categoryGrid(_ m: SpendingModel) -> some View {
+        let shown = showingAll ? m.rows : Array(m.rows.prefix(Self.tileLimit))
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Eyebrow("Categories")
+                Spacer()
+                if m.rows.count > Self.tileLimit {
+                    Button {
+                        Haptics.tap()
+                        withAnimation(M.settle) { showingAll.toggle() }
+                    } label: {
+                        Text(showingAll ? "Fewer" : "All \(m.rows.count) ›")
+                            .font(F.semibold(12))
+                            .foregroundStyle(T.brass)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if m.rows.isEmpty {
+                Text("Nothing spent this month yet.")
+                    .font(F.body(12.5))
+                    .foregroundStyle(T.faint)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { i, row in
+                        CategoryTile(row: row) { openCategory = row }
+                            .rise(4 + i)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+}
+
+// ── Chart modes ──────────────────────────────────────────────────────
+
+private enum ChartMode: String, CaseIterable, Hashable {
+    case daily, pace, mix
+
+    var label: String {
+        switch self {
+        case .daily: return "Daily"
+        case .pace: return "Pace"
+        case .mix: return "Mix"
+        }
+    }
+
+    var heading: String {
+        switch self {
+        case .daily: return "By day"
+        case .pace: return "Cumulative vs pace"
+        case .mix: return "Where it went"
+        }
+    }
+
+    static var options: [(label: String, value: ChartMode)] {
+        allCases.map { (label: $0.label, value: $0) }
     }
 }
 
 // ── The numbers ──────────────────────────────────────────────────────
 
-/// Everything the dashboard renders, derived once per redraw.
-private struct DashboardModel {
-    let entries: [MonthSummary.Entry]
-    let categoryNames: [String: String]
-    let netWorth: Double
-    let budgetTotal: Double
+/// Everything the page renders, derived once per redraw.
+private struct SpendingModel {
+    struct CategoryRow: Identifiable {
+        let id: String
+        let name: String
+        let icon: String?
+        let spent: Double
+        let limit: Double?
+        let state: BudgetState
+        let transactions: [CDTransaction]
+        /// Spend per day of the month so far, day 1 first, zeros kept.
+        let daily: [Double]
 
-    let month: String
+        /// Budget state when there is a budget; brass, the neutral accent, when not.
+        var tint: Color { limit == nil ? T.brass : state.color }
+    }
+
+    let monthLabel: String
+    let dayOfMonth: Int
+    let daysInMonth: Int
     let spent: Double
     let prior: Double
-    let byDay: [MonthSummary.DayTotal]
-    let byCategory: [MonthSummary.CategoryTotal]
+    let netWorth: Double
+    let accountCount: Int
+    let budgetTotal: Double
     let pacing: BudgetPacing
+    let unreviewed: Int
+    let days: [BarPoint]
+    let cumulative: [Double]
+    let mix: [MixSlice]
+    let rows: [CategoryRow]
+
+    var deltaPct: Double? { MonthSummary.deltaPct(spent: spent, prior: prior) }
+    var eyebrow: String { "\(monthLabel) · day \(dayOfMonth) of \(daysInMonth)" }
 
     init(
-        transactions: [MonthSummary.Entry],
-        categoryNames: [String: String],
-        accounts: [(String, Double)],
-        budgetTotal: Double,
+        transactions: [CDTransaction],
+        categories: [CDCategory],
+        accounts: [CDAccount],
+        budgets: [CDBudget],
         now: Date = Date(),
         calendar: Calendar = .current
     ) {
-        self.entries = transactions
-        self.categoryNames = categoryNames
-        self.budgetTotal = budgetTotal
+        // Resolve through the same rule the ledger uses. Grouping on the raw
+        // stored value instead puts overridden and un-overridden rows of the
+        // same category in different buckets.
+        let idx = CategoryIndex(categories: categories)
+        let styles = CategoryStyles(categories: categories)
+
+        let entries = transactions.map {
+            MonthSummary.Entry(amount: $0.amount, date: $0.date ?? "", categoryId: idx.resolvedId(for: $0), pending: $0.pending)
+        }
+        let month = MonthSummary.monthKey(of: now, calendar: calendar)
+        let thisMonth = MonthSummary.inMonth(entries, month: month)
+        let dom = calendar.component(.day, from: now)
+        let dim = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
+
+        let spentToDate = MonthSummary.spent(thisMonth)
+
+        self.monthLabel = now.formatted(.dateTime.month(.wide))
+        self.dayOfMonth = dom
+        self.daysInMonth = dim
+        self.spent = spentToDate
+        self.prior = MonthSummary.priorMonthToDate(entries, now: now, calendar: calendar)
+        self.unreviewed = transactions.reduce(0) { $0 + ($1.reviewed ? 0 : 1) }
 
         // Liabilities are held as positive balances, the same as the web app,
-        // so they have to be subtracted rather than summed.
-        self.netWorth = accounts.reduce(0) { total, account in
-            let (type, balance) = account
-            let isLiability = type == "credit" || type == "loan"
-            return total + (isLiability ? -balance : balance)
+        // so they are subtracted rather than summed.
+        self.netWorth = accounts.reduce(0) { $0 + $1.signedBalance }
+        self.accountCount = accounts.count
+
+        let budgetTotal = budgets.reduce(0) { $0 + $1.amount }
+        self.budgetTotal = budgetTotal
+        self.pacing = BudgetPacing(totalBudget: budgetTotal, spentToDate: spentToDate, dayOfMonth: dom, daysInMonth: dim)
+
+        // Day 1 → today, empty days kept: the rhythm of the month is the signal.
+        func dayIndex(_ date: String) -> Int? {
+            guard let d = Int(date.suffix(2)), d >= 1, d <= dom else { return nil }
+            return d - 1
+        }
+        var perDay = [Double](repeating: 0, count: dom)
+        for e in thisMonth where e.amount > 0 {
+            if let i = dayIndex(e.date) { perDay[i] += e.amount }
+        }
+        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+        self.days = perDay.enumerated().map { i, v in
+            BarPoint(id: "d\(i)", date: calendar.date(byAdding: .day, value: i, to: monthStart) ?? monthStart, value: v)
+        }
+        var running = 0.0
+        self.cumulative = perDay.map { running += $0; return running }
+
+        // The mix: the six biggest, then one honest "everything else".
+        let names = Dictionary(categories.compactMap { c in c.id.map { ($0, c.name ?? $0) } }, uniquingKeysWith: { a, _ in a })
+        self.mix = MonthSummary.byCategory(thisMonth, names: names).enumerated().map { i, c in
+            MixSlice(
+                id: c.id.isEmpty ? "__none__" : c.id,
+                name: c.name,
+                value: c.spent,
+                color: c.id == "__other__" ? T.muted : T.chart[i % T.chart.count]
+            )
         }
 
-        let month = MonthSummary.monthKey(of: now, calendar: calendar)
-        let thisMonth = MonthSummary.inMonth(transactions, month: month)
-
-        self.month = month
-        self.spent = MonthSummary.spent(thisMonth)
-        self.prior = MonthSummary.priorMonthToDate(transactions, now: now, calendar: calendar)
-        self.byDay = MonthSummary.byDay(thisMonth, calendar: calendar)
-        self.byCategory = MonthSummary.byCategory(thisMonth, names: categoryNames)
-        self.pacing = BudgetPacing(
-            totalBudget: budgetTotal,
-            spentToDate: self.spent,
-            dayOfMonth: calendar.component(.day, from: now),
-            daysInMonth: calendar.range(of: .day, in: .month, for: now)?.count ?? 30
+        // Category rows: every category with spend this month, biggest first.
+        let limits = Dictionary(
+            budgets.compactMap { b in b.category?.id.map { ($0, b.amount) } },
+            uniquingKeysWith: { a, _ in a }
         )
-    }
-
-    var deltaPct: Double? { MonthSummary.deltaPct(spent: spent, prior: prior) }
-
-    var monthLabel: String {
-        let f = DateFormatter()
-        f.dateFormat = "LLLL"
-        f.locale = .current
-        let parts = month.split(separator: "-")
-        guard parts.count == 2, let m = Int(parts[1]),
-              let d = Calendar.current.date(from: DateComponents(year: 2000, month: m, day: 1))
-        else { return month }
-        return f.string(from: d)
+        var grouped: [String: [CDTransaction]] = [:]
+        for t in transactions where (t.date ?? "").hasPrefix(month) && t.amount > 0 {
+            grouped[idx.resolvedId(for: t) ?? "__none__", default: []].append(t)
+        }
+        self.rows = grouped.map { id, txns in
+            let spent = txns.reduce(0) { $0 + $1.amount }
+            let limit = limits[id].flatMap { $0 > 0 ? $0 : nil }
+            var daily = [Double](repeating: 0, count: dom)
+            for t in txns {
+                if let i = dayIndex(t.date ?? "") { daily[i] += t.amount }
+            }
+            let state = limit.map {
+                BudgetState.of(
+                    spent: spent,
+                    limit: $0,
+                    pacing: BudgetPacing(totalBudget: $0, spentToDate: spent, dayOfMonth: dom, daysInMonth: dim)
+                )
+            } ?? .ok
+            return CategoryRow(
+                id: id,
+                name: id == "__none__" ? "Uncategorised" : idx.name(forId: id),
+                icon: styles.icon(id),
+                spent: spent,
+                limit: limit,
+                state: state,
+                transactions: txns,
+                daily: daily
+            )
+        }
+        .sorted { $0.spent > $1.spent }
     }
 }
 
 // ── Pieces ───────────────────────────────────────────────────────────
 
-private struct Header: View {
-    let model: DashboardModel
+/// One category on the grid: its mark, what's gone, and how much of the
+/// allowance that is.
+private struct CategoryTile: View {
+    let row: SpendingModel.CategoryRow
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Eyebrow("\(model.monthLabel) · spent so far")
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    GlyphIcon(icon: row.icon, color: row.tint, size: 12.5)
+                    Text(row.name)
+                        .font(F.semibold(11.5))
+                        .foregroundStyle(T.muted)
+                        .lineLimit(1)
+                }
+                Text(row.spent.moneyCompact())
+                    .font(F.monoSemibold(19))
+                    .foregroundStyle(T.paper)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.top, 6)
 
-            Text(model.spent, format: .currency(code: "USD"))
-                .font(F.display(44))
-                .foregroundStyle(T.paper)
-
-            HStack(spacing: 10) {
-                if let delta = model.deltaPct {
-                    // Up is bad here — this is spending, not income.
-                    Label(
-                        "\(abs(delta), format: .number.precision(.fractionLength(0)))%",
-                        systemImage: delta > 0 ? "arrow.up" : "arrow.down"
-                    )
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(delta > 0 ? T.coral : T.jade)
-
-                    Text("vs \(model.prior, format: .currency(code: "USD")) by this day last month")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if let limit = row.limit {
+                    SlimMeter(fraction: row.spent / limit, color: row.tint)
+                        .padding(.top, 9)
+                    Text("\(Int((row.spent / limit * 100).rounded()))% of \(limit.moneyCompact())")
+                        .font(F.body(10))
+                        .foregroundStyle(row.state == .over ? T.coral : T.faint)
+                        .padding(.top, 5)
                 } else {
-                    Text("no comparable month yet")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("\(row.transactions.count) txns · no budget")
+                        .font(F.body(10))
+                        .foregroundStyle(T.faint)
+                        .padding(.top, 9)
                 }
             }
-
-            HStack(spacing: 18) {
-                Stat(label: "Net worth", value: model.netWorth)
-                if model.budgetTotal > 0 {
-                    Stat(
-                        label: model.pacing.paceDelta > 0 ? "Over pace by" : "Under pace by",
-                        value: abs(model.pacing.paceDelta),
-                        tint: model.pacing.isAheadOfPace ? T.coral : T.jade
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: T.radiusSmall, style: .continuous)
+                    .fill(T.panel.opacity(0.78))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: T.radiusSmall, style: .continuous)
+                            .strokeBorder(T.line, lineWidth: 0.75)
                     )
-                }
-            }
-            .padding(.top, 8)
-        }
-    }
-
-    private struct Stat: View {
-        let label: String
-        let value: Double
-        var tint: Color = T.paper
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 2) {
-                Eyebrow(label, color: T.muted)
-                Text(value.money())
-                    .font(F.mono(14))
-                    .foregroundStyle(tint)
-            }
-        }
-    }
-}
-
-private struct DailySpendCard: View {
-    let model: DashboardModel
-
-    var body: some View {
-        TitledPanel("By day") {
-            Chart(model.byDay) { day in
-                BarMark(
-                    x: .value("Day", day.date, unit: .day),
-                    y: .value("Spent", day.spent)
-                )
-                .foregroundStyle(T.jade)
-                .cornerRadius(2)
-            }
-            .chartYAxis { AxisMarks(position: .leading) }
-            .frame(height: 140)
-        }
-    }
-}
-
-private struct PaceCard: View {
-    let model: DashboardModel
-
-    /// Cumulative spend against the even-pace line — the same reading as the
-    /// web app's Budgets chart, which is the one that actually predicts a
-    /// blown month rather than reporting it afterwards.
-    private var cumulative: [(date: Date, spent: Double)] {
-        var running = 0.0
-        return model.byDay.map { day in
-            running += day.spent
-            return (day.date, running)
-        }
-    }
-
-    var body: some View {
-        TitledPanel("Cumulative vs pace") {
-            Chart {
-                ForEach(cumulative, id: \.date) { point in
-                    AreaMark(x: .value("Day", point.date), y: .value("Spent", point.spent))
-                        .foregroundStyle(T.jade.opacity(0.16))
-                    LineMark(x: .value("Day", point.date), y: .value("Spent", point.spent))
-                        .foregroundStyle(model.pacing.isAheadOfPace ? T.coral : T.jade)
-                }
-                RuleMark(y: .value("Budget", model.budgetTotal))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .foregroundStyle(.secondary)
-                    .annotation(position: .top, alignment: .leading) {
-                        Text("budget \(model.budgetTotal, format: .currency(code: "USD"))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-            }
-            .chartYAxis { AxisMarks(position: .leading) }
-            .frame(height: 150)
-
-            Text(
-                model.pacing.isAheadOfPace
-                    ? "On this pace you'll finish the month at \(model.pacing.projectedMonthEnd, format: .currency(code: "USD"))."
-                    : "Tracking under budget — projected \(model.pacing.projectedMonthEnd, format: .currency(code: "USD")) by month end."
             )
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .contentShape(RoundedRectangle(cornerRadius: T.radiusSmall, style: .continuous))
         }
+        .buttonStyle(.pressScale)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Shows this month's transactions")
     }
 }
 
-private struct CategoryCard: View {
-    let model: DashboardModel
+/// One category: its month, its budget, its transactions.
+private struct CategorySheet: View {
+    let row: SpendingModel.CategoryRow
 
     var body: some View {
-        TitledPanel("Where it went") {
-            Chart(model.byCategory) { row in
-                BarMark(
-                    x: .value("Spent", row.spent),
-                    y: .value("Category", row.name)
-                )
-                .foregroundStyle(by: .value("Category", row.name))
-                .cornerRadius(3)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    GlyphTile(icon: row.icon, color: row.tint, size: 32)
+                    Text(row.name)
+                        .font(F.display(21))
+                        .foregroundStyle(T.paper)
+                }
+
+                AnimatedMoney(value: row.spent, font: F.display(36))
+                    .padding(.top, 16)
+                Text("this month · \(row.transactions.count) transaction\(row.transactions.count == 1 ? "" : "s")")
+                    .font(F.body(12))
+                    .foregroundStyle(T.faint)
+                    .padding(.top, 2)
+
+                if let limit = row.limit {
+                    StripedMeter(fraction: row.spent / limit, color: row.tint)
+                        .padding(.top, 16)
+                    Text("\(row.spent.money()) of \(limit.money()) · \(row.spent > limit ? "\((row.spent - limit).money()) over" : "\((limit - row.spent).money()) left")")
+                        .font(F.body(12))
+                        .foregroundStyle(row.spent > limit ? T.coral : T.muted)
+                        .padding(.top, 10)
+                }
+
+                if row.daily.filter({ $0 > 0 }).count > 1 {
+                    Eyebrow("By day").padding(.top, 24)
+                    MiniBars(values: row.daily, height: 44, color: row.tint)
+                        .padding(.top, 10)
+                }
+
+                Eyebrow("Transactions").padding(.top, 24).padding(.bottom, 4)
+                ForEach(Array(row.transactions.enumerated()), id: \.element.objectID) { i, txn in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(txn.merchantName ?? txn.name ?? "—")
+                                .font(F.medium(14.5))
+                                .foregroundStyle(T.paper)
+                                .lineLimit(1)
+                            Text(TransactionsView.dayLabel(txn.date ?? "") + (txn.pending ? " · pending" : ""))
+                                .font(F.body(11.5))
+                                .foregroundStyle(T.faint)
+                        }
+                        Spacer(minLength: 8)
+                        Text(txn.amount.money(txn.isoCurrencyCode ?? "USD"))
+                            .font(F.mono(13.5))
+                            .foregroundStyle(T.paper)
+                    }
+                    .padding(.vertical, 10)
+                    .overlay(alignment: .top) { if i > 0 { Hairline() } }
+                }
             }
-            .chartLegend(.hidden)
-            .chartXAxis { AxisMarks(position: .bottom) }
-            .frame(height: CGFloat(model.byCategory.count) * 30 + 20)
+            .padding(22)
         }
+        .bSheet()
     }
 }
 
+/// The empty store, said warmly: what the app is, and the two ways in.
+private struct WelcomeCard: View {
+    @Environment(\.managedObjectContext) private var context
+    @EnvironmentObject private var app: AppModel
 
-private struct EmptyStore: View {
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "tray")
-                .font(.system(size: 34))
-                .foregroundStyle(.secondary)
-            Text("Nothing imported yet")
-                .font(.title3.weight(.medium))
-            Text("Use Import in the toolbar and pick web/data/budgetr.db.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        Card(padding: 22) {
+            VStack(alignment: .leading, spacing: 16) {
+                BrandMark(size: 46, showsWordmark: false)
+
+                Text("Your ledger, in your pocket.")
+                    .font(F.display(27))
+                    .foregroundStyle(T.paper)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("budgetr reads the same ledger as your Mac. Bring it over once — AirDrop budgetr.db, or drop it into Files → On My iPhone → Budgetr — and every screen fills in.")
+                    .font(F.body(14))
+                    .foregroundStyle(T.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    feature("chart.line.uptrend.xyaxis", "Pace the month", "See whether you'll finish under budget, not after.")
+                    feature("checkmark.circle", "Clear the queue", "File each transaction in one tap.")
+                    feature("chart.pie", "See where it went", "Categories ranked by what you actually spent.")
+                }
+                .padding(.vertical, 4)
+
+                PillButton(title: "Import budgetr.db", systemImage: "square.and.arrow.down", role: .primary) {
+                    Haptics.tap()
+                    app.showingImporter = true
+                }
+                PillButton(title: "Explore with sample data", systemImage: "sparkles") {
+                    app.loadSample(context: context)
+                }
+                Text("Sample data is clearly marked, and removed in one tap.")
+                    .font(F.body(11.5))
+                    .foregroundStyle(T.faint)
+                    .frame(maxWidth: .infinity)
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .padding(40)
     }
-}
 
-// ── Bridging ─────────────────────────────────────────────────────────
-
-private extension CDTransaction {
-    /// Core Data row → the pure summary type.
-    ///
-    /// The category is resolved, not read: the override wins, else the category
-    /// whose `plaidPrimary` matches — the web app's `effectiveCatId`. Pending
-    /// transactions are kept, because they are money already committed and
-    /// dropping them makes today's total look wrong.
-    func summaryEntry(using index: CategoryIndex) -> MonthSummary.Entry {
-        MonthSummary.Entry(
-            amount: amount,
-            date: date ?? "",
-            categoryId: index.resolvedId(for: self),
-            pending: pending
-        )
+    private func feature(_ symbol: String, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(T.jade)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(T.jade.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(F.semibold(13.5)).foregroundStyle(T.paper)
+                Text(detail).font(F.body(12)).foregroundStyle(T.faint)
+            }
+        }
     }
 }
 
 #Preview {
-    DashboardView()
-        .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+    NavigationStack {
+        DashboardView()
+    }
+    .environmentObject(AppModel())
+    .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
 }

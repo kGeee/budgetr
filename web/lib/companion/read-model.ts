@@ -170,6 +170,8 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
         id: p.id,
         name: p.name,
         color: p.color,
+        // So the phone can open a prefilled Venmo request.
+        handle: p.handle,
         cents: cents(p.balance),
         openCount: p.expenseCount,
       })),
