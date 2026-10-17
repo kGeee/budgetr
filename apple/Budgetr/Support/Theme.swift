@@ -31,117 +31,67 @@ enum T {
     static let onJade = Color(hex: 0x06120C)
     static let onBrass = Color(hex: 0x1A1505)
 
-    /// The categorical palette used by every chart, in order — matching
-    /// `PIE_COLORS` on the web so a category keeps its colour across apps.
+    /// The categorical palette used by every chart, in order — the companion's
+    /// `PIE_COLORS` (itself the desktop's), so a category keeps its colour
+    /// across all three apps.
     static let chart: [Color] = [
-        Color(hex: 0x6FE3A6), Color(hex: 0xCBB07C), Color(hex: 0x7FB2E0),
-        Color(hex: 0xC98BD0), Color(hex: 0xE0A26B), Color(hex: 0x7FD0C4),
-        Color(hex: 0xA8B57A), Color(hex: 0xE28C8C),
+        jade, brass, blue, coral,
+        Color(hex: 0xB59CE0), Color(hex: 0x5FC9C0), Color(hex: 0xE0C36F),
+        Color(hex: 0x9AD17F), Color(hex: 0xE08FB8), muted,
     ]
 
-    static let radius: CGFloat = 14
+    /// Card corner radius — the companion's 18, which reads softer on glass
+    /// than the web's 14 and is what the floating tab pill was drawn against.
+    static let radius: CGFloat = 18
+    /// Recessed wells inside a card: stat tiles, category tiles, chips.
+    static let radiusSmall: CGFloat = 14
 }
 
 /// The three faces, by role. Display is Fraunces (figures and titles), body is
 /// Hanken Grotesk, and anything that lines up in a column is Spline Sans Mono.
+///
+/// Every face scales with Dynamic Type relative to the text style it stands in
+/// for, so a reader who has asked for bigger text gets it here too.
 enum F {
-    static func display(_ size: CGFloat) -> Font { .custom("Fraunces-SemiBold", size: size) }
-    static func displayBold(_ size: CGFloat) -> Font { .custom("Fraunces-Bold", size: size) }
-    static func body(_ size: CGFloat) -> Font { .custom("HankenGrotesk-Regular", size: size) }
-    static func medium(_ size: CGFloat) -> Font { .custom("HankenGrotesk-Medium", size: size) }
-    static func semibold(_ size: CGFloat) -> Font { .custom("HankenGrotesk-SemiBold", size: size) }
-    static func mono(_ size: CGFloat) -> Font { .custom("SplineSansMono-Medium", size: size) }
-    static func monoSemibold(_ size: CGFloat) -> Font { .custom("SplineSansMono-SemiBold", size: size) }
+    static func display(_ size: CGFloat) -> Font { .custom("Fraunces-SemiBold", size: size, relativeTo: .largeTitle) }
+    static func displayBold(_ size: CGFloat) -> Font { .custom("Fraunces-Bold", size: size, relativeTo: .largeTitle) }
+    static func body(_ size: CGFloat) -> Font { .custom("HankenGrotesk-Regular", size: size, relativeTo: .body) }
+    static func medium(_ size: CGFloat) -> Font { .custom("HankenGrotesk-Medium", size: size, relativeTo: .body) }
+    static func semibold(_ size: CGFloat) -> Font { .custom("HankenGrotesk-SemiBold", size: size, relativeTo: .body) }
+    static func mono(_ size: CGFloat) -> Font { .custom("SplineSansMono-Medium", size: size, relativeTo: .callout) }
+    static func monoSemibold(_ size: CGFloat) -> Font { .custom("SplineSansMono-SemiBold", size: size, relativeTo: .callout) }
 }
 
-// ── Shared chrome ────────────────────────────────────────────────────
-
-/// The web app's `.eyebrow`: small, tracked, uppercase, brass.
-struct Eyebrow: View {
-    let text: String
-    var color: Color = T.brass
-
-    init(_ text: String, color: Color = T.brass) {
-        self.text = text
-        self.color = color
-    }
-
-    var body: some View {
-        Text(text.uppercased())
-            .font(F.mono(10))
-            .tracking(1.3)
-            .foregroundStyle(color)
-    }
+/// Motion, in Apple's fluid-interface grammar: critically damped springs that
+/// settle without bouncing, and a stagger short enough that a screen of cards
+/// lands as one gesture rather than a slideshow.
+enum M {
+    static let snappy = Animation.spring(response: 0.3, dampingFraction: 1.0)
+    static let settle = Animation.spring(response: 0.42, dampingFraction: 0.86)
+    static let sheet = Animation.spring(response: 0.38, dampingFraction: 0.92)
+    static let stagger: Double = 0.055
 }
 
-/// The web app's `.card` — a panel on the canvas with a hairline border.
-struct Panel<Content: View>: View {
-    var padding: CGFloat = 16
-    @ViewBuilder let content: Content
+/// Budget state → colour, the companion's `stateColor`.
+enum BudgetState {
+    case ok, warn, over
 
-    init(padding: CGFloat = 16, @ViewBuilder content: () -> Content) {
-        self.padding = padding
-        self.content = content()
-    }
-
-    var body: some View {
-        content
-            .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(T.panel, in: RoundedRectangle(cornerRadius: T.radius))
-            .overlay(
-                RoundedRectangle(cornerRadius: T.radius).strokeBorder(T.line, lineWidth: 1)
-            )
-    }
-}
-
-/// A titled panel — the shape most of the app is made of.
-struct TitledPanel<Content: View>: View {
-    let title: String
-    var trailing: String?
-    @ViewBuilder let content: Content
-
-    init(_ title: String, trailing: String? = nil, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.trailing = trailing
-        self.content = content()
-    }
-
-    var body: some View {
-        Panel(padding: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Eyebrow(title)
-                    Spacer()
-                    if let trailing {
-                        Text(trailing).font(F.mono(11)).foregroundStyle(T.faint)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .overlay(alignment: .bottom) { Rectangle().fill(T.line).frame(height: 1) }
-
-                content.padding(16)
-            }
+    var color: Color {
+        switch self {
+        case .ok: return T.jade
+        case .warn: return T.brass
+        case .over: return T.coral
         }
     }
-}
 
-/// A meter bar — budgets, allocation, anything with a share.
-struct MeterBar: View {
-    let fraction: Double
-    var color: Color = T.jade
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(T.panel2)
-                Capsule()
-                    .fill(color)
-                    .frame(width: max(0, min(1, fraction)) * geo.size.width)
-            }
-        }
-        .frame(height: 5)
+    /// Over the limit is coral; ahead of an even pace (or inside the last 15%)
+    /// is brass; anything else is held.
+    static func of(spent: Double, limit: Double, pacing: BudgetPacing? = nil) -> BudgetState {
+        guard limit > 0 else { return .ok }
+        if spent > limit { return .over }
+        if spent > limit * 0.85 { return .warn }
+        if let pacing, pacing.isAheadOfPace { return .warn }
+        return .ok
     }
 }
 
@@ -157,12 +107,27 @@ extension Color {
             opacity: 1
         )
     }
+
+    /// `#6FE3A6` / `6fe3a6` → a colour, or nil for anything else (the web app
+    /// stores category colours as nullable free text).
+    init?(hexString raw: String?) {
+        guard var s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        self.init(hex: v)
+    }
 }
 
 extension Double {
     /// `$1,234.56`, in the app's convention.
     func money(_ code: String = "USD") -> String {
         self.formatted(.currency(code: code).precision(.fractionLength(2)))
+    }
+
+    /// `$1,234` — whole dollars, for heroes where the cents are noise but the
+    /// thousands separator isn't.
+    func moneyWhole(_ code: String = "USD") -> String {
+        self.formatted(.currency(code: code).precision(.fractionLength(0)))
     }
 
     /// `$1.2K` — for tiles and axes, where the cents are noise.
@@ -172,5 +137,12 @@ extension Double {
         if a >= 1_000_000 { return "\(sign)$\((a / 1_000_000).formatted(.number.precision(.fractionLength(1))))M" }
         if a >= 1_000 { return "\(sign)$\((a / 1_000).formatted(.number.precision(.fractionLength(1))))K" }
         return "\(sign)$\(a.formatted(.number.precision(.fractionLength(0))))"
+    }
+}
+
+extension Date {
+    /// `Saturday, October 17` — the companion's page eyebrow.
+    var pageEyebrow: String {
+        formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 }

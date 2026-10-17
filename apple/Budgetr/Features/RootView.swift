@@ -1,37 +1,30 @@
 import CoreData
 import SwiftUI
 
-struct ImportAlert: Identifiable {
-    let id = UUID()
-    let title: String
-    let message: String
-}
-
-/// The app shell, laid out like the web app's: a grouped sidebar over a dark
-/// canvas, with the `b.` mark at the top.
+/// The regular-width shell (iPad, Mac), laid out like the web app's: a grouped
+/// sidebar over the dark canvas, with the `b.` mark at the top.
 ///
 /// The grouping is the web app's own — Ledger, Planning, Assistant — so moving
-/// between the two doesn't mean relearning where anything lives. Sections that
-/// aren't built yet are listed and disabled rather than hidden, because a
-/// missing nav item reads as "this app can't do that" when the truth is "not
-/// yet".
+/// between the two doesn't mean relearning where anything lives.
 struct RootView: View {
     enum Item: String, CaseIterable, Identifiable {
         case overview, accounts, transactions, categories
         case budgets, recurring
         case review
+        case settings
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .overview: return "Overview"
+            case .overview: return "Spending"
             case .accounts: return "Accounts"
             case .transactions: return "Transactions"
             case .categories: return "Categories"
             case .budgets: return "Budgets"
             case .recurring: return "Recurring"
             case .review: return "Review"
+            case .settings: return "Settings"
             }
         }
 
@@ -42,9 +35,10 @@ struct RootView: View {
             case .accounts: return "building.columns"
             case .transactions: return "arrow.left.arrow.right"
             case .categories: return "tag"
-            case .budgets: return "wallet.bifold"
-            case .recurring: return "arrow.trianglehead.2.clockwise"
+            case .budgets: return "chart.pie"
+            case .recurring: return "arrow.triangle.2.circlepath"
             case .review: return "checkmark.circle"
+            case .settings: return "gearshape"
             }
         }
 
@@ -54,14 +48,16 @@ struct RootView: View {
             case .accounts, .transactions, .categories, .recurring: return "Ledger"
             case .budgets: return "Planning"
             case .review: return "Assistant"
+            case .settings: return "App"
             }
         }
     }
 
-    @Environment(\.managedObjectContext) private var context
+    @EnvironmentObject private var app: AppModel
     @State private var selection: Item? = .overview
-    @State private var showingImporter = false
-    @State private var importAlert: ImportAlert?
+
+    @FetchRequest(sortDescriptors: [], predicate: NSPredicate(format: "reviewed == NO"))
+    private var unreviewed: FetchedResults<CDTransaction>
 
     private var groups: [(name: String, items: [Item])] {
         var out: [(String, [Item])] = []
@@ -80,21 +76,13 @@ struct RootView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            detail
-                .background(T.ink)
+            NavigationStack {
+                detail
+            }
+            .id(selection)
         }
         .background(T.ink)
-        .tint(T.jade)
-        .preferredColorScheme(.dark)
-        .fileImporter(
-            isPresented: $showingImporter,
-            allowedContentTypes: [.init(filenameExtension: "db")!]
-        ) { result in
-            importAlert = ImportRunner.handle(result, context: context)
-        }
-        .alert(item: $importAlert) { alert in
-            Alert(title: Text(alert.title), message: Text(alert.message))
-        }
+        .onChange(of: selection) { _, _ in Haptics.tick() }
     }
 
     private var sidebar: some View {
@@ -107,9 +95,13 @@ struct RootView: View {
             ForEach(groups, id: \.name) { group in
                 Section {
                     ForEach(group.items) { item in
-                        Label(item.title, systemImage: item.symbol)
-                            .font(F.body(13.5))
-                            .tag(item)
+                        Label {
+                            Text(item.title).font(F.medium(13.5))
+                        } icon: {
+                            Image(systemName: item.symbol)
+                        }
+                        .badge(item == .review ? unreviewed.count : 0)
+                        .tag(item)
                     }
                 } header: {
                     if !group.name.isEmpty { Eyebrow(group.name) }
@@ -117,11 +109,14 @@ struct RootView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(T.ink)
         .navigationTitle("budgetr")
+        .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button {
-                    showingImporter = true
+                    app.showingImporter = true
                 } label: {
                     Label("Import", systemImage: "square.and.arrow.down")
                 }
@@ -140,48 +135,13 @@ struct RootView: View {
         case .budgets: BudgetsView()
         case .recurring: RecurringView()
         case .review: ReviewView()
+        case .settings: SettingsView()
         }
-    }
-}
-
-/// The `b.` mark — the same italic serif letter and jade dot the desktop app,
-/// the DMG and the phone all show.
-struct BrandMark: View {
-    var size: CGFloat = 30
-
-    var body: some View {
-        HStack(spacing: 9) {
-            ZStack(alignment: .bottomTrailing) {
-                RoundedRectangle(cornerRadius: size * 0.28)
-                    .fill(T.panel)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: size * 0.28)
-                            .strokeBorder(T.brassDim, lineWidth: 1)
-                    )
-                    .frame(width: size, height: size)
-
-                Text("b")
-                    .font(F.display(size * 0.62))
-                    .italic()
-                    .foregroundStyle(T.paper)
-                    .offset(x: -size * 0.18, y: -size * 0.04)
-
-                Circle()
-                    .fill(T.jade)
-                    .frame(width: size * 0.15, height: size * 0.15)
-                    .offset(x: -size * 0.16, y: -size * 0.2)
-            }
-            .frame(width: size, height: size)
-
-            Text("budgetr")
-                .font(F.display(20))
-                .foregroundStyle(T.paper)
-        }
-        .padding(.vertical, 4)
     }
 }
 
 #Preview {
     RootView()
+        .environmentObject(AppModel())
         .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
 }
