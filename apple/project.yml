@@ -44,9 +44,14 @@ targets:
     #  - NSAllowsLocalNetworking: a relay on the LAN (COMPANION_RELAY_URL
     #    pointed at a dev machine) is plain http; the hosted one is https.
     #    Everything through it is end-to-end encrypted either way.
+    #  - CFBundleShortVersionString / CFBundleVersion: XcodeGen otherwise writes
+    #    literal 1.0 / 1 here, and a key in the file beats the build setting,
+    #    so the per-upload CURRENT_PROJECT_VERSION would never reach the bundle.
     info:
       path: Budgetr/Support/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: LaunchBackground

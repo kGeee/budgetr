@@ -68,6 +68,11 @@ xcodebuild \
 
 [[ -d "$ARCHIVE" ]] || { echo "✗ archive failed — rerun without the grep filter to see why" >&2; exit 1; }
 
+# App Store Connect rejects a repeated build number, so refuse to upload one
+# that didn't make it into the bundle.
+STAMPED=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ARCHIVE/Products/Applications/Budgetr.app/Info.plist")
+[[ "$STAMPED" == "$BUILD_NUMBER" ]] || { echo "✗ archived CFBundleVersion is '$STAMPED', expected '$BUILD_NUMBER'" >&2; exit 1; }
+
 # `app-store-connect` with destination `upload` makes -exportArchive sign for
 # distribution and send the build straight to App Store Connect, where it
 # appears in TestFlight once processing finishes (usually 5–15 minutes).
