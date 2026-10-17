@@ -108,10 +108,48 @@ enum CompanionModel {
         index[key]?.name ?? label(key)
     }
 
+    // ── What counts as spend ─────────────────────────────────────────
+    // The Mac's rule, applied to the tape: a transaction is spend when its
+    // (effective) category is in the spending group. Card payments ("AMERICAN
+    // EXPRESS ACH PMT", the card-side "AUTOPAY PAYMENT"), transfers between
+    // your own accounts and fronted shares of a split bill all sit in the
+    // transfer group, so they are never spend and never income — exactly as
+    // the Mac's spendByDay and budgets treat them.
+
+    enum Flow { case spend, income, transfer }
+
+    /// A category key's group. The vocabulary decides when it names the key;
+    /// otherwise the key itself is read — a transfer or card-payment key is
+    /// never spend — and anything else counts as spending, so a budgeted or
+    /// newly created category the vocabulary hasn't caught up with still shows.
+    static func group(_ key: String, _ index: [String: Summary.Category]) -> String? {
+        if let g = index[key]?.group { return g }
+        let k = key.lowercased()
+        if k.contains("transfer") || k.contains("loan_payment") || k.contains("reimburs") { return "transfer" }
+        if k.contains("income") { return "income" }
+        return "spending"
+    }
+
+    static func flow(_ t: Summary.Txn, _ index: [String: Summary.Category]) -> Flow {
+        switch group(t.category, index) {
+        case "spending": return t.cents < 0 ? .spend : .income // a refund on a purchase
+        case "income": return t.cents > 0 ? .income : .transfer
+        default: return .transfer
+        }
+    }
+
+    static func isSpend(_ t: Summary.Txn, _ index: [String: Summary.Category]) -> Bool {
+        t.cents < 0 && flow(t, index) == .spend
+    }
+
+    static func isIncome(_ t: Summary.Txn, _ index: [String: Summary.Category]) -> Bool {
+        t.cents > 0 && group(t.category, index) == "income"
+    }
+
     /// Month to date by category, descending. Income and transfers never count.
     static func categorySpend(_ s: Summary, month: Month) -> [CategorySpend] {
         let index = categoryIndex(s)
-        func isSpend(_ id: String) -> Bool { (index[id]?.group ?? "spending") == "spending" }
+        func isSpend(_ id: String) -> Bool { group(id, index) == "spending" }
 
         let budgets = Dictionary(s.budgets.map { ($0.category, $0) }, uniquingKeysWith: { a, _ in a })
         var fromTape: [String: Int] = [:]

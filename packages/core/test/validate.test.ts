@@ -202,6 +202,26 @@ describe('assertValidOutbox — v2 ops', () => {
     ).toThrow();
   });
 
+  it('accepts someone new to split with, on a v3 batch', () => {
+    expect(() =>
+      assertValidOutbox(batch({ kind: 'addPerson', personId: 'p-new', name: 'Maya', handle: '@maya', color: '#6FE3A6' })),
+    ).not.toThrow();
+  });
+
+  it('refuses a blank name or a malformed colour', () => {
+    expect(() => assertValidOutbox(batch({ kind: 'addPerson', personId: 'p', name: '  ' }))).toThrow();
+    expect(() => assertValidOutbox(batch({ kind: 'addPerson', personId: 'p', name: 'Sam', color: 'green' }))).toThrow();
+  });
+
+  it('still applies a v2 batch, but not one smuggling a v3 op', () => {
+    // A phone that predates v3, or a v3 phone with no new ops to send.
+    expect(() => assertValidOutbox({ ...batch(splitBill), v: 2 })).not.toThrow();
+    expect(() =>
+      assertValidOutbox({ ...batch({ kind: 'addPerson', personId: 'p', name: 'Sam' }), v: 2 }),
+    ).toThrow();
+    expect(() => assertValidOutbox({ ...batch(splitBill), v: 1 })).toThrow();
+  });
+
   it('accepts a receipt photo', () => {
     expect(() =>
       assertValidOutbox(batch({ kind: 'scanReceipt', txnId: 't1', imageBase64: 'AAAA' })),

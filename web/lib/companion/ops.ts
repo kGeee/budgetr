@@ -25,7 +25,7 @@ import {
   transactionSplits,
   transactions,
 } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Op } from "@budgetr/core";
 import { REIMBURSABLE_CATEGORY_ID, seedReimbursableCategory } from "@/lib/seed-categories-data";
 import { appendAppliedOpIds, getAppliedOpIds } from "./store";
@@ -35,6 +35,11 @@ const newId = (prefix: string) => `${prefix}_${crypto.randomUUID().slice(0, 8)}`
 export function applyOps(ops: Op[]): { mutated: number } {
   const already = new Set(getAppliedOpIds());
   let mutated = 0;
+  // A phone-minted person id the desktop resolved to someone it already had
+  // (same name). Later ops in the batch follow the alias rather than being
+  // dropped as naming an unknown person.
+  const alias = new Map<string, string>();
+  const who = (id: string) => alias.get(id) ?? id;
 
   db.transaction((tx) => {
     // Apply in the order the user made the edits, regardless of batch order.
@@ -66,6 +71,32 @@ export function applyOps(ops: Op[]): { mutated: number } {
           })
           .run();
         mutated += 1;
+      } else if (op.kind === "addPerson") {
+        const exists = tx.select({ id: people.id }).from(people).where(eq(people.id, op.personId)).get();
+        if (exists) continue; // re-delivered
+        const name = op.name.trim();
+        // Same rule as the desktop's createPerson: names are unique, ignoring
+        // case. Adding "maya" from the phone means the Maya you already have.
+        const dupe = tx.get<{ id: string }>(sql`SELECT id FROM people WHERE name = ${name} COLLATE NOCASE`);
+        if (dupe) {
+          alias.set(op.personId, dupe.id);
+          if (op.handle?.trim()) {
+            const cur = tx.select({ handle: people.handle }).from(people).where(eq(people.id, dupe.id)).get();
+            if (!cur?.handle) tx.update(people).set({ handle: op.handle.trim() }).where(eq(people.id, dupe.id)).run();
+          }
+          continue;
+        }
+        tx.insert(people)
+          .values({
+            id: op.personId,
+            name,
+            handle: op.handle?.trim() || null,
+            color: op.color ?? null,
+            archived: false,
+            createdAt: new Date(op.ts * 1000),
+          })
+          .run();
+        mutated += 1;
       } else if (op.kind === "splitBill") {
         const txn = tx
           .select({ id: transactions.id, amount: transactions.amount, cat: transactions.userCategoryId })
@@ -77,9 +108,9 @@ export function applyOps(ops: Op[]): { mutated: number } {
         // Every person must still exist. A share pointing at a deleted person
         // would silently vanish from the balances while still leaving the
         // transaction marked as split.
-        const known = op.shares.filter(
-          (sh) => tx.select({ id: people.id }).from(people).where(eq(people.id, sh.personId)).get() != null,
-        );
+        const known = op.shares
+          .map((sh) => ({ ...sh, personId: who(sh.personId) }))
+          .filter((sh) => tx.select({ id: people.id }).from(people).where(eq(people.id, sh.personId)).get() != null);
         if (known.length === 0) continue;
 
         seedReimbursableCategory();
@@ -141,7 +172,7 @@ export function applyOps(ops: Op[]): { mutated: number } {
           .run();
         mutated += 1;
       } else if (op.kind === "recordSettlement") {
-        const person = tx.select({ id: people.id }).from(people).where(eq(people.id, op.personId)).get();
+        const person = tx.select({ id: people.id }).from(people).where(eq(people.id, who(op.personId))).get();
         if (!person) continue;
         // One repayment per inflow. Re-confirming a suggestion the desktop
         // already recorded must not double-credit the balance.
@@ -157,7 +188,7 @@ export function applyOps(ops: Op[]): { mutated: number } {
         tx.insert(settlements)
           .values({
             id: newId("settle"),
-            personId: op.personId,
+            personId: who(op.personId),
             transactionId: op.txnId ?? null,
             amount: op.cents / 100,
             date: new Date(op.ts * 1000).toISOString().slice(0, 10),

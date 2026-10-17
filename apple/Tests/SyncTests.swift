@@ -236,3 +236,99 @@ final class CompanionModelTests: XCTestCase {
         XCTAssertEqual(rows[1].name, "Fun")        // humanised key
     }
 }
+
+// ── What counts as spend, and the outbox wire format ────────────────
+
+final class CompanionFlowTests: XCTestCase {
+    private let index: [String: Summary.Category] = [
+        "cat_food": .init(id: "cat_food", name: "Food", icon: nil, group: "spending"),
+        "cat_loan_payments": .init(id: "cat_loan_payments", name: "Loan Payments", icon: nil, group: "transfer"),
+        "cat_transfer_in": .init(id: "cat_transfer_in", name: "Transfer In", icon: nil, group: "transfer"),
+        "cat_income": .init(id: "cat_income", name: "Income", icon: nil, group: "income"),
+    ]
+
+    private func txn(_ cents: Int, _ cat: String) -> Summary.Txn {
+        .init(id: UUID().uuidString, ts: 0, merchant: "m", cents: cents, category: cat, pending: false)
+    }
+
+    func testCardPaymentsAndTransfersAreNeitherSpendNorIncome() {
+        // "AMERICAN EXPRESS DES:ACH PMT" from checking, and the card's own
+        // "AUTOPAY PAYMENT - THANK YOU" credit.
+        let amex = txn(-642_116, "cat_loan_payments")
+        let autopay = txn(642_116, "cat_loan_payments")
+        let venmoIn = txn(6_450, "cat_transfer_in")
+        for t in [amex, autopay, venmoIn] {
+            XCTAssertEqual(CompanionModel.flow(t, index), .transfer)
+            XCTAssertFalse(CompanionModel.isSpend(t, index))
+            XCTAssertFalse(CompanionModel.isIncome(t, index))
+        }
+        XCTAssertTrue(CompanionModel.isSpend(txn(-1_200, "cat_food"), index))
+        XCTAssertTrue(CompanionModel.isIncome(txn(400_000, "cat_income"), index))
+        // A key the vocabulary hasn't caught up with still reads by its name.
+        XCTAssertFalse(CompanionModel.isSpend(txn(-500, "cat_transfer_out_new"), index))
+        XCTAssertTrue(CompanionModel.isSpend(txn(-500, "cat_brand_new"), index))
+    }
+
+    func testOpsEncodeToTheContractShape() throws {
+        let split = CompanionOp.splitBill(.init(
+            id: "op1", ts: 10, txnId: "t1",
+            shares: [.init(personId: "p1", cents: 6_450)], note: nil
+        ))
+        let settle = CompanionOp.recordSettlement(.init(id: "op2", ts: 11, personId: "p1", cents: 6_450, txnId: "venmo"))
+
+        let a = try JSONSerialization.jsonObject(with: JSONEncoder().encode(split)) as! [String: Any]
+        XCTAssertEqual(a["kind"] as? String, "splitBill")
+        XCTAssertEqual(a["txnId"] as? String, "t1")
+        XCTAssertNil(a["note"], "absent, not null")
+        let shares = a["shares"] as! [[String: Any]]
+        XCTAssertEqual(shares.first?["personId"] as? String, "p1")
+        XCTAssertEqual(shares.first?["cents"] as? Int, 6_450)
+
+        let b = try JSONSerialization.jsonObject(with: JSONEncoder().encode(settle)) as! [String: Any]
+        XCTAssertEqual(Set(b.keys), ["kind", "id", "ts", "personId", "cents", "txnId"])
+        XCTAssertEqual(b["kind"] as? String, "recordSettlement")
+
+        // And back, for the on-disk queue.
+        XCTAssertEqual(try JSONDecoder().decode(CompanionOp.self, from: JSONEncoder().encode(split)), split)
+        XCTAssertEqual(try JSONDecoder().decode(CompanionOp.self, from: JSONEncoder().encode(settle)), settle)
+    }
+
+    func testSealedBatchOpensWithTheSameKey() throws {
+        let key = [UInt8](repeating: 7, count: 32)
+        let batch = OutboxBatch(v: OutboxContract.version, deviceId: "dev_x", batchId: "b1", createdAt: 1, ops: [
+            .recordSettlement(.init(id: "op", ts: 1, personId: "p", cents: 100, txnId: nil)),
+        ])
+        let plain = try JSONEncoder().encode(batch)
+        let env = try Envelope.seal(plain, key: key)
+        XCTAssertEqual(env.alg, "xsalsa20-poly1305")
+        XCTAssertEqual(Base64.decode(env.nonce)?.count, 24)
+
+        let opened = try SecretBox.open(Base64.decode(env.ct)!, nonce: Base64.decode(env.nonce)!, key: key)
+        XCTAssertEqual(Data(opened), plain)
+
+        // Fresh nonce every time — reuse would break the cipher.
+        XCTAssertNotEqual(try Envelope.seal(plain, key: key).nonce, env.nonce)
+    }
+}
+
+final class AddPersonOpTests: XCTestCase {
+    func testAddPersonEncodesAndPicksTheBatchVersion() throws {
+        let add = CompanionOp.addPerson(.init(id: "op", ts: 1, personId: "person_x", name: "Rowan", handle: "@rowan", color: "#6FE3A6"))
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(add)) as! [String: Any]
+        XCTAssertEqual(json["kind"] as? String, "addPerson")
+        XCTAssertEqual(Set(json.keys), ["kind", "id", "ts", "personId", "name", "handle", "color"])
+        XCTAssertEqual(try JSONDecoder().decode(CompanionOp.self, from: JSONEncoder().encode(add)), add)
+
+        let settle = CompanionOp.recordSettlement(.init(id: "s", ts: 1, personId: "p", cents: 1, txnId: nil))
+        // Only a batch that needs v3 says v3, so an older Mac keeps applying the rest.
+        XCTAssertEqual(OutboxContract.version(for: [settle]), 2)
+        XCTAssertEqual(OutboxContract.version(for: [add, settle]), 3)
+    }
+
+    func testItemizedSplitCarriesBasisAndItems() throws {
+        let split = CompanionOp.splitBill(.init(id: "op", ts: 1, txnId: "t", shares: [.init(personId: "p", cents: 3934)], note: nil, basisCents: 9000, itemsJson: "{\"v\":1}"))
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(split)) as! [String: Any]
+        XCTAssertEqual(json["basisCents"] as? Int, 9000)
+        XCTAssertEqual(json["itemsJson"] as? String, "{\"v\":1}")
+    }
+}

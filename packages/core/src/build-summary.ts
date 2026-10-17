@@ -70,6 +70,7 @@ export interface DesktopReadModel {
     cents: number;
     openCount: number;
     lastSettledAt?: number | null;
+    handle?: string | null;
   }>;
   shared?: Array<{
     id: string;
@@ -276,6 +277,7 @@ export function buildSummary(model: DesktopReadModel): Summary {
               cents: cents(p.cents, `person ${p.id}`),
               openCount: Math.max(0, Math.trunc(p.openCount)),
               ...(p.lastSettledAt ? { lastSettledAt: seconds(p.lastSettledAt, `person ${p.id} settled`) } : {}),
+              ...(p.handle?.trim() ? { handle: p.handle.trim() } : {}),
             })),
         }
       : {}),

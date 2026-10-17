@@ -19,6 +19,10 @@ struct ScrubBars: View {
     let points: [BarPoint]
     var height: CGFloat = 104
     var color: Color = T.brass
+    /// Draws the mean of the days shown as a dashed reference with its value.
+    var showsAverage = false
+    /// Rings the last bar — today, when the series runs to now.
+    var highlightsLast = false
 
     @State private var active: Int?
     @State private var grown = false
@@ -34,6 +38,9 @@ struct ScrubBars: View {
             let barW = max(2, slot * 0.62)
             let maxV = max(1, points.map(\.value).max() ?? 1)
 
+            let avg = points.isEmpty ? 0 : points.map(\.value).reduce(0, +) / Double(points.count)
+            let avgY = height - CGFloat(avg / maxV) * (height - 6)
+
             ZStack(alignment: .topLeading) {
                 if let i = active, points.indices.contains(i) {
                     readout(points[i])
@@ -43,15 +50,40 @@ struct ScrubBars: View {
                 ZStack(alignment: .bottomLeading) {
                     ForEach(Array(points.enumerated()), id: \.element.id) { i, p in
                         let h = max(2, CGFloat(p.value / maxV) * (height - 6))
-                        RoundedRectangle(cornerRadius: min(2, barW / 2), style: .continuous)
-                            .fill(active == i ? T.paper : color)
-                            .opacity(active == nil || active == i ? 0.92 : 0.4)
+                        let isLast = highlightsLast && i == points.count - 1
+                        RoundedRectangle(cornerRadius: min(2.5, barW / 2), style: .continuous)
+                            .fill(active == i
+                                  ? AnyShapeStyle(T.paper)
+                                  : AnyShapeStyle(LinearGradient(colors: [isLast ? T.jade : color, (isLast ? T.jade : color).opacity(0.45)], startPoint: .top, endPoint: .bottom)))
+                            .opacity(active == nil || active == i ? 0.95 : 0.35)
                             .frame(width: barW, height: grown ? h : 2)
+                            .shadow(color: isLast && active == nil ? T.jade.opacity(0.5) : .clear, radius: 5)
                             .offset(x: CGFloat(i) * slot + (slot - barW) / 2)
                     }
                 }
                 .frame(width: w, height: height, alignment: .bottomLeading)
                 .offset(y: readoutHeight)
+
+                if showsAverage && avg > 0 && active == nil {
+                    Path { p in
+                        p.move(to: CGPoint(x: 0, y: avgY))
+                        p.addLine(to: CGPoint(x: w, y: avgY))
+                    }
+                    .stroke(T.paper.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                    .offset(y: readoutHeight)
+                    .opacity(grown ? 1 : 0)
+
+                    Text("avg \(avg.moneyCompact())")
+                        .font(F.mono(9.5))
+                        .foregroundStyle(T.paper.opacity(0.75))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(T.ink.opacity(0.85)))
+                        .fixedSize()
+                        .position(x: 30, y: readoutHeight + avgY - 10)
+                        .opacity(grown ? 1 : 0)
+                        .transition(.opacity)
+                }
             }
             .contentShape(Rectangle())
             // Simultaneous, so a page scroll that starts on the chart still

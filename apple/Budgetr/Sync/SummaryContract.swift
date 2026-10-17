@@ -79,6 +79,56 @@ struct Summary: Codable, Equatable {
     let investments: Investments?
     let spendByDay: [SparkPoint]?
     let categories: [Category]?
+    // v2 — shared expenses. Absent on installs that have never split a bill.
+    let people: [Person]?
+    /// Most recent first.
+    let shared: [SharedExpense]?
+    /// Inflows the Mac thinks are paybacks, pending confirmation there.
+    let settleSuggestions: [SettleSuggestion]?
+
+    struct Person: Codable, Equatable, Identifiable {
+        let id: String
+        let name: String
+        /// Hex, assigned on the Mac, so both apps colour a person alike.
+        let color: String?
+        /// Net, signed: positive = they owe you. Netted on the Mac.
+        let cents: Int
+        /// Unsettled bills they're on.
+        let openCount: Int
+        let lastSettledAt: Int?
+        /// Venmo @handle, phone or email, as entered on the Mac.
+        let handle: String?
+    }
+
+    struct SharedExpense: Codable, Equatable, Identifiable {
+        let id: String
+        let txnId: String
+        let ts: Int
+        let merchant: String
+        /// The whole bill, positive.
+        let cents: Int
+        /// Your slice of it.
+        let myCents: Int
+        let shares: [Share]
+        /// Built from a receipt, item by item.
+        let itemized: Bool?
+        let note: String?
+
+        struct Share: Codable, Equatable {
+            let personId: String
+            let cents: Int
+        }
+    }
+
+    struct SettleSuggestion: Codable, Equatable, Identifiable {
+        var id: String { "\(txnId)|\(personId)" }
+        let txnId: String
+        let personId: String
+        let ts: Int
+        let cents: Int
+        /// Pre-rendered on the Mac, e.g. "Venmo · matches their Ippudo share".
+        let detail: String
+    }
 
     struct SparkPoint: Codable, Equatable {
         /// Unix seconds at 00:00 UTC of the day.

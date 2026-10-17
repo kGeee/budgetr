@@ -45,8 +45,11 @@ struct PageHead<Trailing: View>: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            Spacer(minLength: 0)
-            trailing
+            // The eyebrow truncates before the trailing chips get pushed off
+            // the edge of the screen.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(-1)
+            trailing.fixedSize()
         }
         .padding(.bottom, 16)
         .overlay(alignment: .bottom) { Hairline() }
@@ -360,6 +363,8 @@ struct StripedMeter: View {
     let fraction: Double
     var color: Color = T.jade
     var height: CGFloat = 12
+    /// Where an even pace would be today (0…1) — a hairline tick above the bar.
+    var marker: Double? = nil
 
     @State private var shown: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -398,6 +403,18 @@ struct StripedMeter: View {
                     .overlay(Circle().strokeBorder(color, lineWidth: 2))
                     .frame(width: height - 1, height: height - 1)
                     .offset(x: max(0, min(w - height, fillW - r)) + 0.5)
+            }
+            .frame(height: height)
+            // An overlay, so the tick can stand proud of the bar without
+            // stretching the track it sits on.
+            .overlay(alignment: .leading) {
+                if let marker {
+                    Capsule()
+                        .fill(T.paper.opacity(0.85))
+                        .frame(width: 2, height: height + 6)
+                        .offset(x: w * max(0, min(1, marker)) - 1)
+                        .accessibilityHidden(true)
+                }
             }
         }
         .frame(height: height)

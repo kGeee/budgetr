@@ -391,4 +391,60 @@ describe("applyOps — shared expenses", () => {
     // Names reach the phone cleaned, the same as everywhere else.
     expect(bill.merchant).toBe("Ippudo");
   });
+
+  it("adds someone from the phone and splits with them in the same batch", () => {
+    db.insert(schema.transactions)
+      .values({
+        id: "txn-tacos",
+        accountId: "acc-chk",
+        amount: 40,
+        date: new Date().toISOString().slice(0, 10),
+        name: "TACOS",
+        pending: false,
+        userCategoryId: "cat_dining",
+      })
+      .run();
+    const res = applyOps([
+      { id: "op-add-1", ts: NOW + 3, kind: "addPerson", personId: "p-phone-1", name: "Rowan", handle: "@rowan" },
+      { id: "op-split-tacos", ts: NOW + 3, kind: "splitBill", txnId: "txn-tacos", shares: [{ personId: "p-phone-1", cents: 2000 }] },
+    ]);
+    expect(res.mutated).toBe(2);
+    const row = db.get<{ name: string; handle: string }>(sql`SELECT name, handle FROM people WHERE id = 'p-phone-1'`);
+    expect(row).toEqual({ name: "Rowan", handle: "@rowan" });
+    const owed = db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expense_shares WHERE person_id = 'p-phone-1'`);
+    expect(owed!.n).toBe(1);
+
+    // Re-delivery is a no-op, never a second Rowan.
+    expect(applyOps([{ id: "op-add-1b", ts: NOW + 4, kind: "addPerson", personId: "p-phone-1", name: "Rowan" }]).mutated).toBe(0);
+    expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM people WHERE name = 'Rowan'`)!.n).toBe(1);
+
+    // Handles travel so the phone can open a prefilled Venmo request.
+    const summary = core.buildSummary(buildReadModel(NOW));
+    expect(summary.people!.find((p) => p.id === "p-phone-1")!.handle).toBe("@rowan");
+  });
+
+  it("treats a name the desktop already has as that person", () => {
+    db.insert(schema.transactions)
+      .values({
+        id: "txn-pizza",
+        accountId: "acc-chk",
+        amount: 30,
+        date: new Date().toISOString().slice(0, 10),
+        name: "PIZZA",
+        pending: false,
+        userCategoryId: "cat_dining",
+      })
+      .run();
+    applyOps([
+      { id: "op-add-dupe", ts: NOW + 5, kind: "addPerson", personId: "p-phone-dupe", name: "eesh", handle: "@eesh" },
+      { id: "op-split-pizza", ts: NOW + 5, kind: "splitBill", txnId: "txn-pizza", shares: [{ personId: "p-phone-dupe", cents: 1000 }] },
+    ]);
+    expect(db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM people WHERE id = 'p-phone-dupe'`)!.n).toBe(0);
+    const share = db.get<{ person: string }>(
+      sql`SELECT es.person_id AS person FROM expense_shares es JOIN shared_expenses se ON se.id = es.shared_expense_id WHERE se.transaction_id = 'txn-pizza'`,
+    );
+    expect(share?.person).toBe("p-eesh");
+    // The handle fills a gap but never overwrites one.
+    expect(db.get<{ handle: string }>(sql`SELECT handle FROM people WHERE id = 'p-eesh'`)!.handle).toBe("@eesh");
+  });
 });

@@ -59,7 +59,35 @@ struct ScrollTracking {
         if q != offset { offset = q }
     }
 
+    /// An offset read straight from the scroll view — no baseline to guess.
+    mutating func set(_ value: CGFloat) {
+        let q = (value * 2).rounded() / 2
+        if q != offset { offset = q }
+    }
+
     var collapsed: Bool { offset > 44 }
+}
+
+/// Feeds `ScrollTracking` from the scroll view itself where the OS can say
+/// (iOS 18 / macOS 15), falling back to the title-position preference. The
+/// preference path captures its baseline on the first report, which can land
+/// before the navigation bar has settled — the page then reads as permanently
+/// overscrolled and the title sits stretched. The geometry path has no
+/// baseline to get wrong.
+private struct ScrollOffsetFeed: ViewModifier {
+    @Binding var tracking: ScrollTracking
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { _, y in
+                tracking.set(y)
+            }
+        } else {
+            content.onPreferenceChange(TitleOffsetKey.self) { tracking.update($0) }
+        }
+    }
 }
 
 /// A scrolling page with the PageHead, aurora and compact header.
@@ -100,7 +128,7 @@ struct BScreen<Trailing: View, Content: View>: View {
             .frame(maxWidth: .infinity)
         }
         .scrollIndicators(.hidden)
-        .onPreferenceChange(TitleOffsetKey.self) { tracking.update($0) }
+        .modifier(ScrollOffsetFeed(tracking: $tracking))
         .background(AuroraBackground(drift: reduceMotion ? 0 : -tracking.offset * 0.15))
         .navigationTitle(title)
         .compactHeader(title: title, visible: tracking.collapsed)

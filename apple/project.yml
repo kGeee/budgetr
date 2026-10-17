@@ -68,7 +68,7 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         # The app is dark by design; launch and system chrome agree with it.
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
-        INFOPLIST_KEY_NSCameraUsageDescription: "budgetr uses the camera to scan your Mac's pairing code."
+        INFOPLIST_KEY_NSCameraUsageDescription: "budgetr uses the camera to scan your Mac's pairing code and to photograph receipts for splitting a bill. Photos are read on this iPhone and not uploaded."
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait"
         # iPad multitasking requires all four; App Store validation rejects fewer.
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
@@ -105,6 +105,8 @@ targets:
       - path: Budgetr/Sync/Pairing.swift
       - path: Budgetr/Sync/SummaryContract.swift
       - path: Budgetr/Sync/CompanionModel.swift
+      - path: Budgetr/Sync/Outbox.swift
+      - path: Budgetr/Sync/Receipt.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app.tests

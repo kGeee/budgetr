@@ -215,7 +215,7 @@ private struct PhoneTabs: View {
 
 
 private enum CompanionTab: Hashable {
-    case spending, activity, budgets, holdings, more
+    case spending, activity, shared, budgets, holdings, more
 }
 
 /// The paired phone: the Expo companion's tabs, under the same floating pill.
@@ -227,6 +227,8 @@ private struct CompanionTabs: View {
         [
             .init(tab: .spending, title: "Spending", symbol: "square.grid.2x2"),
             .init(tab: .activity, title: "Activity", symbol: "arrow.left.arrow.right"),
+            // Badged while the Mac has spotted a payback waiting to be confirmed.
+            .init(tab: .shared, title: "Shared", symbol: "person.2", badge: companion.summary?.settleSuggestions?.count ?? 0),
             .init(tab: .budgets, title: "Budgets", symbol: "chart.pie"),
             .init(tab: .holdings, title: "Holdings", symbol: "chart.line.uptrend.xyaxis"),
             .init(tab: .more, title: "More", symbol: "ellipsis", badge: companion.syncError == nil ? 0 : 1),
@@ -241,6 +243,9 @@ private struct CompanionTabs: View {
             NavigationStack { CompanionActivityView() }
                 .toolbar(.hidden, for: .tabBar)
                 .tag(CompanionTab.activity)
+            NavigationStack { CompanionSharedView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(CompanionTab.shared)
             NavigationStack { CompanionBudgetsView() }
                 .toolbar(.hidden, for: .tabBar)
                 .tag(CompanionTab.budgets)

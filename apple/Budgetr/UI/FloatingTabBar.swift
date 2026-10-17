@@ -70,7 +70,8 @@ struct FloatingTabBar<Tab: Hashable>: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
                 }
             }
-            .padding(.horizontal, 14)
+            // Six tabs still fit a 375pt phone once the idle ones tighten up.
+            .padding(.horizontal, items.count > 5 ? 11 : 14)
             .frame(minWidth: 44, minHeight: 44)
             .background {
                 if active {
