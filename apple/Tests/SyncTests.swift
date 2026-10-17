@@ -160,6 +160,10 @@ final class SummaryContractTests: XCTestCase {
         XCTAssertEqual(s.budgets.first?.state, "warn")
         XCTAssertEqual(s.positions.first?.dayBp, -42)
         XCTAssertNil(s.investments)
+        XCTAssertNil(s.outboxVersion) // a Mac from before the field
+
+        let advertised = sample.replacingOccurrences(of: #""appliedOpIds":[]"#, with: #""appliedOpIds":[],"outboxVersion":3"#)
+        XCTAssertEqual(try SummaryContract.decode(Data(advertised.utf8)).outboxVersion, 3)
     }
 
     func testANewerFormatAsksForAnUpdate() {
@@ -323,6 +327,29 @@ final class AddPersonOpTests: XCTestCase {
         // Only a batch that needs v3 says v3, so an older Mac keeps applying the rest.
         XCTAssertEqual(OutboxContract.version(for: [settle]), 2)
         XCTAssertEqual(OutboxContract.version(for: [add, settle]), 3)
+    }
+
+    func testAnOlderMacGetsEverythingItCanReadAndTheRestWaits() {
+        let add = CompanionOp.addPerson(.init(id: "add", ts: 1, personId: "person_new", name: "Rowan", handle: nil, color: nil))
+        let splitNew = CompanionOp.splitBill(.init(id: "split-new", ts: 2, txnId: "t1", shares: [.init(personId: "person_new", cents: 500)], note: nil))
+        let settleNew = CompanionOp.recordSettlement(.init(id: "settle-new", ts: 3, personId: "person_new", cents: 500, txnId: nil))
+        let splitOld = CompanionOp.splitBill(.init(id: "split-old", ts: 4, txnId: "t2", shares: [.init(personId: "p-maya", cents: 700)], note: nil))
+        let settleOld = CompanionOp.recordSettlement(.init(id: "settle-old", ts: 5, personId: "p-maya", cents: 700, txnId: nil))
+        let queue = [add, splitNew, settleNew, splitOld, settleOld]
+
+        // A Mac that reads v2 only — said so, or too old to say.
+        for peer in [2, nil] as [Int?] {
+            let gate = OutboxContract.partition(queue, peer: peer)
+            XCTAssertEqual(gate.send.map(\.id), ["split-old", "settle-old"])
+            XCTAssertEqual(gate.held.map(\.id), ["add", "split-new", "settle-new"])
+            // What goes out is a batch that Mac accepts.
+            XCTAssertEqual(OutboxContract.version(for: gate.send), 2)
+        }
+
+        // An up-to-date Mac takes the lot.
+        let gate = OutboxContract.partition(queue, peer: 3)
+        XCTAssertEqual(gate.send.map(\.id), queue.map(\.id))
+        XCTAssertTrue(gate.held.isEmpty)
     }
 
     func testItemizedSplitCarriesBasisAndItems() throws {

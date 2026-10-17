@@ -238,7 +238,8 @@ final class CompanionStore: ObservableObject {
         // Edits first, so the summary fetched next has the best chance of
         // already reflecting them.
         var pushProblem: String?
-        switch await client.push(pending, deviceId: OutboxStore.deviceId) {
+        let gate = OutboxContract.partition(pending, peer: summary?.outboxVersion)
+        switch await client.push(gate.send, deviceId: OutboxStore.deviceId) {
         case .sent: break
         case .offline: pushProblem = "Offline — your edits will send when you're back."
         case .failed(let why): pushProblem = why.prefix(1).uppercased() + why.dropFirst()
@@ -257,6 +258,11 @@ final class CompanionStore: ObservableObject {
             etag = tag
             Self.saveCache(s)
             markSynced()
+            // Held only because the last summary we had was older or missing;
+            // this one says the Mac reads them, so don't wait a whole sync.
+            if !gate.held.isEmpty, OutboxContract.partition(pending, peer: s.outboxVersion).held.isEmpty {
+                _ = await client.push(pending, deviceId: OutboxStore.deviceId)
+            }
         case .notModified:
             markSynced()
         case .nothingYet:
@@ -271,6 +277,10 @@ final class CompanionStore: ObservableObject {
             syncError = why.prefix(1).uppercased() + why.dropFirst()
         }
         if syncError == nil, let pushProblem { syncError = pushProblem }
+        let held = OutboxContract.partition(pending, peer: summary?.outboxVersion).held.count
+        if syncError == nil, held > 0, summary != nil {
+            syncError = "Update budgetr on your Mac to add people from this phone — \(held) \(held == 1 ? "edit is" : "edits are") waiting. Your other edits still sync."
+        }
         if manual && syncError == nil { Haptics.success() }
     }
 

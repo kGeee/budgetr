@@ -11,7 +11,7 @@ import Security
 // resent on every sync, harmless to repeat because every op id is stable and
 // the Mac applies each id once.
 //
-// The ops are the contract's (`packages/core/src/contracts.ts`, OUTBOX_VERSION 2).
+// The ops are the contract's (`packages/core/src/contracts.ts`, OUTBOX_VERSION 3).
 
 enum OutboxContract {
     /// v3 added addPerson. A batch without it goes as v2, so a Mac that
@@ -21,6 +21,29 @@ enum OutboxContract {
 
     static func version(for ops: [CompanionOp]) -> Int {
         ops.contains { if case .addPerson = $0 { return true } else { return false } } ? version : baseVersion
+    }
+
+    /// What a Mac that reads outbox `peer` can take now, and what has to wait
+    /// for it to update. A Mac that doesn't say (`Summary.outboxVersion` absent)
+    /// predates the field and reads v2 only.
+    ///
+    /// Held: every addPerson, since a v2 Mac refuses the whole batch carrying
+    /// one — and every edit naming a person added here, since that Mac would
+    /// drop the share for someone it has never heard of and still confirm it.
+    static func partition(_ ops: [CompanionOp], peer: Int?) -> (send: [CompanionOp], held: [CompanionOp]) {
+        if (peer ?? baseVersion) >= version { return (ops, []) }
+        var minted = Set<String>()
+        for op in ops {
+            if case .addPerson(let o) = op { minted.insert(o.personId) }
+        }
+        func waits(_ op: CompanionOp) -> Bool {
+            switch op {
+            case .addPerson: return true
+            case .splitBill(let o): return o.shares.contains { minted.contains($0.personId) }
+            case .recordSettlement(let o): return minted.contains(o.personId)
+            }
+        }
+        return (ops.filter { !waits($0) }, ops.filter(waits))
     }
 }
 
