@@ -143,5 +143,6 @@ struct RootView: View {
 #Preview {
     RootView()
         .environmentObject(AppModel())
+        .environmentObject(CompanionStore())
         .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
 }

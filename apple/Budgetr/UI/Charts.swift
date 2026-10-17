@@ -306,3 +306,124 @@ struct MixDonut: View {
         .accessibilityValue(slices.prefix(3).map { "\($0.name) \($0.value.moneyCompact())" }.joined(separator: ", "))
     }
 }
+
+/// The net-worth spark — the companion's `Spark`: a smooth jade line (coral
+/// when the period ends down) over a soft fill, scrubbable with a readout and
+/// a haptic detent per day, heavier at the series' high, low and ends.
+struct SparkLine: View {
+    let points: [BarPoint]
+    var height: CGFloat = 84
+
+    @State private var active: Int?
+    @State private var drawn: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let readoutHeight: CGFloat = 24
+
+    private var values: [Double] { points.map(\.value) }
+    private var color: Color { (values.last ?? 0) >= (values.first ?? 0) ? T.jade : T.coral }
+
+    /// Endpoints, high and low — they get the heavier detent.
+    private var landmarks: Set<Int> {
+        guard let lo = values.indices.min(by: { values[$0] < values[$1] }),
+              let hi = values.indices.max(by: { values[$0] < values[$1] }) else { return [] }
+        return [0, values.count - 1, lo, hi]
+    }
+
+    var body: some View {
+        if points.count < 2 {
+            EmptyView()
+        } else {
+            GeometryReader { geo in
+                let w = geo.size.width
+                let g = SparkGeometry(values: values, size: CGSize(width: w, height: height))
+
+                ZStack(alignment: .topLeading) {
+                    if let i = active {
+                        VStack(spacing: 0) {
+                            Text(points[i].value.money()).font(F.monoSemibold(12.5)).foregroundStyle(T.paper)
+                            Text(points[i].date.formatted(.dateTime.month(.abbreviated).day()))
+                                .font(F.body(9.5)).foregroundStyle(T.faint)
+                        }
+                        .fixedSize()
+                        .position(x: min(max(48, g.point(i).x), w - 48), y: readoutHeight / 2 - 2)
+                    }
+
+                    ZStack(alignment: .topLeading) {
+                        SparkShape(values: values, closed: true)
+                            .fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0)], startPoint: .top, endPoint: .bottom))
+                            .opacity(Double(drawn))
+                        SparkShape(values: values, closed: false)
+                            .trim(from: 0, to: drawn)
+                            .stroke(color, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                        if let i = active {
+                            Rectangle().fill(T.lineStrong).frame(width: 1, height: height)
+                                .offset(x: g.point(i).x)
+                            Circle().fill(color).overlay(Circle().strokeBorder(T.ink, lineWidth: 2))
+                                .frame(width: 9, height: 9)
+                                .position(g.point(i))
+                        }
+                    }
+                    .frame(width: w, height: height)
+                    .offset(y: readoutHeight)
+                }
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { v in
+                            if abs(v.translation.height) > 14 && abs(v.translation.height) > abs(v.translation.width) {
+                                if active != nil { active = nil }
+                                return
+                            }
+                            guard w > 0 else { return }
+                            let i = max(0, min(points.count - 1, Int((v.location.x / w * CGFloat(points.count - 1)).rounded())))
+                            if i != active {
+                                if landmarks.contains(i) { Haptics.tap() } else { Haptics.tick() }
+                                active = i
+                            }
+                        }
+                        .onEnded { _ in withAnimation(.easeOut(duration: 0.18)) { active = nil } }
+                )
+            }
+            .frame(height: height + readoutHeight)
+            .onAppear {
+                if reduceMotion { drawn = 1 } else { withAnimation(.easeOut(duration: 0.8).delay(0.1)) { drawn = 1 } }
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Trend")
+            .accessibilityValue("from \(values.first?.money() ?? "") to \(values.last?.money() ?? "")")
+        }
+    }
+}
+
+private struct SparkGeometry {
+    let values: [Double]
+    let size: CGSize
+
+    func point(_ i: Int) -> CGPoint {
+        let lo = values.min() ?? 0
+        let range = max((values.max() ?? 0) - lo, 0.01)
+        let x = CGFloat(i) / CGFloat(max(1, values.count - 1)) * size.width
+        let y = 4 + (1 - CGFloat((values[i] - lo) / range)) * (size.height - 8)
+        return CGPoint(x: x, y: y)
+    }
+}
+
+private struct SparkShape: Shape {
+    let values: [Double]
+    let closed: Bool
+
+    func path(in rect: CGRect) -> Path {
+        guard values.count > 1 else { return Path() }
+        let g = SparkGeometry(values: values, size: rect.size)
+        var p = Path()
+        p.move(to: g.point(0))
+        for i in 1..<values.count { p.addLine(to: g.point(i)) }
+        if closed {
+            p.addLine(to: CGPoint(x: rect.width, y: rect.height))
+            p.addLine(to: CGPoint(x: 0, y: rect.height))
+            p.closeSubpath()
+        }
+        return p
+    }
+}

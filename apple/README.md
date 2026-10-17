@@ -84,6 +84,32 @@ On a fresh install with no ledger, the Spending screen offers **Explore with
 sample data** — a believable ~90-day ledger, clearly ribboned, removed in one
 tap — so a tester can judge every screen before AirDropping `budgetr.db`.
 
+## Pair with your Mac (companion mode)
+
+On iPhone the app opens on **Pair your Mac**: in budgetr on the Mac, Settings →
+Phone companion → Pair phone, then scan the code (or paste it). From then on
+the phone shows the summary the Mac publishes — Spending, Activity, Budgets and
+Holdings — refreshed on launch, on foreground and on pull. It can pair
+alongside the Expo companion; both read the same channel.
+
+This build is **read-only**: it never writes to the relay, so recategorising,
+dismissing alerts, splitting bills and receipt scans stay on the Mac (or the
+Expo app) for now.
+
+- `Sync/SecretBox.swift` — NaCl secretbox (XSalsa20-Poly1305) in pure Swift,
+  tested byte-for-byte against `packages/sync-crypto/test/vectors.json`.
+- `Sync/Pairing.swift` — the `budgetr1.` code; the key goes to this device's
+  Keychain only (not iCloud Keychain).
+- `Sync/SummaryContract.swift` — the Summary v2 contract; a newer format reads
+  as "update the app", never as corrupt data.
+- `Sync/CompanionModel.swift` — the month-to-date re-slicing from
+  `mobile/src/spending.ts`; the phone computes nothing financial.
+- `Sync/CompanionStore.swift` — pairing, the relay GET with ETag, and a
+  file-protected cache so the app opens on numbers.
+
+Importing a `budgetr.db` and the sample ledger are still there, under the
+pairing screen and in More.
+
 ## Design system
 
 `Budgetr/UI/` is the companion's design system (`mobile/src/ui/*`) in SwiftUI,

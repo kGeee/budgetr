@@ -41,12 +41,17 @@ targets:
     #    user's own data, which is exempt — declaring it here skips the export
     #    compliance question on every TestFlight upload.
     #  - UILaunchScreen: launch on the ink canvas, not a white flash.
+    #  - NSAllowsLocalNetworking: a relay on the LAN (COMPANION_RELAY_URL
+    #    pointed at a dev machine) is plain http; the hosted one is https.
+    #    Everything through it is end-to-end encrypted either way.
     info:
       path: Budgetr/Support/Info.plist
       properties:
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: LaunchBackground
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app
@@ -63,6 +68,7 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         # The app is dark by design; launch and system chrome agree with it.
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        INFOPLIST_KEY_NSCameraUsageDescription: "budgetr uses the camera to scan your Mac's pairing code."
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait"
         # iPad multitasking requires all four; App Store validation rejects fewer.
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
@@ -92,6 +98,13 @@ targets:
       - path: Budgetr/Domain/MonthSummary.swift
       - path: Budgetr/Domain/BudgetPacing.swift
       - path: Budgetr/Domain/CategoryMapping.swift
+      # The companion wire format — crypto, pairing, the Summary contract and
+      # its derivations — is pure Foundation too, and the part most worth
+      # pinning: it has to agree with the TypeScript side to the byte.
+      - path: Budgetr/Sync/SecretBox.swift
+      - path: Budgetr/Sync/Pairing.swift
+      - path: Budgetr/Sync/SummaryContract.swift
+      - path: Budgetr/Sync/CompanionModel.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app.tests

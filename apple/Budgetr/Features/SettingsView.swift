@@ -6,7 +6,9 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var app: AppModel
+    @EnvironmentObject private var companion: CompanionStore
     @AppStorage(SampleData.flagKey) private var sampleLoaded = false
+    @State private var showingPairing = false
 
     @FetchRequest(sortDescriptors: [])
     private var transactions: FetchedResults<CDTransaction>
@@ -30,6 +32,17 @@ struct SettingsView: View {
 
     var body: some View {
         BScreen("More", eyebrow: "budgetr · \(version)") {
+            #if os(iOS)
+            group("Companion") {
+                action("Pair with your Mac", "qrcode.viewfinder", tint: T.jade) {
+                    showingPairing = true
+                }
+            } footer: {
+                "Scan the code in budgetr on your Mac to see its live numbers here instead of this ledger."
+            }
+            .rise(0)
+            #endif
+
             if showsLedgerLinks {
                 group("Ledger") {
                     link("Accounts", "building.columns", detail: "\(accounts.count)") { AccountsView() }
@@ -84,6 +97,13 @@ struct SettingsView: View {
             }
             .padding(.top, 10)
             .rise(3)
+        }
+        .sheet(isPresented: $showingPairing) {
+            NavigationStack { PairingView(showsAlternatives: false) }
+                .environmentObject(companion)
+                .environmentObject(app)
+                .environment(\.managedObjectContext, context)
+                .bSheet([.large])
         }
     }
 

@@ -67,26 +67,44 @@ final class AppModel: ObservableObject {
 /// On compact width the app is the companion's floating pill tab bar instead,
 /// so switching sections costs one tap and the current one is always visible.
 /// Regular width (iPad, Mac) keeps the sidebar, which is right there.
+///
+/// On iOS, pairing with the Mac comes first: a paired phone shows the Mac's
+/// published summary; an unpaired one with no ledger opens on the pairing
+/// screen, with the .db import and sample data as the quieter ways in.
 struct AppShell: View {
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var app = AppModel()
+    @StateObject private var companion = CompanionStore()
     @AppStorage(SampleData.flagKey) private var sampleLoaded = false
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
+
+    /// One row is enough to know whether there's a ledger at all.
+    @FetchRequest private var anyTransaction: FetchedResults<CDTransaction>
+
+    init() {
+        let request = NSFetchRequest<CDTransaction>(entityName: "CDTransaction")
+        request.sortDescriptors = []
+        request.fetchLimit = 1
+        _anyTransaction = FetchRequest(fetchRequest: request)
+    }
 
     private static let ledgerType = UTType(filenameExtension: "db") ?? .data
 
     var body: some View {
         shell
             .safeAreaInset(edge: .top, spacing: 0) {
-                if sampleLoaded {
+                if sampleLoaded && !companion.isPaired {
                     SampleRibbon { app.confirmingErase = true }
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
             .animation(M.settle, value: sampleLoaded)
+            .animation(M.settle, value: companion.phase)
             .environmentObject(app)
+            .environmentObject(companion)
             .tint(T.jade)
             .preferredColorScheme(.dark)
             .fileImporter(isPresented: $app.showingImporter, allowedContentTypes: [Self.ledgerType]) { result in
@@ -110,16 +128,31 @@ struct AppShell: View {
             }
             .task {
                 if let outcome = FirstRunImport.run(context: context) { app.alert = outcome }
+                await companion.refresh()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // Back in the foreground is when the numbers are most likely
+                // stale — the Mac has probably synced since.
+                if phase == .active { Task { await companion.refresh() } }
             }
     }
 
     @ViewBuilder
     private var shell: some View {
         #if os(iOS)
-        if sizeClass == .compact {
-            PhoneTabs()
-        } else {
-            RootView()
+        switch companion.phase {
+        case .paired:
+            CompanionTabs()
+        case .updateRequired:
+            NavigationStack { CompanionUpdateRequiredView() }
+        case .unpaired:
+            if anyTransaction.isEmpty {
+                NavigationStack { PairingView() }
+            } else if sizeClass == .compact {
+                PhoneTabs()
+            } else {
+                RootView()
+            }
         }
         #else
         RootView()
@@ -176,6 +209,53 @@ private struct PhoneTabs: View {
             FloatingTabBar(items: items, selection: $tab)
             .padding(.bottom, 2)
             .ignoresSafeArea(.keyboard)
+        }
+    }
+}
+
+
+private enum CompanionTab: Hashable {
+    case spending, activity, budgets, holdings, more
+}
+
+/// The paired phone: the Expo companion's tabs, under the same floating pill.
+private struct CompanionTabs: View {
+    @EnvironmentObject private var companion: CompanionStore
+    @State private var tab: CompanionTab = .spending
+
+    private var items: [FloatingTabBar<CompanionTab>.Item] {
+        [
+            .init(tab: .spending, title: "Spending", symbol: "square.grid.2x2"),
+            .init(tab: .activity, title: "Activity", symbol: "arrow.left.arrow.right"),
+            .init(tab: .budgets, title: "Budgets", symbol: "chart.pie"),
+            .init(tab: .holdings, title: "Holdings", symbol: "chart.line.uptrend.xyaxis"),
+            .init(tab: .more, title: "More", symbol: "ellipsis", badge: companion.syncError == nil ? 0 : 1),
+        ]
+    }
+
+    var body: some View {
+        TabView(selection: $tab) {
+            NavigationStack { CompanionSpendingView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(CompanionTab.spending)
+            NavigationStack { CompanionActivityView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(CompanionTab.activity)
+            NavigationStack { CompanionBudgetsView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(CompanionTab.budgets)
+            NavigationStack { CompanionHoldingsView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(CompanionTab.holdings)
+            NavigationStack { CompanionSettingsView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(CompanionTab.more)
+        }
+        .environment(\.chromeClearance, 84)
+        .overlay(alignment: .bottom) {
+            FloatingTabBar(items: items, selection: $tab)
+                .padding(.bottom, 2)
+                .ignoresSafeArea(.keyboard)
         }
     }
 }
