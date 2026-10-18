@@ -1,0 +1,61 @@
+# Archive the native iOS app and upload it to TestFlight — the Swift app's
+# counterpart to `eas build --profile production` + `eas submit` for the Expo
+# companion. Run it from the Actions tab, or push a tag like ios-v1.0.0.
+#
+# Needs three repository secrets (Settings > Secrets and variables > Actions),
+# from App Store Connect > Users and Access > Integrations > App Store Connect
+# API, using a key with the Admin role so Xcode may create the distribution
+# certificate and provisioning profile itself:
+#   ASC_KEY_ID      the key's ID
+#   ASC_ISSUER_ID   the issuer ID
+#   ASC_KEY_P8      the full contents of AuthKey_<ID>.p8
+#
+# The App Store Connect app record for the bundle ID (com.budgetr.app unless
+# overridden) has to exist first: Apps > + > New App, once.
+name: TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: Bundle identifier of the App Store Connect app record
+        default: com.budgetr.app
+  push:
+    tags: ["ios-v*"]
+
+jobs:
+  upload:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Write the API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ]; then
+            echo "::error::ASC_KEY_P8 secret is not set — see the comment at the top of this workflow"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey.p8"
+
+      - name: Archive and upload
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_PATH: ${{ runner.temp }}/asc/AuthKey.p8
+          BUNDLE_ID: ${{ inputs.bundle_id || 'com.budgetr.app' }}
+          # BUILD_NUMBER is left to the script's UTC stamp, so builds uploaded
+          # from here and from a desk Mac share one increasing sequence.
+        run: scripts/testflight.sh
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"

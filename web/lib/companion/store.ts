@@ -18,10 +18,13 @@ const KEYS = {
   lastPushedHash: "companion.lastPushedHash", // hash of last pushed summary (asOf zeroed)
   lastSyncAt: "companion.lastSyncAt", // unix seconds of last successful sync
   lastError: "companion.lastError", // human-readable sync error, '' = healthy
+  personAliases: "companion.personAliases", // JSON { phoneMintedId: desktopPersonId }
 } as const;
 
 /** Cap on remembered op ids — must be ≥ the 200 the Summary echoes back. */
 const APPLIED_OP_CAP = 500;
+/** Cap on remembered person aliases, oldest dropped first. */
+const PERSON_ALIAS_CAP = 500;
 
 function get(key: string): string | null {
   const row = db.select({ value: appSettings.value }).from(appSettings).where(eq(appSettings.key, key)).get();
@@ -113,6 +116,24 @@ export function appendAppliedOpIds(ids: string[]): void {
   if (ids.length === 0) return;
   const merged = [...getAppliedOpIds(), ...ids].slice(-APPLIED_OP_CAP);
   set(KEYS.appliedOpIds, JSON.stringify(merged));
+}
+
+// ── phone-minted person ids ─────────────────────────────────────────
+// A phone's addPerson naming someone the desktop already has resolves to that
+// person instead of creating a twin. The phone keeps using its own minted id in
+// later ops — possibly in a later batch, long after the addPerson was applied —
+// so the mapping has to outlive the batch that created it.
+
+export function getPersonAliases(): Record<string, string> {
+  return readJson<Record<string, string>>(KEYS.personAliases) ?? {};
+}
+
+export function setPersonAlias(phoneId: string, personId: string): void {
+  const aliases = getPersonAliases();
+  delete aliases[phoneId];
+  aliases[phoneId] = personId;
+  const kept = Object.entries(aliases).slice(-PERSON_ALIAS_CAP);
+  writeJson(KEYS.personAliases, Object.fromEntries(kept));
 }
 
 // ── status surfaced to the UI ───────────────────────────────────────

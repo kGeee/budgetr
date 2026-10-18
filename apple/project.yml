@@ -11,7 +11,9 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "0.1.0"
+    # The build number is stamped per upload by scripts/testflight.sh
+    # (App Store Connect rejects a repeat), so "1" here is only the local default.
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
@@ -33,16 +35,49 @@ targets:
     supportedDestinations: [iOS, macOS]
     sources:
       - path: Budgetr
+    # Keys Xcode's generated Info.plist has no build setting for. Merged with
+    # the generated one (GENERATE_INFOPLIST_FILE stays on).
+    #  - ITSAppUsesNonExemptEncryption: the only crypto is AES-GCM over the
+    #    user's own data, which is exempt — declaring it here skips the export
+    #    compliance question on every TestFlight upload.
+    #  - UILaunchScreen: launch on the ink canvas, not a white flash.
+    #  - NSAllowsLocalNetworking: a relay on the LAN (COMPANION_RELAY_URL
+    #    pointed at a dev machine) is plain http; the hosted one is https.
+    #    Everything through it is end-to-end encrypted either way.
+    #  - CFBundleShortVersionString / CFBundleVersion: XcodeGen otherwise writes
+    #    literal 1.0 / 1 here, and a key in the file beats the build setting,
+    #    so the per-upload CURRENT_PROJECT_VERSION would never reach the bundle.
+    info:
+      path: Budgetr/Support/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app
         PRODUCT_NAME: Budgetr
         GENERATE_INFOPLIST_FILE: YES
-        CODE_SIGN_ENTITLEMENTS: Budgetr/Support/Budgetr.entitlements
+        # The sandbox entitlements are macOS-only. An iOS build carrying them
+        # fails App Store validation, so iOS signs with none (it needs none
+        # until CloudKit is switched back on).
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Budgetr/Support/Budgetr.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         INFOPLIST_KEY_CFBundleDisplayName: Budgetr
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.finance"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # The app is dark by design; launch and system chrome agree with it.
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        INFOPLIST_KEY_NSCameraUsageDescription: "budgetr uses the camera to scan your Mac's pairing code and to photograph receipts for splitting a bill. Photos are read on this iPhone and not uploaded."
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait"
+        # iPad multitasking requires all four; App Store validation rejects fewer.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        SUPPORTS_MACCATALYST: NO
         # A phone has no budgetr.db on disk — it has to arrive. These expose the
         # app's Documents folder in Files (and over a cable), so the ledger can
         # be dropped in and opened, which is the only data path on iOS until
@@ -68,6 +103,15 @@ targets:
       - path: Budgetr/Domain/MonthSummary.swift
       - path: Budgetr/Domain/BudgetPacing.swift
       - path: Budgetr/Domain/CategoryMapping.swift
+      # The companion wire format — crypto, pairing, the Summary contract and
+      # its derivations — is pure Foundation too, and the part most worth
+      # pinning: it has to agree with the TypeScript side to the byte.
+      - path: Budgetr/Sync/SecretBox.swift
+      - path: Budgetr/Sync/Pairing.swift
+      - path: Budgetr/Sync/SummaryContract.swift
+      - path: Budgetr/Sync/CompanionModel.swift
+      - path: Budgetr/Sync/Outbox.swift
+      - path: Budgetr/Sync/Receipt.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app.tests

@@ -20,7 +20,18 @@
 
 // ── Format version. Bump on any breaking change to Summary/Outbox. ──
 export const SUMMARY_VERSION = 2;
-export const OUTBOX_VERSION = 2;
+export const OUTBOX_VERSION = 3;
+/**
+ * The oldest outbox a current desktop still applies. v3 only added `addPerson`;
+ * a phone sends v2 for batches without it, so a desktop that predates v3 keeps
+ * applying ordinary edits and only refuses the batches it truly can't read.
+ */
+export const MIN_OUTBOX_VERSION = 2;
+
+/** The lowest OutboxBatch.v that can carry these ops. */
+export function outboxVersionFor(ops: readonly Pick<Op, 'kind'>[]): number {
+  return ops.some((o) => o.kind === 'addPerson') ? OUTBOX_VERSION : MIN_OUTBOX_VERSION;
+}
 
 // ── Desktop → Phone ────────────────────────────────────────────────
 
@@ -42,6 +53,10 @@ export interface Summary {
   // Daily spending totals (positive cents per day, days with no spend absent),
   // ascending, ≤ MAX_SPARK_POINTS. Backs the Budgets/Activity charts.
   spendByDay?: SparkPoint[];
+  // The budget month's daily spend across BUDGETED categories only — what the
+  // desktop's Budgets pace line plots, so an unbudgeted category (rent with no
+  // envelope) never counts against the budget on the phone either. Optional.
+  budgetSpendByDay?: SparkPoint[];
   // Active categories in the desktop's display order; ≤ MAX_CATEGORIES.
   categories?: CategoryInfo[];
   // ── v2: shared expenses ──────────────────────────────────────────
@@ -60,6 +75,12 @@ export interface Summary {
    * pretending to be instant.
    */
   scans?: ScanResultSummary[]; // ≤ MAX_SCAN_RESULTS
+  /**
+   * The newest OutboxBatch.v this desktop applies. A phone sends ops that need
+   * a newer outbox only when this says the desktop reads them, and holds them
+   * otherwise. Absent = a desktop from before the field, which reads v2 only.
+   */
+  outboxVersion?: number;
 }
 
 export interface ScanResultSummary {
@@ -87,6 +108,12 @@ export interface PersonSummary {
   openCount: number;
   /** Last settlement, unix seconds — null if you have never squared up. */
   lastSettledAt?: number | null;
+  /**
+   * Free text as entered on the desktop — usually a Venmo @handle, sometimes a
+   * phone or email. Lets the phone open a prefilled Venmo request. Display and
+   * deep-link only; never matched against transactions.
+   */
+  handle?: string | null;
 }
 
 export interface SharedExpenseSummary {
@@ -236,7 +263,8 @@ export type Op =
   | DismissAlertOp
   | SplitBillOp
   | RecordSettlementOp
-  | ScanReceiptOp;
+  | ScanReceiptOp
+  | AddPersonOp;
 
 export interface OpBase {
   id: string; // uuid v4; idempotency key for the single op
@@ -276,6 +304,21 @@ export interface SplitBillOp extends OpBase {
   /** Receipt lines + assignment, opaque JSON, round-tripped for re-editing. */
   itemsJson?: string | null;
   note?: string | null;
+}
+
+/**
+ * Someone new to split with (OUTBOX v3). The phone mints `personId` so a
+ * splitBill in the same batch can name them before the desktop has replied.
+ * Idempotent on personId: re-delivery never creates a second person.
+ */
+export interface AddPersonOp extends OpBase {
+  kind: 'addPerson';
+  personId: string;
+  name: string;
+  /** Venmo @handle, phone or email — optional, display/deep-link only. */
+  handle?: string | null;
+  /** Hex, e.g. "#6FE3A6". The desktop assigns one when absent. */
+  color?: string | null;
 }
 
 /** "They paid me back." */

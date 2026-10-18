@@ -1,0 +1,52 @@
+# Build the native app for both platforms and run the domain tests, on every
+# push that touches apple/. Unsigned: this proves the code compiles and the
+# arithmetic holds, which is what a reviewer can't see from a diff. Signing
+# and upload are testflight.yml's job.
+name: Apple
+
+on:
+  push:
+    paths: ["apple/**", ".github/workflows/apple.yml"]
+  pull_request:
+    paths: ["apple/**", ".github/workflows/apple.yml"]
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build for iOS
+        run: |
+          set -o pipefail
+          xcodebuild -project Budgetr.xcodeproj -scheme Budgetr \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 60
+
+      # testflight.sh stamps CURRENT_PROJECT_VERSION per upload; a literal in
+      # Info.plist would silently win and every upload would repeat a number.
+      - name: Check the build number reaches the bundle
+        run: |
+          stamped=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/Build/Products/Debug-iphonesimulator/Budgetr.app/Info.plist)
+          echo "CFBundleVersion = $stamped"
+          test "$stamped" = "${{ github.run_number }}"
+
+      - name: Build for macOS and run tests
+        run: |
+          set -o pipefail
+          xcodebuild -project Budgetr.xcodeproj -scheme Budgetr \
+            -destination 'platform=macOS' \
+            -derivedDataPath build \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="" \
+            test | tail -n 60
