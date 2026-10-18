@@ -296,10 +296,11 @@ struct CompanionSpendingView: View {
     private func content(_ s: Summary, month: CompanionModel.Month) -> some View {
         let totals = CompanionModel.totals(s.spendByDay ?? [], month: month)
         let rows = CompanionModel.categorySpend(s, month: month)
-        let limit = s.budgets.reduce(0) { $0 + $1.limitCents }
-        let left = limit - totals.spentCents
+        let limit = CompanionModel.budgetLimit(s)
+        let budgeted = CompanionModel.budgetedSpent(s)
+        let left = limit - budgeted
 
-        SpendingHero(totals: totals, limit: limit, month: month).rise(0)
+        SpendingHero(totals: totals, limit: limit, budgeted: budgeted, month: month).rise(0)
 
         // The worst alert, stated. A dot on an icon is not how you tell someone
         // a bank connection has been dead for weeks.
@@ -340,7 +341,7 @@ struct CompanionSpendingView: View {
         }
         .rise(1)
 
-        chartCard(totals: totals, rows: rows, limit: limit, month: month).rise(2)
+        chartCard(totals: totals, pace: CompanionModel.budgetTotals(s, month: month), rows: rows, limit: limit, month: month).rise(2)
 
         TopMerchants(summary: s, month: month).rise(3)
 
@@ -371,7 +372,10 @@ struct CompanionSpendingView: View {
         .rise(4)
     }
 
-    private func chartCard(totals: CompanionModel.Totals, rows: [CompanionModel.CategorySpend], limit: Int, month: CompanionModel.Month) -> some View {
+    private func chartCard(totals: CompanionModel.Totals, pace: CompanionModel.Totals?, rows: [CompanionModel.CategorySpend], limit: Int, month: CompanionModel.Month) -> some View {
+        // Against a budget, pace is budgeted spend only; with no budgets it's
+        // all spend against its own run rate.
+        let paceSeries = limit > 0 ? pace : totals
         let headings = ["By day", "Cumulative vs pace", "Where it went"]
         return Card(padding: 16) {
             VStack(alignment: .leading, spacing: 10) {
@@ -392,10 +396,10 @@ struct CompanionSpendingView: View {
                             empty("No spending recorded this month.")
                         }
                     case 1:
-                        if totals.cumulative.count > 1 {
+                        if let paceSeries, paceSeries.cumulative.count > 1 {
                             VStack(alignment: .leading, spacing: 8) {
                                 PaceChart(
-                                    cumulative: totals.cumulative.map(\.dollars),
+                                    cumulative: paceSeries.cumulative.map(\.dollars),
                                     budget: limit.dollars,
                                     daysInMonth: month.daysInMonth,
                                     dayOfMonth: month.dayOfMonth,
@@ -403,11 +407,13 @@ struct CompanionSpendingView: View {
                                 )
                                 HStack(spacing: 14) {
                                     legendKey(color: T.paper.opacity(0.5), dashed: true, label: limit > 0 ? "even pace to \(limit.dollars.moneyCompact())" : "run-rate pace")
-                                    legendKey(color: paceAhead(totals, limit, month) ? T.coral : T.jade, dashed: false, label: "spent")
+                                    legendKey(color: paceAhead(paceSeries, limit, month) ? T.coral : T.jade, dashed: false, label: limit > 0 ? "budgeted spend" : "spent")
                                 }
                             }
                         } else {
-                            empty("Not enough of the month yet to draw a pace.")
+                            empty(limit > 0 && pace == nil
+                                  ? "Update budgetr on your Mac to see the budget pace."
+                                  : "Not enough of the month yet to draw a pace.")
                         }
                     default:
                         let slices = mixSlices(rows, total: totals.spentCents)
@@ -473,12 +479,14 @@ struct CompanionSpendingView: View {
 private struct SpendingHero: View {
     let totals: CompanionModel.Totals
     let limit: Int
+    /// Spend in budgeted categories only — what the ring measures.
+    let budgeted: Int
     let month: CompanionModel.Month
 
     var body: some View {
         let elapsed = Double(month.dayOfMonth) / Double(month.daysInMonth)
-        let used = limit > 0 ? Double(totals.spentCents) / Double(limit) : 0
-        let tint = CompanionFormat.paceColor(spent: totals.spentCents, limit: limit, elapsed: elapsed)
+        let used = limit > 0 ? Double(budgeted) / Double(limit) : 0
+        let tint = CompanionFormat.paceColor(spent: budgeted, limit: limit, elapsed: elapsed)
 
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
@@ -734,26 +742,14 @@ private struct WalletSheet: View {
         let assets = summary.accounts.reduce(0) { $0 + max(0, $1.cents) }
         let debts = summary.accounts.reduce(0) { $0 + max(0, -$1.cents) }
         let spark = summary.netWorth.spark
-        let change: Double? = {
-            guard let a = spark.first?.cents, let b = spark.last?.cents, a != 0 else { return nil }
-            return Double(b - a) / Double(abs(a)) * 100
-        }()
         let groups = Dictionary(grouping: summary.accounts, by: { Self.kindOrder.contains($0.kind) ? $0.kind : "other" })
 
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Eyebrow("Net worth")
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    AnimatedMoney(value: summary.netWorth.cents.dollars, font: F.display(38))
-                    if let change {
-                        DeltaPill(pct: change, upIsGood: true)
-                    }
-                }
-                .padding(.top, 8)
-                if change != nil {
-                    Text("over the last \(spark.count) days").font(F.body(11.5)).foregroundStyle(T.faint).padding(.top, 2)
-                }
-                SparkLine(points: spark.map {
+                AnimatedMoney(value: summary.netWorth.cents.dollars, font: F.display(38))
+                    .padding(.top, 8)
+                RangedSparkLine(points: spark.map {
                     BarPoint(id: "\($0.d)", date: CompanionFormat.date($0.d), value: $0.cents.dollars)
                 }, height: 84)
                 .padding(.top, 12)
@@ -1034,7 +1030,8 @@ struct CompanionBudgetsView: View {
                     .rise(0)
                 } else {
                     overview(s, month: month, daysLeft: daysLeft).rise(0)
-                    list(s, month: month).rise(1)
+                    monthPace(s, month: month).rise(1)
+                    list(s, month: month).rise(2)
                 }
             } else {
                 AwaitingSummary().rise(0)
@@ -1099,6 +1096,48 @@ struct CompanionBudgetsView: View {
             }
         }
         .heroGlow(tint)
+    }
+
+    /// The month so far: cumulative spend against the dashed even-pace line
+    /// to the total budget — the Expo app's Budgets chart, natively.
+    @ViewBuilder
+    private func monthPace(_ s: Summary, month: CompanionModel.Month) -> some View {
+        // Budgeted categories only, as the desktop's Budgets pace line.
+        let totals = CompanionModel.budgetTotals(s, month: month)
+            ?? CompanionModel.Totals(spentCents: 0, priorCents: 0, deltaPct: nil, perDay: [], cumulative: [])
+        let limit = CompanionModel.budgetLimit(s)
+        let paceToDate = limit * month.dayOfMonth / max(1, month.daysInMonth)
+        let ahead = totals.spentCents > paceToDate
+        if totals.cumulative.count > 1 {
+            TitledCard("Month so far", trailing: "day \(month.dayOfMonth) of \(month.daysInMonth)") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(totals.spentCents.dollars.moneyWhole())
+                            .font(F.monoSemibold(18)).foregroundStyle(T.paper)
+                        Text("spent").font(F.body(12)).foregroundStyle(T.faint)
+                        Spacer()
+                        Text(ahead
+                             ? "\((totals.spentCents - paceToDate).dollars.moneyWhole()) ahead of pace"
+                             : "\((paceToDate - totals.spentCents).dollars.moneyWhole()) under pace")
+                            .font(F.mono(11.5)).foregroundStyle(ahead ? T.coral : T.jade)
+                    }
+                    PaceChart(
+                        cumulative: totals.cumulative.map(\.dollars),
+                        budget: limit.dollars,
+                        daysInMonth: month.daysInMonth,
+                        dayOfMonth: month.dayOfMonth,
+                        height: 140
+                    )
+                    HStack {
+                        Text("1").font(F.mono(9.5)).foregroundStyle(T.faint)
+                        Spacer()
+                        Text("dashed: even pace to \(limit.dollars.moneyCompact())").font(F.body(10.5)).foregroundStyle(T.faint)
+                        Spacer()
+                        Text("\(month.daysInMonth)").font(F.mono(9.5)).foregroundStyle(T.faint)
+                    }
+                }
+            }
+        }
     }
 
     private func stateLine(_ color: Color, _ text: String) -> some View {
@@ -1224,17 +1263,10 @@ struct CompanionHoldingsView: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text("PORTFOLIO VALUE").font(F.mono(10)).tracking(1.2).foregroundStyle(T.muted)
             AnimatedMoney(value: value.dollars, font: F.display(44))
-            HStack(spacing: 8) {
-                if let change {
-                    DeltaPill(pct: change, upIsGood: true)
-                    Text("\(spark.count)d").font(F.mono(11)).foregroundStyle(T.faint)
-                    Text("·").foregroundStyle(T.faint)
-                }
-                Text("\(s.positions.count) position\(s.positions.count == 1 ? "" : "s")")
-                    .font(F.body(12.5)).foregroundStyle(T.faint)
-            }
+            Text("\(s.positions.count) position\(s.positions.count == 1 ? "" : "s")")
+                .font(F.body(12.5)).foregroundStyle(T.faint)
             if spark.count > 1 {
-                SparkLine(points: spark.map {
+                RangedSparkLine(points: spark.map {
                     BarPoint(id: "\($0.d)", date: CompanionFormat.date($0.d), value: $0.cents.dollars)
                 }, height: 96)
                 .padding(.top, 6)

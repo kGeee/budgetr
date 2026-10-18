@@ -16,10 +16,12 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   getAccounts,
+  getBudgetSpendByDay,
   getBudgetsWithSpend,
   getCategories,
   getDailySpend,
   getHoldings,
+  getImportedHoldings,
   getInvestmentSectors,
   getManualHoldings,
   getNetWorth,
@@ -33,6 +35,52 @@ import { detectAnomalies, type Alert } from "@/lib/anomalies";
 import { classifyOptionLegs, parseOccSymbol, type OptionLegInput, type ParsedOption } from "@/lib/options";
 import { payoffCurve } from "@/lib/payoff";
 import { getAppliedOpIds } from "./store";
+import { getTickerHistories } from "@/lib/portfolio-history";
+
+/** Latest close per symbol (upper-cased), dollars. */
+export type PriceMap = Record<string, number>;
+
+/**
+ * Symbols the investments page prices live rather than reading a stored value:
+ * ticker-carrying manual holdings (BTC-USD, a wallet's ETH-USD) and positions
+ * rebuilt from imported broker trades. Without these the phone silently lost
+ * every ad-hoc holding the desktop shows.
+ */
+export function pricedSymbols(): string[] {
+  const syms = [
+    ...getManualHoldings().map((m) => m.symbol),
+    ...getImportedHoldings().map((h) => h.ticker),
+  ].filter((s): s is string => Boolean(s) && !parseOccSymbol(s));
+  return [...new Set(syms.map((s) => s.toUpperCase()))];
+}
+
+/** The same last-close source the investments page values these with. */
+export async function loadPrices(symbols = pricedSymbols()): Promise<PriceMap> {
+  if (symbols.length === 0) return {};
+  const histories = await getTickerHistories(symbols, 1);
+  const out: PriceMap = {};
+  for (const [sym, hist] of Object.entries(histories)) {
+    const last = hist.at(-1)?.close;
+    if (typeof last === "number" && Number.isFinite(last)) out[sym.toUpperCase()] = last;
+  }
+  return out;
+}
+
+/**
+ * A manual holding's dollar value, as the investments page computes it:
+ * tickered ones are quantity × last close (falling back to a stored value when
+ * no price came back), fixed-value ones carry their stored value.
+ */
+function manualDollars(
+  m: { symbol: string | null; quantity: number | null; manualValue: number | null },
+  prices: PriceMap,
+): number | null {
+  if (m.symbol) {
+    const px = prices[m.symbol.toUpperCase()];
+    if (px != null && m.quantity != null) return m.quantity * px;
+  }
+  return m.manualValue;
+}
 
 const cents = (dollars: number | null | undefined): number => Math.round((dollars ?? 0) * 100);
 
@@ -45,7 +93,7 @@ function alertKind(kind: Alert["kind"]): "overspend" | "large_move" | "low_balan
   return kind === "spike" ? "large_move" : "other";
 }
 
-export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopReadModel {
+export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: PriceMap = {}): DesktopReadModel {
   const accounts = getAccounts()
     .filter((a) => !a.excluded)
     .map((a) => {
@@ -119,15 +167,31 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
     a.sector ??= sectorNamesForPositions[sectorKeyFor(parsed?.underlying ?? h.ticker, h.id)] ?? null;
   }
   for (const m of manual) {
-    if (m.manualValue == null || m.manualValue === 0) continue;
+    const value = manualDollars(m, prices);
+    if (value == null || value === 0) continue;
     const symbol = m.symbol ?? m.name ?? "OTHER";
     const a = acc(symbol);
-    a.cents += cents(m.manualValue);
+    a.cents += cents(value);
     a.name ??= m.name ?? null;
     if (m.quantity != null) a.qty = (a.qty ?? 0) + m.quantity;
     if (m.costBasis == null) a.costed = false;
-    else a.pnl += m.manualValue - m.costBasis;
+    else a.pnl += value - m.costBasis;
     a.sector ??= sectorNamesForPositions[sectorKeyFor(m.symbol, `man:${m.id}`)] ?? null;
+  }
+  // Positions rebuilt from imported broker trades, valued like the
+  // investments page values them: quantity × last close.
+  const imported = getImportedHoldings();
+  for (const h of imported) {
+    const px = prices[h.ticker.toUpperCase()];
+    if (px == null || !h.quantity) continue;
+    const value = h.quantity * px;
+    const a = acc(h.ticker);
+    a.cents += cents(value);
+    a.name ??= h.securityName ?? null;
+    a.qty = (a.qty ?? 0) + h.quantity;
+    if (h.costBasis == null) a.costed = false;
+    else a.pnl += value - h.costBasis;
+    a.sector ??= sectorNamesForPositions[sectorKeyFor(h.ticker, h.id)] ?? null;
   }
   const positions = [...bySymbol.entries()].map(([symbol, a]) => ({
     symbol,
@@ -139,7 +203,7 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
     ...(a.sector ? { sector: a.sector } : {}),
   }));
 
-  const investments = buildInvestmentsModel(holdings, manual, optionLegs, now);
+  const investments = buildInvestmentsModel(holdings, manual, optionLegs, now, prices, imported);
 
   // detectAnomalies already excludes dismissed/snoozed alert keys.
   const alerts = detectAnomalies().map((a) => ({
@@ -161,6 +225,8 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000)): DesktopRead
     alerts,
     investments,
     spendByDay: getDailySpend(92).map((r) => ({ d: dayToUnix(r.date), cents: cents(r.spent) })),
+    // What the desktop's Budgets pace line plots: budgeted categories only.
+    budgetSpendByDay: getBudgetSpendByDay().map((r) => ({ d: dayToUnix(r.date), cents: cents(r.spent) })),
     // ── Shared expenses (contract v2) ────────────────────────────────
     // Balances are netted here, on the desktop, and the phone renders the
     // result — it never has the ledger to recompute one from.
@@ -222,6 +288,8 @@ function buildInvestmentsModel(
   manual: ReturnType<typeof getManualHoldings>,
   optionLegs: Array<{ parsed: ParsedOption; quantity: number | null; valueCents: number; costBasis: number | null }>,
   now: number,
+  prices: PriceMap = {},
+  imported: ReturnType<typeof getImportedHoldings> = [],
 ): DesktopReadModel["investments"] {
   const sectorNames = getInvestmentSectors();
   const bySector = new Map<string, number>();
@@ -237,9 +305,16 @@ function buildInvestmentsModel(
     addToSector(sectorKeyFor(parsed?.underlying ?? h.ticker, h.id), cents(h.value));
   }
   for (const m of manual) {
-    if (m.manualValue == null || m.manualValue === 0) continue;
-    valueCents += cents(m.manualValue);
-    addToSector(sectorKeyFor(m.symbol, `man:${m.id}`), cents(m.manualValue));
+    const value = manualDollars(m, prices);
+    if (value == null || value === 0) continue;
+    valueCents += cents(value);
+    addToSector(sectorKeyFor(m.symbol, `man:${m.id}`), cents(value));
+  }
+  for (const h of imported) {
+    const px = prices[h.ticker.toUpperCase()];
+    if (px == null || !h.quantity) continue;
+    valueCents += cents(h.quantity * px);
+    addToSector(sectorKeyFor(h.ticker, h.id), cents(h.quantity * px));
   }
 
   // Strategies: group legs per underlying, let the desktop's classifier name

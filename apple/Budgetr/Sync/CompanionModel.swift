@@ -108,6 +108,24 @@ enum CompanionModel {
         index[key]?.name ?? label(key)
     }
 
+    // ── Budget figures ───────────────────────────────────────────────
+    // Measured the desktop's way: only categories that HAVE a budget count
+    // against the budget. Rent with no envelope is spending, but it isn't
+    // budget spending — comparing all spend to the budget total overstated
+    // every reading on the phone.
+
+    /// What's been spent against the budget this month — the Mac's own sum.
+    static func budgetedSpent(_ s: Summary) -> Int { s.budgets.reduce(0) { $0 + $1.spentCents } }
+
+    static func budgetLimit(_ s: Summary) -> Int { s.budgets.reduce(0) { $0 + $1.limitCents } }
+
+    /// The budgeted-only daily series for the pace line; nil from a Mac that
+    /// doesn't send it (drawing all spend instead would be the old bug).
+    static func budgetTotals(_ s: Summary, month: Month) -> Totals? {
+        guard let series = s.budgetSpendByDay else { return nil }
+        return totals(series, month: month)
+    }
+
     // ── What counts as spend ─────────────────────────────────────────
     // The Mac's rule, applied to the tape: a transaction is spend when its
     // (effective) category is in the spending group. Card payments ("AMERICAN

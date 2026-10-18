@@ -178,6 +178,7 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
   });
 
   if (s.spendByDay !== undefined) validateSpark(s.spendByDay, '$.spendByDay');
+  if (s.budgetSpendByDay !== undefined) validateSpark(s.budgetSpendByDay, '$.budgetSpendByDay');
 
   if (s.categories !== undefined) {
     reqArr(s.categories, '$.categories');

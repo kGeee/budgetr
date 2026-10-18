@@ -59,6 +59,8 @@ export interface DesktopReadModel {
   alerts: Array<{ id: string; kind: AlertKind; text: string; ts: number }>;
   // Daily spending totals, positive cents. Optional.
   spendByDay?: Array<{ d: number; cents: number }>;
+  // Budgeted categories only, budget month only. Optional.
+  budgetSpendByDay?: Array<{ d: number; cents: number }>;
   // Active categories in display order. Optional.
   categories?: Array<{ id: string; name: string; icon?: string | null; group: 'income' | 'spending' | 'transfer' }>;
   // Optional shared-expense detail (contract v2). Absent on installs that have
@@ -263,6 +265,7 @@ export function buildSummary(model: DesktopReadModel): Summary {
     alerts,
     ...(model.investments ? { investments: buildInvestments(model.investments) } : {}),
     ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
+    ...(model.budgetSpendByDay ? { budgetSpendByDay: buildSpark(model.budgetSpendByDay, 'budgetSpendByDay') } : {}),
     // Sorted and bounded like everything else, so an unchanged desktop state
     // still produces byte-identical JSON and never churns the relay blob.
     ...(model.people

@@ -7,14 +7,27 @@ import SwiftUI
 // ticker alone (see MarketData).
 
 struct PositionDetailView: View {
-    let position: Summary.Position
     let summary: Summary
+    private let initial: Summary.Position
 
+    /// The ticker on screen. Flipping to another keeps the timeframe, so the
+    /// same range can be compared across the whole portfolio.
+    @State private var symbol: String
     @State private var range: MarketData.Range = .month
     @State private var series: MarketData.Series?
     @State private var failure: MarketData.Failure?
     @State private var loading = false
     @State private var active: Int?
+
+    init(position: Summary.Position, summary: Summary) {
+        self.summary = summary
+        self.initial = position
+        _symbol = State(initialValue: position.symbol)
+    }
+
+    private var position: Summary.Position {
+        summary.positions.first { $0.symbol == symbol } ?? initial
+    }
 
     private var quantity: Double? {
         position.qtyLabel.flatMap { Double($0.filter { "0123456789.-".contains($0) }) }
@@ -32,13 +45,22 @@ struct PositionDetailView: View {
 
     var body: some View {
         BScreen(position.symbol, eyebrow: [position.sector, series?.exchange].compactMap { $0 }.joined(separator: " · ").ifEmpty("Position")) {
-            priceHeader.rise(0)
+            TickerStrip(positions: summary.positions, selected: $symbol).rise(0)
+            priceHeader
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 24).onEnded { v in
+                        guard abs(v.translation.width) > 60, abs(v.translation.width) > abs(v.translation.height) * 1.5 else { return }
+                        step(v.translation.width < 0 ? 1 : -1)
+                    }
+                )
+                .rise(0)
             chartCard.rise(1)
             holdingCard.rise(2)
             if let series { marketCard(series).rise(3) }
             footnote.rise(4)
         }
-        .task(id: range) { await load() }
+        .task(id: "\(symbol)|\(range.rawValue)") { await load() }
         .refreshable { await load(force: true) }
     }
 
@@ -91,8 +113,10 @@ struct PositionDetailView: View {
         case .week: return "past week"
         case .month: return "past month"
         case .quarter: return "past 3 months"
+        case .ytd: return "this year"
         case .year: return "past year"
         case .fiveYears: return "past 5 years"
+        case .max: return "all time"
         }
     }
 
@@ -307,9 +331,25 @@ struct PositionDetailView: View {
 
     // ── Loading ──────────────────────────────────────────────────────
 
+    /// Next or previous holding, in the Holdings list's order.
+    private func step(_ by: Int) {
+        let symbols = summary.positions.map(\.symbol)
+        guard let i = symbols.firstIndex(of: symbol) else { return }
+        let next = i + by
+        guard symbols.indices.contains(next) else { Haptics.warning(); return }
+        Haptics.tick()
+        withAnimation(M.settle) { symbol = symbols[next] }
+    }
+
     private func load(force: Bool = false) async {
         loading = true
         active = nil
+        // A different ticker: drop the old chart rather than show its line
+        // under the new name while the new one loads.
+        if series?.symbol != symbol {
+            series = nil
+            failure = nil
+        }
         defer { loading = false }
         do {
             let s = try await MarketData.shared.series(position.symbol, range: range)
@@ -481,6 +521,54 @@ struct PriceChart: View {
                 .foregroundStyle(T.muted)
                 .fixedSize()
                 .position(x: min(max(30, p.x), width - 30), y: p.y + (above ? -10 : 10))
+        }
+    }
+}
+
+/// Every holding as a chip — tap to flip the page to it. Each carries its day
+/// move, so the strip doubles as a glance at the whole portfolio.
+private struct TickerStrip: View {
+    let positions: [Summary.Position]
+    @Binding var selected: String
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 7) {
+                    ForEach(positions, id: \.symbol) { p in
+                        let on = p.symbol == selected
+                        Button {
+                            guard !on else { return }
+                            Haptics.tick()
+                            withAnimation(M.settle) { selected = p.symbol }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(CompanionFormat.ticker(p.symbol))
+                                    .font(F.monoSemibold(12))
+                                    .foregroundStyle(on ? T.paper : T.muted)
+                                if let bp = p.dayBp {
+                                    Text("\(bp >= 0 ? "+" : "−")\(String(format: "%.1f", Double(abs(bp)) / 100))%")
+                                        .font(F.mono(10.5))
+                                        .foregroundStyle(bp >= 0 ? T.jade : T.coral)
+                                }
+                            }
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(on ? T.panel2 : T.panel.opacity(0.6)))
+                            .overlay(Capsule().strokeBorder(on ? T.jade.opacity(0.5) : T.line, lineWidth: on ? 1 : 0.75))
+                        }
+                        .buttonStyle(.pressScale)
+                        .id(p.symbol)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+            .scrollIndicators(.hidden)
+            .scrollClipDisabled()
+            .onAppear { proxy.scrollTo(selected, anchor: .center) }
+            .onChange(of: selected) { _, new in
+                withAnimation(M.settle) { proxy.scrollTo(new, anchor: .center) }
+            }
         }
     }
 }

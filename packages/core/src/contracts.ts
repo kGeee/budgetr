@@ -48,6 +48,10 @@ export interface Summary {
   // Daily spending totals (positive cents per day, days with no spend absent),
   // ascending, ≤ MAX_SPARK_POINTS. Backs the Budgets/Activity charts.
   spendByDay?: SparkPoint[];
+  // The budget month's daily spend across BUDGETED categories only — what the
+  // desktop's Budgets pace line plots, so an unbudgeted category (rent with no
+  // envelope) never counts against the budget on the phone either. Optional.
+  budgetSpendByDay?: SparkPoint[];
   // Active categories in the desktop's display order; ≤ MAX_CATEGORIES.
   categories?: CategoryInfo[];
   // ── v2: shared expenses ──────────────────────────────────────────

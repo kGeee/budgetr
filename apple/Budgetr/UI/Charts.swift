@@ -459,3 +459,76 @@ private struct SparkShape: Shape {
         return p
     }
 }
+
+/// A spark with its own window picker — 1W, 1M, 3M, All — and the change over
+/// whichever window is showing. Windows longer than the data are left out
+/// rather than offered and silently clamped.
+struct RangedSparkLine: View {
+    let points: [BarPoint]
+    var height: CGFloat = 96
+    /// Net worth and portfolio value: up is good. Spend would be the reverse.
+    var upIsGood = true
+
+    @State private var days = 0
+
+    private var span: Int {
+        guard let first = points.first?.date, let last = points.last?.date else { return 0 }
+        return Int(last.timeIntervalSince(first) / 86_400)
+    }
+
+    private var options: [(label: String, value: Int)] {
+        var out: [(String, Int)] = []
+        for (label, d) in [("1W", 7), ("1M", 30), ("3M", 90), ("1Y", 365)] where d < span { out.append((label, d)) }
+        out.append(("All", 0))
+        return out
+    }
+
+    private var shown: [BarPoint] {
+        guard days > 0, let last = points.last?.date else { return points }
+        let cutoff = last.addingTimeInterval(-Double(days) * 86_400)
+        let window = points.filter { $0.date >= cutoff }
+        return window.count >= 2 ? window : points
+    }
+
+    private var change: Double? {
+        guard let a = shown.first?.value, let b = shown.last?.value, a != 0 else { return nil }
+        return (b - a) / abs(a) * 100
+    }
+
+    private var windowLabel: String {
+        switch days {
+        case 7: return "past week"
+        case 30: return "past month"
+        case 90: return "past 3 months"
+        case 365: return "past year"
+        default: return span > 0 ? "past \(span) days" : ""
+        }
+    }
+
+    var body: some View {
+        if points.count >= 2 {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    if let change {
+                        DeltaPill(pct: change, upIsGood: upIsGood, size: 10.5)
+                        if let a = shown.first?.value, let b = shown.last?.value {
+                            Text("\(b - a >= 0 ? "+" : "−")\(abs(b - a).moneyCompact())")
+                                .font(F.mono(11))
+                                .foregroundStyle((b - a >= 0) == upIsGood ? T.jade : T.coral)
+                        }
+                    }
+                    Text(windowLabel).font(F.body(11.5)).foregroundStyle(T.faint).lineLimit(1)
+                    Spacer(minLength: 6)
+                    if options.count > 1 {
+                        Segmented(options: options, selection: $days)
+                            .frame(width: CGFloat(options.count) * 44)
+                    }
+                }
+                SparkLine(points: shown, height: height)
+                    .id(days)
+                    .transition(.opacity)
+            }
+            .animation(M.settle, value: days)
+        }
+    }
+}

@@ -448,3 +448,40 @@ describe("applyOps — shared expenses", () => {
     expect(db.get<{ handle: string }>(sql`SELECT handle FROM people WHERE id = 'p-eesh'`)!.handle).toBe("@eesh");
   });
 });
+
+describe("read-model — what the phone was missing", () => {
+  it("counts only budgeted categories in the budget pace series", () => {
+    // Groceries has no budget, so the desktop's Budgets page leaves it out —
+    // the phone's pace line must too (this was rent on the real ledger).
+    db.insert(schema.transactions)
+      .values({
+        id: "txn-groceries-unbudgeted",
+        accountId: "acc-chk",
+        amount: 999,
+        date: new Date().toISOString().slice(0, 10),
+        name: "BIG GROCERY RUN",
+        pending: false,
+        userCategoryId: "cat_groceries",
+      })
+      .run();
+    const m = buildReadModel(NOW);
+    const budgeted = (m.budgetSpendByDay ?? []).reduce((a, p) => a + p.cents, 0);
+    const all = (m.spendByDay ?? []).reduce((a, p) => a + p.cents, 0);
+    expect(all - budgeted).toBeGreaterThanOrEqual(99_900);
+    expect(budgeted).toBe(m.budgets.reduce((a, b) => a + b.spentCents, 0));
+  });
+
+  it("values ticker-priced manual holdings from the last close", () => {
+    const ts = new Date(NOW * 1000);
+    db.insert(schema.manualHoldings)
+      .values({ id: "mh-btc", name: "Bitcoin", symbol: "BTC-USD", type: "crypto", quantity: 0.5, costBasis: 20_000, createdAt: ts, updatedAt: ts })
+      .run();
+    // No price → nothing invented.
+    expect(buildReadModel(NOW).positions.find((p) => p.symbol === "BTC-USD")).toBeUndefined();
+    const m = buildReadModel(NOW, { "BTC-USD": 60_000 });
+    const btc = m.positions.find((p) => p.symbol === "BTC-USD")!;
+    expect(btc.cents).toBe(3_000_000);
+    expect(btc.pnlCents).toBe(1_000_000);
+    expect(m.investments!.valueCents).toBeGreaterThanOrEqual(3_000_000);
+  });
+});

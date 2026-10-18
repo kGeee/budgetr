@@ -12,7 +12,7 @@ actor MarketData {
     static let shared = MarketData()
 
     enum Range: String, CaseIterable, Identifiable {
-        case day = "1D", week = "1W", month = "1M", quarter = "3M", year = "1Y", fiveYears = "5Y"
+        case day = "1D", week = "1W", month = "1M", quarter = "3M", ytd = "YTD", year = "1Y", fiveYears = "5Y", max = "MAX"
 
         var id: String { rawValue }
 
@@ -22,8 +22,10 @@ actor MarketData {
             case .week: return ("5d", "30m")
             case .month: return ("1mo", "1d")
             case .quarter: return ("3mo", "1d")
+            case .ytd: return ("ytd", "1d")
             case .year: return ("1y", "1d")
             case .fiveYears: return ("5y", "1wk")
+            case .max: return ("max", "1mo")
             }
         }
 

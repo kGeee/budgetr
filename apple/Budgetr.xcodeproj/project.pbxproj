@@ -143,7 +143,7 @@
 		E42A466B4CC5859903CF5625 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		EB493C8F4F78C5B27F691BDA /* Screen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Screen.swift; sourceTree = "<group>"; };
 		EB8445158F976B9B9F19F4DD /* MonthSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthSummary.swift; sourceTree = "<group>"; };
-		F038438482828015BB08B95A /* Budgetr.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Budgetr.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F038438482828015BB08B95A /* Budgetr.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Budgetr.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F756300171D848D20D2CD8FC /* SyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTests.swift; sourceTree = "<group>"; };
 		F8910B32E8D0FD12FBC60897 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		FEA05924AFE2E530192A3BF0 /* CompanionScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionScreens.swift; sourceTree = "<group>"; };
@@ -378,6 +378,7 @@
 						ProvisioningStyle = Automatic;
 					};
 					57A57B0C05FDEC9F7EE049F2 = {
+						DevelopmentTeam = B9UFFWUAD8;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -596,7 +597,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Budgetr/Support/Budgetr.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 7CK43PG7GZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Budgetr/Support/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Budgetr;
@@ -691,7 +691,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Budgetr/Support/Budgetr.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 7CK43PG7GZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Budgetr/Support/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Budgetr;

@@ -129,7 +129,7 @@ enum CompanionDemo {
             .map { Summary.Sector(sector: $0.key, cents: $0.value.reduce(0) { $0 + $1.cents }) }
             .sorted { $0.cents > $1.cents }
 
-        return Summary(
+        var summary = Summary(
             v: SummaryContract.version,
             asOf: Int(now.timeIntervalSince1970) - 240,
             appliedOpIds: [],
@@ -174,6 +174,13 @@ enum CompanionDemo {
                 .init(txnId: "venmo", personId: "p-maya", ts: todaySec - day / 2, cents: 6_450, detail: "Venmo · matches their Ippudo share"),
             ]
         )
+        // The budgeted share of this month's days, scaled to the budgets' own
+        // total — the real one leaves unbudgeted categories out.
+        let thisMonth = spendByDay.filter { $0.d >= month.startSec }
+        let monthTotal = max(1, thisMonth.reduce(0) { $0 + $1.cents })
+        let budgeted = budgets.reduce(0) { $0 + $1.spentCents }
+        summary.budgetSpendByDay = thisMonth.map { .init(d: $0.d, cents: $0.cents * budgeted / monthTotal) }
+        return summary
     }
 }
 

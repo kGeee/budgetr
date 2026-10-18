@@ -79,6 +79,9 @@ struct Summary: Codable, Equatable {
     let investments: Investments?
     let spendByDay: [SparkPoint]?
     let categories: [Category]?
+    /// Budget month, budgeted categories only — what the desktop's Budgets
+    /// pace line plots. Absent from older Macs.
+    var budgetSpendByDay: [SparkPoint]? = nil
     // v2 — shared expenses. Absent on installs that have never split a bill.
     let people: [Person]?
     /// Most recent first.

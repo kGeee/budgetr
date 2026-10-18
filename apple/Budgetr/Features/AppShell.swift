@@ -236,25 +236,17 @@ private struct CompanionTabs: View {
     }
 
     var body: some View {
-        TabView(selection: $tab) {
-            NavigationStack { CompanionSpendingView() }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(CompanionTab.spending)
-            NavigationStack { CompanionActivityView() }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(CompanionTab.activity)
-            NavigationStack { CompanionSharedView() }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(CompanionTab.shared)
-            NavigationStack { CompanionBudgetsView() }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(CompanionTab.budgets)
-            NavigationStack { CompanionHoldingsView() }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(CompanionTab.holdings)
-            NavigationStack { CompanionSettingsView() }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(CompanionTab.more)
+        // Not a TabView: past five tabs UIKit moves the rest into its own
+        // hidden "More" navigation controller, and Holdings grew a "‹ More"
+        // back button. Every stack stays alive in the ZStack, so each tab
+        // keeps its navigation and scroll position like a TabView would.
+        ZStack {
+            page(.spending) { CompanionSpendingView() }
+            page(.activity) { CompanionActivityView() }
+            page(.shared) { CompanionSharedView() }
+            page(.budgets) { CompanionBudgetsView() }
+            page(.holdings) { CompanionHoldingsView() }
+            page(.more) { CompanionSettingsView() }
         }
         .environment(\.chromeClearance, 84)
         .overlay(alignment: .bottom) {
@@ -262,6 +254,15 @@ private struct CompanionTabs: View {
                 .padding(.bottom, 2)
                 .ignoresSafeArea(.keyboard)
         }
+    }
+
+    private func page<V: View>(_ t: CompanionTab, @ViewBuilder _ view: () -> V) -> some View {
+        let on = tab == t
+        return NavigationStack { view() }
+            .opacity(on ? 1 : 0)
+            .allowsHitTesting(on)
+            .accessibilityHidden(!on)
+            .zIndex(on ? 1 : 0)
     }
 }
 
