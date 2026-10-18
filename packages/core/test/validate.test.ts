@@ -3,7 +3,9 @@ import {
   ContractValidationError,
   ContractVersionError,
   MAX_RECEIPT_BYTES,
+  MIN_OUTBOX_VERSION,
   OUTBOX_VERSION,
+  outboxVersionFor,
   assertValidOutbox,
   assertValidSummary,
   buildSummary,
@@ -41,6 +43,15 @@ const validOutbox = (): OutboxBatch => ({
 describe('assertValidSummary', () => {
   it('accepts a buildSummary product round-tripped through JSON', () => {
     expect(() => assertValidSummary(validSummary())).not.toThrow();
+  });
+
+  it('advertises the newest outbox the desktop applies, and rejects a malformed one', () => {
+    const s = validSummary();
+    expect(s.outboxVersion).toBe(OUTBOX_VERSION);
+    delete s.outboxVersion; // a desktop from before the field
+    expect(() => assertValidSummary(s)).not.toThrow();
+    s.outboxVersion = '3';
+    expect(() => assertValidSummary(s)).toThrow(ContractValidationError);
   });
 
   it('rejects float cents', () => {
@@ -220,6 +231,12 @@ describe('assertValidOutbox — v2 ops', () => {
       assertValidOutbox({ ...batch({ kind: 'addPerson', personId: 'p', name: 'Sam' }), v: 2 }),
     ).toThrow();
     expect(() => assertValidOutbox({ ...batch(splitBill), v: 1 })).toThrow();
+  });
+
+  it('versions a batch by what it carries, so a v2 desktop can read it whenever possible', () => {
+    expect(outboxVersionFor([{ kind: 'splitBill' }, { kind: 'recordSettlement' }])).toBe(MIN_OUTBOX_VERSION);
+    expect(outboxVersionFor([{ kind: 'splitBill' }, { kind: 'addPerson' }])).toBe(OUTBOX_VERSION);
+    expect(outboxVersionFor([])).toBe(MIN_OUTBOX_VERSION);
   });
 
   it('accepts a receipt photo', () => {

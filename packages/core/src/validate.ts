@@ -177,6 +177,8 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
     reqInt(a.ts, `${path}.ts`);
   });
 
+  if (s.outboxVersion !== undefined) reqInt(s.outboxVersion, '$.outboxVersion');
+
   if (s.spendByDay !== undefined) validateSpark(s.spendByDay, '$.spendByDay');
   if (s.budgetSpendByDay !== undefined) validateSpark(s.budgetSpendByDay, '$.budgetSpendByDay');
 

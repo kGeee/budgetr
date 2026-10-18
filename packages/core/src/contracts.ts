@@ -28,6 +28,11 @@ export const OUTBOX_VERSION = 3;
  */
 export const MIN_OUTBOX_VERSION = 2;
 
+/** The lowest OutboxBatch.v that can carry these ops. */
+export function outboxVersionFor(ops: readonly Pick<Op, 'kind'>[]): number {
+  return ops.some((o) => o.kind === 'addPerson') ? OUTBOX_VERSION : MIN_OUTBOX_VERSION;
+}
+
 // ── Desktop → Phone ────────────────────────────────────────────────
 
 export interface Summary {
@@ -70,6 +75,12 @@ export interface Summary {
    * pretending to be instant.
    */
   scans?: ScanResultSummary[]; // ≤ MAX_SCAN_RESULTS
+  /**
+   * The newest OutboxBatch.v this desktop applies. A phone sends ops that need
+   * a newer outbox only when this says the desktop reads them, and holds them
+   * otherwise. Absent = a desktop from before the field, which reads v2 only.
+   */
+  outboxVersion?: number;
 }
 
 export interface ScanResultSummary {

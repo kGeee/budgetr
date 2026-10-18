@@ -31,7 +31,16 @@ jobs:
           xcodebuild -project Budgetr.xcodeproj -scheme Budgetr \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             CODE_SIGNING_ALLOWED=NO build | tail -n 60
+
+      # testflight.sh stamps CURRENT_PROJECT_VERSION per upload; a literal in
+      # Info.plist would silently win and every upload would repeat a number.
+      - name: Check the build number reaches the bundle
+        run: |
+          stamped=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/Build/Products/Debug-iphonesimulator/Budgetr.app/Info.plist)
+          echo "CFBundleVersion = $stamped"
+          test "$stamped" = "${{ github.run_number }}"
 
       - name: Build for macOS and run tests
         run: |

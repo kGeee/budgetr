@@ -88,6 +88,9 @@ struct Summary: Codable, Equatable {
     let shared: [SharedExpense]?
     /// Inflows the Mac thinks are paybacks, pending confirmation there.
     let settleSuggestions: [SettleSuggestion]?
+    /// The newest outbox the Mac applies; nil from a Mac that predates the
+    /// field, which reads v2 only. Gates what the phone sends (`OutboxContract.partition`).
+    var outboxVersion: Int? = nil
 
     struct Person: Codable, Equatable, Identifiable {
         let id: String
