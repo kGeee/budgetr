@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { InvestmentsTabs } from "@/components/investments-tabs";
+import { requireTradingDesk } from "@/lib/trading-desk";
 import { Card } from "@/components/ui/card";
 import { IncomeSankey } from "@/components/fundamentals/income-sankey";
 import { getIncomeStatement } from "@/lib/sec";
@@ -22,6 +23,8 @@ export default async function FundamentalsPage({
 }: {
   searchParams: Promise<{ ticker?: string; period?: string }>;
 }) {
+  // Part of the Trading desk: with it off, land on the Settings switch instead.
+  requireTradingDesk();
   const { ticker, period: periodParam } = await searchParams;
   const sym = (ticker ?? "").trim().toUpperCase();
   const period = periodParam === "quarterly" ? "quarterly" : "annual";
@@ -31,7 +34,7 @@ export default async function FundamentalsPage({
   return (
     <div className="space-y-6">
       {/* Lives outside investments/layout.tsx, so it renders the section bar itself. */}
-      <InvestmentsTabs />
+      <InvestmentsTabs tradingDesk />
       <PageHead
         title="Fundamentals"
         action={

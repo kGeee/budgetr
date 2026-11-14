@@ -6,7 +6,7 @@
  * and SEC Fundamentals — are real, working tools, but they are not what most
  * people open a budgeting app for, and 0.15 took them out of the everyday
  * navigation. This flag brings them back: off by default, one switch in
- * Settings → Display.
+ * Settings → Trading desk.
  *
  * The read-only web demo always shows them — it is the showcase.
  *

@@ -7,8 +7,9 @@ import {
   Menu,
   X,
   LayoutDashboard,
-  LayoutGrid,
   ArrowLeftRight,
+  PieChart,
+  CalendarClock,
   LineChart,
   Wallet,
   Settings,
@@ -28,77 +29,57 @@ type NavItem = {
 };
 
 /**
- * The four screens this app is opened for. They get icons, size, and a fixed
- * position above the scroll; everything else is one rank quieter. A flat list of
- * twenty-one equal rows can't say that Transactions is a daily habit and
- * Fundamentals is a twice-a-year visit — so it said neither.
+ * The six screens this app is opened for, one question each: am I OK (Home),
+ * what happened (Transactions), where did it go (Spending), am I on plan
+ * (Budgets), what's coming (Plan), what do I own (Investments). They get icons,
+ * size, and a fixed position above the scroll.
  *
- * Editing this list is the whole knob: move an href up here to promote it.
+ * 0.15 folded twenty-one destinations into these — most of the old pages were
+ * the same queries drawn a second time. Editing this list is the whole knob.
  */
 const primaryNav: NavItem[] = [
-  { href: "/overview", label: "Overview", icon: LayoutDashboard },
-  // { href: "/dashboards", label: "Dashboards", icon: LayoutGrid },
-  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
-  { href: "/investments", label: "Investments", icon: LineChart },
+  { href: "/overview", label: "Home", icon: LayoutDashboard },
+  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight, badge: "review" },
+  { href: "/spending", label: "Spending", icon: PieChart },
   { href: "/budgets", label: "Budgets", icon: Wallet },
+  { href: "/plan", label: "Plan", icon: CalendarClock },
+  { href: "/investments", label: "Investments", icon: LineChart },
 ];
 
-/** Everything else, grouped by what you're doing rather than by data model. */
-const navGroups: { label: string; items: NavItem[] }[] = [
-  {
-    label: "Ledger",
-    items: [
-      { href: "/accounts", label: "Accounts" },
-      { href: "/recurring", label: "Recurring" },
-      { href: "/shared", label: "Shared" },
-      { href: "/vendors", label: "Vendors" },
-      { href: "/categories", label: "Categories" },
-    ],
-  },
-  {
-    label: "Investing",
-    items: [
-      { href: "/markets", label: "Markets" },
-      { href: "/investments/options", label: "Options" },
-      { href: "/investments/analysis", label: "Analysis" },
-      { href: "/fundamentals", label: "Fundamentals" },
-      { href: "/realized-gains", label: "Realized gains" },
-    ],
-  },
-  {
-    label: "Planning",
-    items: [
-      { href: "/cashflow", label: "Cashflow" },
-      { href: "/goals", label: "Goals" },
-      { href: "/fire", label: "FIRE" },
-    ],
-  },
-  {
-    label: "Assistant",
-    items: [
-      { href: "/review", label: "Review", badge: "review" },
-      { href: "/insights", label: "Insights" },
-      { href: "/rules", label: "Auto-tag rules" },
-    ],
-  },
-];
+/** The occasional destinations, one rank quieter. */
+const ledgerGroup = {
+  label: "Ledger",
+  items: [
+    { href: "/accounts", label: "Accounts" },
+    { href: "/shared", label: "Shared" },
+  ],
+};
+
+/** Trading tools — shown only when Settings → Trading desk is on (lib/trading-desk.ts). */
+const deskGroup = {
+  label: "Trading desk",
+  items: [
+    { href: "/markets", label: "Markets" },
+    { href: "/investments/options", label: "Options" },
+    { href: "/fundamentals", label: "Fundamentals" },
+  ],
+};
 
 const settingsItem: NavItem = { href: "/settings", label: "Settings", icon: Settings };
 
-const nav: NavItem[] = [...primaryNav, ...navGroups.flatMap((g) => g.items), settingsItem];
+const nav: NavItem[] = [
+  ...primaryNav,
+  ...ledgerGroup.items,
+  ...deskGroup.items,
+  settingsItem,
+];
 
-// On the read-only web demo, drop nav items that only make sense on a real
-// install (Settings → API keys). Everything else is browsable.
-const DEMO_HIDDEN = new Set(["/settings"]);
-function visibleGroups(webDemo: boolean) {
-  if (!webDemo) return navGroups;
-  return navGroups
-    .map((g) => ({ ...g, items: g.items.filter((i) => !DEMO_HIDDEN.has(i.href)) }))
-    .filter((g) => g.items.length > 0);
+function visibleGroups(tradingDesk: boolean): { label: string; items: NavItem[] }[] {
+  return tradingDesk ? [ledgerGroup, deskGroup] : [ledgerGroup];
 }
 
 // Does `pathname` sit at or under `href`? Uses a segment-aware prefix test so
-// "/investments" matches "/investments/analysis" but never "/investments-foo".
+// "/investments" matches "/investments/options" but never "/investments-foo".
 function matchesHref(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
@@ -106,7 +87,7 @@ function matchesHref(pathname: string, href: string) {
 
 // The single most-specific nav item for the current path: the longest matching
 // href across all items. This makes exactly one row active — on
-// "/investments/analysis" only "Analysis" lights up (not its "/investments"
+// "/investments/options" only "Options" lights up (not its "/investments"
 // parent), and the mobile header resolves to the deepest match.
 function bestMatchHref(pathname: string, items: NavItem[]): string | null {
   let best: string | null = null;
@@ -279,13 +260,15 @@ export function Sidebar({
   accounts,
   reviewCount = 0,
   webDemo = false,
+  tradingDesk = false,
 }: {
   accounts: SidebarAccount[];
   reviewCount?: number;
   webDemo?: boolean;
+  tradingDesk?: boolean;
 }) {
   const pathname = usePathname();
-  const groupsNav = visibleGroups(webDemo);
+  const groupsNav = visibleGroups(tradingDesk);
   // Resolve the single active href once per render; an item is active iff it is
   // that most-specific match.
   const activeHref = bestMatchHref(pathname, nav);
@@ -323,7 +306,7 @@ export function Sidebar({
         </Link>
 
         <nav className="mt-6 flex flex-col gap-0.5">
-          {primaryNav.map(({ href, label, icon: Icon }) => {
+          {primaryNav.map(({ href, label, icon: Icon, badge }) => {
             const active = href === activeHref;
             return (
               <Link
@@ -339,6 +322,7 @@ export function Sidebar({
                 <ActiveRail active={active} />
                 {Icon && <Icon size={17} strokeWidth={active ? 2.2 : 1.8} />}
                 {label}
+                {badge && <Badge count={counts[badge] ?? 0} />}
               </Link>
             );
           })}
@@ -346,7 +330,7 @@ export function Sidebar({
       </div>
 
       {/* The tail: everything you reach for occasionally, one rank quieter and
-          one indent in. Nothing is hidden — only weighted. */}
+          one indent in. */}
       <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-1">
         {groupsNav.map((group) => (
           <div key={group.label}>
@@ -426,10 +410,12 @@ export function MobileNav({
   accounts = [],
   reviewCount = 0,
   webDemo = false,
+  tradingDesk = false,
 }: {
   accounts?: SidebarAccount[];
   reviewCount?: number;
   webDemo?: boolean;
+  tradingDesk?: boolean;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -437,7 +423,7 @@ export function MobileNav({
   // so the analysis page reads "Analysis" rather than its "/investments" parent.
   const activeHref = bestMatchHref(pathname, nav);
   const current = nav.find(({ href }) => href === activeHref);
-  const groupsNav = visibleGroups(webDemo);
+  const groupsNav = visibleGroups(tradingDesk);
   const visible = accounts.filter((a) => !a.excluded);
   const counts: Record<string, number> = { review: reviewCount };
 
@@ -502,7 +488,7 @@ export function MobileNav({
           )}
 
           <div className="mb-5 flex flex-col gap-0.5">
-            {primaryNav.map(({ href, label, icon: Icon }) => {
+            {primaryNav.map(({ href, label, icon: Icon, badge }) => {
               const active = href === activeHref;
               return (
                 <Link
@@ -518,6 +504,7 @@ export function MobileNav({
                 >
                   {Icon && <Icon size={19} strokeWidth={active ? 2.2 : 1.8} />}
                   {label}
+                  {badge && <Badge count={counts[badge] ?? 0} />}
                 </Link>
               );
             })}

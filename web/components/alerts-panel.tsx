@@ -12,6 +12,7 @@ import {
   Clock,
   PlugZap,
   ShieldCheck,
+  ListChecks,
   type LucideIcon,
 } from "lucide-react";
 import { dismissAlert, snoozeAlert } from "@/lib/actions-alerts";
@@ -49,19 +50,31 @@ function snoozeDate(days: number): string {
   return new Date(Date.now() + days * 86400_000).toISOString().slice(0, 10);
 }
 
+/**
+ * Home's "Needs attention" card: data-health and spending alerts, plus the
+ * review backlog as one line into Transactions → Needs review. With `limit` it
+ * shows the first few and expands in place — there's no separate insights page
+ * to send you to any more.
+ */
 export function AlertsPanel({
   alerts,
   compact = false,
   limit,
+  reviewCount = 0,
 }: {
   alerts: Alert[];
   compact?: boolean;
   limit?: number;
+  /** Unreviewed settled transactions; renders the review line when > 0. */
+  reviewCount?: number;
 }) {
-  const shown = typeof limit === "number" ? alerts.slice(0, limit) : alerts;
+  const [expanded, setExpanded] = useState(false);
+  const capped = typeof limit === "number" && !expanded;
+  const shown = capped ? alerts.slice(0, limit) : alerts;
   const hidden = alerts.length - shown.length;
+  const things = alerts.length + (reviewCount > 0 ? 1 : 0);
 
-  if (alerts.length === 0) {
+  if (things === 0) {
     return (
       <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6">
         <div className="flex items-center gap-3">
@@ -75,8 +88,9 @@ export function AlertsPanel({
                 reassuring green tick. */}
             <p className="text-sm font-medium text-[var(--paper)]">Nothing needs you</p>
             <p className="text-xs text-[var(--muted)]">
-              Every connection is reporting, your ledger is current, and no spending spikes,
-              duplicate charges or subscription surprises turned up.
+              Every connection is reporting, your ledger is current, every transaction is
+              reviewed, and no spending spikes, duplicate charges or subscription surprises
+              turned up.
             </p>
           </div>
         </div>
@@ -88,31 +102,52 @@ export function AlertsPanel({
     <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6 shadow-[var(--elev-2)]">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <p className="eyebrow">Alerts</p>
+          <p className="eyebrow">Needs attention</p>
           <p className="mt-0.5 text-sm text-[var(--muted)]">
-            {alerts.length} {alerts.length === 1 ? "thing" : "things"} worth a look
+            {things} {things === 1 ? "thing" : "things"} worth a look
           </p>
         </div>
-        {compact && (
-          <Link href="/insights" className="text-xs text-[var(--brass)] hover:underline">
-            All insights →
-          </Link>
+        {typeof limit === "number" && alerts.length > limit && (
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="text-xs text-[var(--brass)] hover:underline"
+          >
+            {expanded ? "Show fewer" : `See all ${alerts.length}`}
+          </button>
         )}
       </div>
 
-      <div className="space-y-3">
-        {shown.map((a) => (
-          <AlertCard key={a.key} alert={a} compact={compact} />
-        ))}
-      </div>
+      {reviewCount > 0 && (
+        <Link
+          href="/transactions?view=review"
+          className={`flex items-center gap-3 rounded-lg border border-line bg-[var(--panel-2)] px-4 py-3 text-sm transition-colors hover:border-[var(--line-strong)] ${
+            shown.length > 0 ? "mb-3" : ""
+          }`}
+        >
+          <ListChecks size={16} className="shrink-0 text-[var(--brass)]" />
+          <span className="flex-1 text-[var(--paper)]">
+            {reviewCount.toLocaleString()} {reviewCount === 1 ? "transaction" : "transactions"}{" "}
+            to review
+          </span>
+          <span className="text-[var(--brass)]">→</span>
+        </Link>
+      )}
+
+      {shown.length > 0 && (
+        <div className="space-y-3">
+          {shown.map((a) => (
+            <AlertCard key={a.key} alert={a} compact={compact} />
+          ))}
+        </div>
+      )}
 
       {hidden > 0 && (
-        <Link
-          href="/insights"
-          className="mt-4 block text-center text-xs text-[var(--muted)] hover:text-[var(--paper)]"
+        <button
+          onClick={() => setExpanded(true)}
+          className="mt-4 block w-full text-center text-xs text-[var(--muted)] hover:text-[var(--paper)]"
         >
-          +{hidden} more on Insights →
-        </Link>
+          +{hidden} more
+        </button>
       )}
     </div>
   );

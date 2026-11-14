@@ -1,12 +1,18 @@
+import Link from "next/link";
+import { ListChecks } from "lucide-react";
 import { PageHead } from "@/components/page-head";
+import { Card } from "@/components/ui/card";
 import { MatchesReview } from "@/components/transactions/matches-review";
+import { ReviewInbox } from "@/components/transactions/review-inbox";
 import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { TransactionsFilterBar } from "@/components/transactions/transactions-filter-bar";
 import {
+  countUnreviewed,
   getAccounts,
   getCategories,
   getSavedFilters,
   getTags,
+  getTransactionsToReview,
   searchTransactions,
   summarizeTransactions,
   type TxnCriteria,
@@ -53,7 +59,7 @@ function parseCriteria(sp: SearchParams): TxnCriteria {
   const max = Number(maxRaw);
   if (maxRaw && !Number.isNaN(max)) c.amountMax = max;
 
-  // ?reviewed=no is the destination of the Insights review-backlog alert, so it
+  // ?reviewed=no is the destination of the review-backlog health alert, so it
   // has to actually narrow the list — an action that silently shows everything
   // is worse than no action.
   const reviewed = one(sp.reviewed);
@@ -63,12 +69,77 @@ function parseCriteria(sp: SearchParams): TxnCriteria {
   return c;
 }
 
+// The inbox loads a page at a time; reviewing a batch refreshes in the next one.
+const REVIEW_PAGE = 100;
+
+/** All ⇄ Needs review. Server-rendered links: the view lives in the URL. */
+function ViewTabs({ view, reviewCount }: { view: "all" | "review"; reviewCount: number }) {
+  const tabs = [
+    { key: "all", href: "/transactions", label: "All" },
+    { key: "review", href: "/transactions?view=review", label: "Needs review" },
+  ] as const;
+  return (
+    <nav aria-label="Transactions view" className="flex gap-1.5">
+      {tabs.map((t) => {
+        const on = t.key === view;
+        return (
+          <Link
+            key={t.key}
+            href={t.href}
+            aria-current={on ? "page" : undefined}
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
+              on
+                ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
+                : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+            }`}
+          >
+            {t.label}
+            {t.key === "review" && reviewCount > 0 && (
+              <span className="mono rounded-full bg-[color-mix(in_srgb,var(--brass)_18%,transparent)] px-1.5 text-xs text-[var(--brass)]">
+                {reviewCount.toLocaleString()}
+              </span>
+            )}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 export default async function TransactionsPage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const criteria = parseCriteria(await searchParams);
+  const sp = await searchParams;
+  const reviewCount = countUnreviewed();
+
+  if (sp.view === "review") {
+    const queue = getTransactionsToReview(REVIEW_PAGE);
+    return (
+      <div className="space-y-7">
+        <PageHead
+          title="Transactions"
+          action={<ViewTabs view="review" reviewCount={reviewCount} />}
+        />
+        {reviewCount === 0 ? (
+          <Card className="flex min-h-[220px] flex-col items-center justify-center text-center">
+            <span className="grid h-11 w-11 place-items-center rounded-2xl border border-line text-[var(--jade)]">
+              <ListChecks size={20} />
+            </span>
+            <p className="mt-4 font-display text-lg text-[var(--paper)]">All caught up</p>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Every settled transaction has been reviewed.
+            </p>
+          </Card>
+        ) : (
+          <ReviewInbox transactions={queue} categories={getCategories()} total={reviewCount} />
+        )}
+      </div>
+    );
+  }
+
+  const criteria = parseCriteria(sp);
   const filtered = Object.keys(criteria).length > 0;
 
   const txns = searchTransactions(criteria, 500);
@@ -86,7 +157,7 @@ export default async function TransactionsPage({
 
   return (
     <div className="space-y-7">
-      <PageHead title="Transactions" />
+      <PageHead title="Transactions" action={<ViewTabs view="all" reviewCount={reviewCount} />} />
       <div className="-mt-3 space-y-2">
         <p className="text-sm text-[var(--muted)]">
           {summary.total.toLocaleString()} {filtered ? "matching " : ""}

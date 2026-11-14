@@ -383,7 +383,14 @@ function ReviewQueueBody({
       </Card>
     );
   }
-  return <ReviewInbox transactions={transactions} categories={categories} total={total} />;
+  return (
+    <ReviewInbox
+      transactions={transactions}
+      categories={categories}
+      total={total}
+      href="/transactions?view=review"
+    />
+  );
 }
 
 function RecentActivityBody({ transactions }: { transactions: TransactionRow[] }) {
@@ -457,7 +464,7 @@ function SpendingReviewBody({
           <Receipt size={13} className="text-[var(--brass)]" />
           Spending review
         </CardTitle>
-        <Link href="/review" className="text-xs text-[var(--brass)] hover:underline">
+        <Link href="/spending?view=trends" className="text-xs text-[var(--brass)] hover:underline">
           Full review →
         </Link>
       </CardHeader>

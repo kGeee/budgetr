@@ -1,5 +1,14 @@
 import { cookies } from "next/headers";
-import { BadgeCheck, Clock, Coins, KeyRound, Mail, Smartphone, SunMoon } from "lucide-react";
+import {
+  BadgeCheck,
+  CandlestickChart,
+  KeyRound,
+  Mail,
+  SlidersHorizontal,
+  Smartphone,
+  Tags,
+  Wand2,
+} from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { CurrencySwitcher } from "@/components/currency-switcher";
@@ -7,20 +16,66 @@ import { ThemeSegmented } from "@/components/theme-toggle";
 import { ReportScheduleForm } from "@/components/report-schedule-form";
 import { ApiKeysForm } from "@/components/api-keys-form";
 import { CompanionCard } from "@/components/companion-card";
-import { ConnectionList } from "@/components/connection-status";
-import { getConnectionSummary } from "@/lib/connection-health";
 import { LicensePanel } from "@/components/license/license-panel";
-import { getSyncStatus } from "@/lib/companion/store";
+import { CategoryManager } from "@/components/budget/category-manager";
+import { RulesManager } from "@/components/transactions/rules-manager";
 import { PendingSwitch } from "@/components/pending-toggle";
-import { getDisplayCurrencySetting, getPendingSummary } from "@/lib/queries";
+import { TradingDeskSwitch } from "./trading-desk-switch";
+import { getSyncStatus } from "@/lib/companion/store";
+import {
+  getAccounts,
+  getArchivedCategories,
+  getCategories,
+  getDisplayCurrencySetting,
+  getPendingSummary,
+  getTagRules,
+} from "@/lib/queries";
 import { getIncludePending } from "@/lib/pending";
 import { getReportSchedule } from "@/lib/actions-reports";
 import { getFinnhubKey, getPlaidConfig } from "@/lib/app-config";
 import { getEntitlement } from "@/lib/license";
 import { hasPlaidCredentials } from "@/lib/plaid";
+import { isTradingDeskEnabled } from "@/lib/trading-desk";
 import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 
 export const dynamic = "force-dynamic";
+
+// The page is long now that Categories and Rules live here, so it opens with an
+// index. Ids are the shared anchor contract other pages link to.
+const SECTIONS = [
+  { id: "license", label: "License" },
+  { id: "display", label: "Display" },
+  { id: "trading-desk", label: "Trading desk" },
+  { id: "categories", label: "Categories" },
+  { id: "rules", label: "Rules" },
+  { id: "reports", label: "Reports" },
+  { id: "api-keys", label: "API keys" },
+  { id: "companion", label: "Companion" },
+] as const;
+
+// Clears the sticky app header when a section is jumped to.
+const SECTION = "scroll-mt-24";
+
+/** One labelled row inside the Display card. */
+function DisplayRow({
+  title,
+  children,
+  control,
+}: {
+  title: string;
+  children: React.ReactNode;
+  control: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 py-5 first:pt-0 last:pb-0">
+      <div className="max-w-md">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-sm text-[var(--muted)]">{children}</p>
+      </div>
+      {control}
+    </div>
+  );
+}
 
 export default async function SettingsPage() {
   const schedule = await getReportSchedule();
@@ -31,14 +86,31 @@ export default async function SettingsPage() {
   const entitlement = getEntitlement();
   const countPending = getIncludePending();
   const pendingSummary = getPendingSummary();
-  const connections = getConnectionSummary();
+  const tradingDesk = isTradingDeskEnabled();
+  const categories = getCategories();
+  const archivedCategories = getArchivedCategories();
+  const rules = getTagRules();
+  const ruleAccounts = getAccounts().map((a) => ({ id: a.id, name: a.name }));
+  const ruleCategories = categories.map((c) => ({ id: c.id, name: c.name }));
 
   return (
     <div className="space-y-7">
       <PageHead title="Settings" />
 
+      <nav aria-label="Settings sections" className="-mt-2 flex flex-wrap gap-2">
+        {SECTIONS.map((s) => (
+          <a
+            key={s.id}
+            href={`#${s.id}`}
+            className="rounded-full border border-line px-3 py-1 text-xs text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+          >
+            {s.label}
+          </a>
+        ))}
+      </nav>
+
       {/* License / trial */}
-      <Card>
+      <Card id="license" className={SECTION}>
         <CardHeader>
           <CardTitle>License</CardTitle>
           <BadgeCheck size={15} className="text-[var(--brass)]" />
@@ -46,21 +118,98 @@ export default async function SettingsPage() {
         <LicensePanel entitlement={entitlement} />
       </Card>
 
-      {/* Connections — linked institution health, then the API keys behind them */}
-      <Card id="connections">
+      {/* Display — currency and pending left the app header in 0.15, so this is
+          now their only home; they lead the everyday preferences. */}
+      <Card id="display" className={SECTION}>
         <CardHeader>
-          <CardTitle>Connections</CardTitle>
+          <CardTitle>Display</CardTitle>
+          <SlidersHorizontal size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <div className="divide-y divide-[var(--line)]">
+          <DisplayRow
+            title="Display currency"
+            control={<CurrencySwitcher current={displayCurrency} />}
+          >
+            Every figure across budgetr is converted to this unit using cached ECB reference
+            rates. Source currencies are preserved — this only changes how amounts are shown.
+          </DisplayRow>
+          <DisplayRow
+            title="Count pending transactions"
+            control={
+              <PendingSwitch
+                on={countPending}
+                count={pendingSummary.count}
+                amount={pendingSummary.amount}
+              />
+            }
+          >
+            Off (the default), a charge only counts toward spending once it settles, so totals
+            never move under you. On, pending charges count immediately — usually the truer
+            picture, at the cost of the odd figure changing when a hold posts at its final amount.
+          </DisplayRow>
+          <DisplayRow title="Theme" control={<ThemeSegmented initialTheme={theme} />}>
+            <span className="text-[var(--paper)]">System</span> follows your operating
+            system&apos;s light/dark setting.
+          </DisplayRow>
+        </div>
+      </Card>
+
+      {/* Trading desk — desk pages redirect here while it's off */}
+      <Card id="trading-desk" className={SECTION}>
+        <CardHeader>
+          <CardTitle>Trading desk</CardTitle>
+          <CandlestickChart size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <TradingDeskSwitch on={tradingDesk} />
+      </Card>
+
+      {/* Categories — management only; category spend lives on /spending */}
+      <Card id="categories" className={SECTION}>
+        <CardHeader>
+          <CardTitle>Categories</CardTitle>
+          <Tags size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <p className="mb-6 max-w-xl text-sm text-[var(--muted)]">
+          Rename, add, or archive the categories your spending rolls up into. Every transaction
+          maps through these — overrides set per-transaction take precedence.
+        </p>
+        <CategoryManager categories={categories} archived={archivedCategories} />
+      </Card>
+
+      {/* Auto-tag rules (was /rules) */}
+      <Card id="rules" className={SECTION}>
+        <CardHeader>
+          <CardTitle>Auto-tag rules</CardTitle>
+          <Wand2 size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <p className="mb-6 max-w-xl text-sm text-[var(--muted)]">
+          Rules tag matching transactions automatically — applied to new transactions on every
+          sync and backfilled across your history when you add them. Add amount, account, or regex
+          conditions for finer control, and optionally set a category too.
+        </p>
+        <RulesManager rules={rules} accounts={ruleAccounts} categories={ruleCategories} />
+      </Card>
+
+      {/* Scheduled report */}
+      <Card id="reports" className={SECTION}>
+        <CardHeader>
+          <CardTitle>Scheduled report</CardTitle>
+          <Mail size={15} className="text-[var(--brass)]" />
+        </CardHeader>
+        <p className="mb-6 max-w-md text-sm text-[var(--muted)]">
+          Email yourself a periodic summary — totals, top vendors, category breakdown and net
+          worth. Delivery is a stub for now (the report is rendered and logged server-side); wire
+          up a provider to go live.
+        </p>
+        <ReportScheduleForm initial={schedule} />
+      </Card>
+
+      {/* API keys — institution health lives on /accounts */}
+      <Card id="api-keys" className={SECTION}>
+        <CardHeader>
+          <CardTitle>API keys</CardTitle>
           <KeyRound size={15} className="text-[var(--brass)]" />
         </CardHeader>
-        {connections.total > 0 && (
-          <div className="mb-6 space-y-3">
-            <p className="text-sm text-[var(--muted)]">
-              {connections.liveCount} of {connections.total}{" "}
-              {connections.total === 1 ? "institution is" : "institutions are"} reporting normally.
-            </p>
-            <ConnectionList summary={connections} />
-          </div>
-        )}
         <p className="mb-6 max-w-md text-sm text-[var(--muted)]">
           Your Plaid keys power bank connections; the optional Finnhub key adds live stock prices.
           Keys are encrypted on this device. Leave a field blank to keep the saved value.{" "}
@@ -80,79 +229,13 @@ export default async function SettingsPage() {
         />
       </Card>
 
-      {/* Display currency */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Display currency</CardTitle>
-          <Coins size={15} className="text-[var(--brass)]" />
-        </CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <p className="max-w-md text-sm text-[var(--muted)]">
-            Every figure across budgetr is converted to this unit using cached ECB
-            reference rates. Source currencies are preserved — this only changes how
-            amounts are shown.
-          </p>
-          <CurrencySwitcher current={displayCurrency} />
-        </div>
-      </Card>
-
-      {/* Pending transactions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Pending transactions</CardTitle>
-          <Clock size={15} className="text-[var(--brass)]" />
-        </CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <p className="max-w-md text-sm text-[var(--muted)]">
-            Off (the default), a charge only counts toward spending once it settles, so
-            totals never move under you. On, pending charges count immediately — usually
-            the truer picture, at the cost of the odd figure changing when a gas-station
-            hold or a restaurant tip posts at its final amount.
-          </p>
-          <PendingSwitch
-            on={countPending}
-            count={pendingSummary.count}
-            amount={pendingSummary.amount}
-          />
-        </div>
-      </Card>
-
-      {/* Appearance */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Appearance</CardTitle>
-          <SunMoon size={15} className="text-[var(--brass)]" />
-        </CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <p className="max-w-md text-sm text-[var(--muted)]">
-            Choose the interface theme. <span className="text-[var(--paper)]">System</span> follows
-            your operating system&apos;s light/dark setting.
-          </p>
-          <ThemeSegmented initialTheme={theme} />
-        </div>
-      </Card>
-
       {/* Phone companion */}
-      <Card>
+      <Card id="companion" className={SECTION}>
         <CardHeader>
           <CardTitle>Phone companion</CardTitle>
           <Smartphone size={15} className="text-[var(--brass)]" />
         </CardHeader>
         <CompanionCard initial={getSyncStatus()} />
-      </Card>
-
-      {/* Scheduled report */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Scheduled report</CardTitle>
-          <Mail size={15} className="text-[var(--brass)]" />
-        </CardHeader>
-        <p className="mb-6 max-w-md text-sm text-[var(--muted)]">
-          Email yourself a periodic summary — totals, top vendors, category
-          breakdown and net worth. Delivery is a stub for now (the report is
-          rendered and logged server-side); wire up a provider to go live.
-        </p>
-        <ReportScheduleForm initial={schedule} />
       </Card>
     </div>
   );

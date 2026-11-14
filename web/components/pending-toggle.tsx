@@ -2,14 +2,12 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Clock } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
 import { setCountPending } from "@/lib/actions-settings";
 
 /**
- * Controls for the "count pending transactions" preference (see lib/pending.ts).
- * Both variants write the same server-side setting and refresh, so every spend
+ * Control for the "count pending transactions" preference (see lib/pending.ts).
+ * It writes the server-side setting and refreshes, so every spend
  * figure in the app re-reads it.
  */
 
@@ -22,52 +20,6 @@ function useToggle(on: boolean) {
       router.refresh();
     });
   return { busy, toggle };
-}
-
-function describe(on: boolean, count: number, amount: number) {
-  const money = formatCurrency(amount);
-  if (count === 0) {
-    return on
-      ? "Pending charges are counted as spending (nothing pending right now)"
-      : "Pending charges are left out of spending (nothing pending right now)";
-  }
-  return on
-    ? `Counting ${count} pending charge${count === 1 ? "" : "s"} (${money}) as spending — click to leave them out`
-    : `${count} pending charge${count === 1 ? "" : "s"} (${money}) not counted — click to include them`;
-}
-
-/**
- * Header control. Hidden when there is nothing pending and the preference is
- * off, since it would then change no number on screen — the Settings page keeps
- * it reachable.
- */
-export function PendingToggle({
-  on,
-  count,
-  amount,
-}: {
-  on: boolean;
-  count: number;
-  amount: number;
-}) {
-  const { busy, toggle } = useToggle(on);
-  if (!on && count === 0) return null;
-
-  return (
-    <Button
-      variant={on ? "outline" : "ghost"}
-      size="sm"
-      onClick={toggle}
-      disabled={busy}
-      aria-pressed={on}
-      title={describe(on, count, amount)}
-    >
-      <Clock size={15} />
-      <span className="hidden sm:inline">
-        {on ? "Pending in" : `${count} pending`}
-      </span>
-    </Button>
-  );
 }
 
 /** Settings-page variant: an explicit on/off pair with room for the numbers. */

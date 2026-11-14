@@ -1,10 +1,14 @@
 import { BrandMark } from "@/components/brand-mark";
 import { PlaidLink } from "@/components/onboarding/plaid-link";
+import { AlertsPanel } from "@/components/alerts-panel";
 import { DashboardView, type ResolvedWidget } from "@/components/dashboard-view";
 import { DataFreshnessBanner } from "@/components/data-freshness";
+import { detectAnomalies } from "@/lib/anomalies";
 import { getDataFreshness } from "@/lib/data-freshness";
+import { getDataHealthAlerts } from "@/lib/data-health";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
 import {
+  countUnreviewed,
   ensureOverviewDashboard,
   getCategories,
   getItems,
@@ -24,11 +28,10 @@ function parseConfig(raw: string | null): WidgetConfig {
 }
 
 /**
- * The Overview landing screen is now a customizable dashboard: it renders the
- * reserved "Overview" board (seeded on first run with the net-worth hero,
- * spending review, review queue, cashflow, budgets, activity and bills) through
- * the same editable/draggable widget grid as any custom dashboard. Users can add,
- * remove and reorder widgets here to shape what — and how — they see on landing.
+ * Home: a "Needs attention" card (data health, spending alerts, review backlog —
+ * what used to be the Insights page) above the customizable widget grid of the
+ * reserved Overview board. Users add, remove and reorder widgets here to shape
+ * what they see on landing.
  */
 export default async function Overview() {
   let items = getItems();
@@ -42,7 +45,7 @@ export default async function Overview() {
   const { dashboard, widgets } = ensureOverviewDashboard();
 
   // Resolve each widget's data server-side so the client grid stays a pure,
-  // serializable renderer (same contract as /dashboards/[id]).
+  // serializable renderer.
   const resolved: ResolvedWidget[] = widgets.map((w) => ({
     id: w.id,
     config: parseConfig(w.config),
@@ -56,10 +59,24 @@ export default async function Overview() {
   // thing that should interrupt before any figure below it is read.
   const freshness = getDataFreshness();
 
+  // Health first, always — a clear spending board only reassures if the data
+  // behind it is complete. The review-backlog health alert is dropped here
+  // because the card's own review line already says it, with a live count.
+  const alerts = [
+    ...getDataHealthAlerts().filter((a) => a.key !== "health:review-backlog"),
+    ...detectAnomalies(),
+  ];
+  const reviewCount = countUnreviewed();
+
   return (
     <>
       <DataFreshnessBanner freshness={freshness} className="mb-6" />
-      <DashboardView dashboard={dashboard} widgets={resolved} categories={categories} overview />
+      <DashboardView
+        dashboard={dashboard}
+        widgets={resolved}
+        categories={categories}
+        lead={<AlertsPanel alerts={alerts} reviewCount={reviewCount} limit={3} compact />}
+      />
     </>
   );
 }

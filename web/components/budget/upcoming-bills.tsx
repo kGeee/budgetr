@@ -12,8 +12,8 @@ export function UpcomingBills({ bills }: { bills: RecurringRow[] }) {
     <Card>
       <CardHeader>
         <CardTitle>Next two weeks</CardTitle>
-        <Link href="/recurring" className="text-xs text-[var(--brass)] hover:underline">
-          Recurring →
+        <Link href="/plan?tab=bills" className="text-xs text-[var(--brass)] hover:underline">
+          Bills &amp; income →
         </Link>
       </CardHeader>
 

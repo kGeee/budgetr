@@ -310,7 +310,7 @@ export function TransactionDetail({
       {t.recurring && (
         <Field label="Recurring">
           <a
-            href="/recurring"
+            href="/plan?tab=bills"
             className="inline-flex items-center gap-1.5 rounded-full border border-[var(--brass-dim)] px-2.5 py-1 text-xs text-[var(--brass)] hover:bg-[color-mix(in_srgb,var(--brass)_12%,transparent)]"
           >
             <Repeat size={12} /> Part of a recurring series

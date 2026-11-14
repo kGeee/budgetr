@@ -1,62 +1,34 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import {
+  INVESTMENTS_TABS,
+  investmentsTabHref,
+  parseInvestmentsTab,
+} from "@/components/investments-tab-keys";
 
 /**
  * Navigation for the whole investing section.
  *
- * Two bars, one idiom. `InvestmentsTabs` names every desk in the section and is
- * rendered by `investments/layout.tsx` (plus the two desks that live outside
- * that layout, Fundamentals and Realized gains). `OptionsToolTabs` names the
- * five tools inside the Options desk.
+ * Two bars, one idiom. `InvestmentsTabs` is the section bar: the three tabs of
+ * /investments (Holdings · Allocation · Income & gains) and, only with the
+ * Trading desk switched on, the desk's Markets · Options · Fundamentals. It's
+ * rendered by `investments/layout.tsx` plus the two desk pages outside that
+ * layout. `OptionsToolTabs` names the three tools inside the Options desk, and
+ * `SubTabs` is the same pill row for a tool's own modes (Chain › Vol › LEAPS).
  *
- * It used to list only Portfolio + Analysis and return `null` on every options
- * route, which is how the wheel scanner ended up with no reachable entry point:
- * navigation vanished exactly where the section got deep, and each page
- * hand-wrote its own back-links instead. Both bars now persist, so a desk is
- * always one click from any other.
+ * Everything takes the desk flag as a prop: it's a server-side setting and this
+ * is a client component.
  */
 
-// `href` is where the tab goes; `path` is the bare route it represents. They
-// differ only for the ticker-carrying tools, whose href gains a query string —
-// which must not stop the tab from lighting up.
-type Tab = { href: string; label: string; path?: string };
+type Tab = { key: string; href: string; label: string };
 
-const SECTION: Tab[] = [
-  { href: "/investments", label: "Portfolio" },
-  { href: "/markets", label: "Markets" },
-  { href: "/investments/options", label: "Options" },
-  { href: "/investments/analysis", label: "Analysis" },
-  { href: "/fundamentals", label: "Fundamentals" },
-  { href: "/realized-gains", label: "Realized gains" },
-];
-
-/** Tools of the Options desk. `carriesTicker` marks the symbol-scoped ones. */
-const TOOLS: (Tab & { carriesTicker?: boolean })[] = [
-  { href: "/investments/options", label: "Positions" },
-  { href: "/investments/options/chain", label: "Chain", carriesTicker: true },
-  { href: "/investments/options/wheel", label: "Wheel" },
-  { href: "/investments/options/scanner", label: "Scanner" },
-  { href: "/investments/options/leaps", label: "LEAPS", carriesTicker: true },
-  { href: "/investments/options/vol", label: "Vol", carriesTicker: true },
-];
-
-// Segment-aware prefix test, same rule the sidebar uses: "/investments" matches
-// "/investments/analysis" but never "/investments-foo".
-function matches(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(href + "/");
-}
-
-/** The longest matching href wins, so /investments/options lights up Options
- * rather than its Portfolio parent. */
-function activeHref(pathname: string, tabs: Tab[]): string | null {
-  let best: string | null = null;
-  for (const t of tabs) {
-    const path = t.path ?? t.href;
-    if (matches(pathname, path) && (best === null || path.length > best.length)) best = path;
-  }
-  return best;
+// Segment-aware prefix test, same rule the sidebar uses: "/investments/options"
+// matches "/investments/options/chain" but never "/investments/options-foo".
+function matches(pathname: string, path: string) {
+  return pathname === path || pathname.startsWith(path + "/");
 }
 
 function TabBar({
@@ -78,10 +50,10 @@ function TabBar({
       className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {tabs.map((t) => {
-        const on = (t.path ?? t.href) === active;
+        const on = t.key === active;
         return (
           <Link
-            key={t.path ?? t.href}
+            key={t.key}
             href={t.href}
             aria-current={on ? "page" : undefined}
             className={`shrink-0 rounded-full border transition-colors ${
@@ -100,24 +72,102 @@ function TabBar({
   );
 }
 
-/** The section bar: Portfolio · Options · Analysis · Fundamentals · Realized gains. */
-export function InvestmentsTabs() {
+const DESK: Tab[] = [
+  { key: "markets", href: "/markets", label: "Markets" },
+  { key: "options", href: "/investments/options", label: "Options" },
+  { key: "fundamentals", href: "/fundamentals", label: "Fundamentals" },
+];
+
+function sectionTabs(tradingDesk: boolean): Tab[] {
+  const own = INVESTMENTS_TABS.map((t) => ({
+    key: t.key,
+    href: investmentsTabHref(t.key),
+    label: t.label,
+  }));
+  return tradingDesk ? [...own, ...DESK] : own;
+}
+
+/** Which section tab a URL belongs to. Import is a Holdings action, so it lights Holdings. */
+function activeSection(pathname: string, tab: string | null): string | null {
+  for (const d of DESK) if (matches(pathname, d.href)) return d.key;
+  if (pathname === "/investments") return parseInvestmentsTab(tab);
+  if (matches(pathname, "/investments/import")) return "holdings";
+  return null;
+}
+
+function SectionBarWithQuery({ tradingDesk }: { tradingDesk: boolean }) {
   const pathname = usePathname();
-  return <TabBar tabs={SECTION} active={activeHref(pathname, SECTION)} label="Investments" />;
+  const tab = useSearchParams().get("tab");
+  return (
+    <TabBar
+      tabs={sectionTabs(tradingDesk)}
+      active={activeSection(pathname, tab)}
+      label="Investments"
+    />
+  );
 }
 
 /**
- * The Options desk's tool bar. Rendered by each options page rather than a
- * layout, because only a page can read `?ticker=` — and Chain and Vol have to
- * keep the symbol when you move between them.
+ * The section bar. `?tab=` is only readable through useSearchParams, which
+ * needs a Suspense boundary; the fallback is the same bar lit by path alone
+ * (so /investments shows Holdings until the query is known).
+ */
+export function InvestmentsTabs({ tradingDesk }: { tradingDesk: boolean }) {
+  const pathname = usePathname();
+  return (
+    <Suspense
+      fallback={
+        <TabBar
+          tabs={sectionTabs(tradingDesk)}
+          active={activeSection(pathname, null)}
+          label="Investments"
+        />
+      }
+    >
+      <SectionBarWithQuery tradingDesk={tradingDesk} />
+    </Suspense>
+  );
+}
+
+/** Tools of the Options desk. `carriesTicker` marks the symbol-scoped one. */
+const TOOLS: (Tab & { carriesTicker?: boolean })[] = [
+  { key: "/investments/options", href: "/investments/options", label: "Positions" },
+  { key: "/investments/options/chain", href: "/investments/options/chain", label: "Chain", carriesTicker: true },
+  { key: "/investments/options/wheel", href: "/investments/options/wheel", label: "Wheel" },
+];
+
+/**
+ * The Options desk's tool bar. Rendered by each options page rather than the
+ * options layout, because only a page can read `?ticker=` — and Chain has to
+ * keep the symbol when you come back to it.
  */
 export function OptionsToolTabs({ ticker }: { ticker?: string | null }) {
   const pathname = usePathname();
   const sym = ticker?.trim().toUpperCase();
   const tabs: Tab[] = TOOLS.map((t) =>
-    t.carriesTicker && sym
-      ? { ...t, path: t.href, href: `${t.href}?ticker=${encodeURIComponent(sym)}` }
-      : t,
+    t.carriesTicker && sym ? { ...t, href: `${t.href}?ticker=${encodeURIComponent(sym)}` } : t,
   );
-  return <TabBar tabs={tabs} active={activeHref(pathname, TOOLS)} label="Options tools" size="sm" />;
+  // Longest matching path wins, so /investments/options/chain lights Chain
+  // rather than its Positions parent.
+  let active: string | null = null;
+  for (const t of TOOLS) {
+    if (matches(pathname, t.key) && (active === null || t.key.length > active.length)) active = t.key;
+  }
+  return <TabBar tabs={tabs} active={active} label="Options tools" size="sm" />;
+}
+
+/**
+ * A tool's own modes, e.g. Chain · Vol · LEAPS on the chain page or Your wheel ·
+ * Scanner on the wheel page. The page knows its mode, so it passes it in.
+ */
+export function SubTabs({
+  tabs,
+  active,
+  label,
+}: {
+  tabs: Tab[];
+  active: string;
+  label: string;
+}) {
+  return <TabBar tabs={tabs} active={active} label={label} size="sm" />;
 }

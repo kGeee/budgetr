@@ -2,47 +2,34 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Check,
-  GripVertical,
-  LayoutGrid,
-  Pencil,
-  Plus,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Check, GripVertical, LayoutGrid, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageHead } from "@/components/page-head";
 import { DashboardWidget, WIDGET_META } from "@/components/dashboard-widget";
 import { WidgetPicker } from "@/components/widget-picker";
-import {
-  createDashboard,
-  deleteDashboard,
-  removeWidget,
-  renameDashboard,
-  reorderWidgets,
-} from "@/lib/actions-dashboards";
+import { removeWidget, reorderWidgets } from "@/lib/actions-dashboards";
 import type { CategoryRow, WidgetConfig, WidgetData } from "@/lib/queries";
 import type { Dashboard } from "@/db/schema";
 
 export type ResolvedWidget = { id: string; data: WidgetData; config?: WidgetConfig };
 
 /**
- * The composable widget grid for a single dashboard. Read mode renders the
- * widgets responsively; edit mode adds a widget palette, per-widget remove, and
- * drag-to-reorder (persisted via reorderWidgets). Dashboard rename/delete live
- * in the header.
+ * Home's composable widget grid — the one remaining dashboard (the reserved
+ * Overview board). Read mode renders the widgets responsively; edit mode adds a
+ * widget palette, per-widget remove, and drag-to-reorder (persisted via
+ * reorderWidgets). `lead` renders between the title and the grid, so what needs
+ * attention is read before any figure.
  */
 export function DashboardView({
   dashboard,
   widgets,
   categories,
-  overview = false,
+  lead,
 }: {
   dashboard: Dashboard;
   widgets: ResolvedWidget[];
   categories: CategoryRow[];
-  /** The reserved Overview board — fixed title, no rename/delete. */
-  overview?: boolean;
+  lead?: React.ReactNode;
 }) {
   const router = useRouter();
   const [edit, setEdit] = useState(false);
@@ -84,12 +71,9 @@ export function DashboardView({
 
   return (
     <div className="space-y-7">
-      <DashboardHeader
-        dashboard={dashboard}
-        edit={edit}
-        overview={overview}
-        onToggleEdit={() => setEdit((e) => !e)}
-      />
+      <DashboardHeader edit={edit} onToggleEdit={() => setEdit((e) => !e)} />
+
+      {lead}
 
       {ordered.length === 0 && !edit && (
         <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-[var(--radius)] border border-dashed border-line text-center">
@@ -154,102 +138,16 @@ export function DashboardView({
 }
 
 function DashboardHeader({
-  dashboard,
   edit,
-  overview = false,
   onToggleEdit,
 }: {
-  dashboard: Dashboard;
   edit: boolean;
-  overview?: boolean;
   onToggleEdit: () => void;
 }) {
-  const router = useRouter();
-  const [renaming, setRenaming] = useState(false);
-  const [name, setName] = useState(dashboard.name);
-  const [pending, start] = useTransition();
-
-  function saveName() {
-    const trimmed = name.trim();
-    if (!trimmed || trimmed === dashboard.name) {
-      setName(dashboard.name);
-      setRenaming(false);
-      return;
-    }
-    start(async () => {
-      await renameDashboard(dashboard.id, trimmed);
-      setRenaming(false);
-      router.refresh();
-    });
-  }
-
-  function remove() {
-    if (!confirm(`Delete "${dashboard.name}"? This can't be undone.`)) return;
-    start(async () => {
-      await deleteDashboard(dashboard.id);
-      router.push("/dashboards");
-    });
-  }
-
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
-      <div className="min-w-0">
-        <p className="eyebrow">{overview ? "Home" : "Dashboard"}</p>
-        {overview ? (
-          <h1 className="mt-1.5 truncate font-display text-3xl leading-none tracking-tight sm:text-4xl">
-            {dashboard.name}
-          </h1>
-        ) : renaming ? (
-          <div className="mt-1.5 flex items-center gap-2">
-            <input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveName();
-                if (e.key === "Escape") {
-                  setName(dashboard.name);
-                  setRenaming(false);
-                }
-              }}
-              className="w-64 max-w-full rounded-lg border border-line bg-[var(--panel)] px-3 py-1.5 font-display text-2xl tracking-tight text-[var(--paper)] outline-none focus:border-[var(--brass-dim)]"
-            />
-            <button
-              onClick={saveName}
-              disabled={pending}
-              aria-label="Save name"
-              className="grid h-8 w-8 place-items-center rounded-lg border border-line text-[var(--jade)] hover:bg-[var(--panel)] disabled:opacity-50"
-            >
-              <Check size={16} />
-            </button>
-            <button
-              onClick={() => {
-                setName(dashboard.name);
-                setRenaming(false);
-              }}
-              aria-label="Cancel rename"
-              className="grid h-8 w-8 place-items-center rounded-lg border border-line text-[var(--muted)] hover:bg-[var(--panel)]"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        ) : (
-          <div className="mt-1.5 flex items-center gap-2.5">
-            <h1 className="truncate font-display text-3xl leading-none tracking-tight sm:text-4xl">
-              {dashboard.name}
-            </h1>
-            <button
-              onClick={() => setRenaming(true)}
-              aria-label="Rename dashboard"
-              className="text-[var(--faint)] transition-colors hover:text-[var(--paper)]"
-            >
-              <Pencil size={16} />
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2">
+    <PageHead
+      title="Home"
+      action={
         <Button variant={edit ? "primary" : "secondary"} size="sm" onClick={onToggleEdit}>
           {edit ? (
             <>
@@ -261,51 +159,7 @@ function DashboardHeader({
             </>
           )}
         </Button>
-        {edit && !overview && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={remove}
-            disabled={pending}
-            className="text-[var(--coral)] hover:bg-[color-mix(in_srgb,var(--coral)_12%,transparent)] hover:text-[var(--coral)]"
-          >
-            <Trash2 size={15} /> Delete
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Standalone create-dashboard form for the index page. Creates the dashboard and
- * navigates straight into it so the user lands in the (empty) editor.
- */
-export function CreateDashboardForm() {
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [pending, start] = useTransition();
-
-  function create() {
-    start(async () => {
-      const id = await createDashboard(name || "Untitled dashboard");
-      setName("");
-      router.push(`/dashboards/${id}`);
-    });
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && create()}
-        placeholder="New dashboard name…"
-        className="h-10 w-64 max-w-full rounded-full border border-line bg-[var(--panel)] px-4 text-sm text-[var(--paper)] outline-none placeholder:text-[var(--faint)] focus:border-[var(--brass-dim)]"
-      />
-      <Button size="md" onClick={create} disabled={pending}>
-        <Plus size={16} /> Create dashboard
-      </Button>
-    </div>
+      }
+    />
   );
 }

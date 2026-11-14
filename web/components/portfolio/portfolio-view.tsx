@@ -1,17 +1,12 @@
 "use client";
 
-import { Fragment, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { createContext, Fragment, useContext, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { PayoffDiagram } from "@/components/options/payoff-diagram";
-import {
-  PIE_COLORS,
-  Sparkline,
-  TickerPriceChart,
-  type SectorSlice,
-} from "@/components/charts";
+import { Sparkline, TickerPriceChart } from "@/components/charts";
 import { ValueHistory } from "@/components/portfolio/value-history";
 import {
   AddManualHoldingButton,
@@ -32,16 +27,18 @@ import {
   parseOccSymbol,
   riskLevel,
 } from "@/lib/options";
-import { AssetAllocation, type AllocRow } from "@/components/portfolio/asset-allocation";
-import { DividendPanel } from "@/components/portfolio/dividend-panel";
 import type { InvestmentTxnRow } from "@/lib/queries";
-import type { DividendSummary } from "@/lib/dividends";
-import type { DividendCalendarEntry, PricePoint as YahooPricePoint } from "@/lib/yahoo";
+import type { PricePoint as YahooPricePoint } from "@/lib/yahoo";
 import type { BenchmarkKey, ComparisonRow } from "@/lib/benchmark";
 import { classifyHolding, isCashLike, KIND_LABEL, KIND_ORDER, type HoldingKind } from "@/lib/portfolio/classify";
 import { computeStanding, standingDetail, standingHeadline, WINDOW_LABEL } from "@/lib/portfolio/standing";
-
-const UNASSIGNED = "Unassigned";
+import {
+  effectiveValue,
+  liveSymbols,
+  sectorColorMap,
+  effectivePrice,
+  type HoldingRow,
+} from "@/components/portfolio/valuation";
 import {
   LivePricesProvider,
   useLivePrices,
@@ -49,38 +46,22 @@ import {
   type LiveQuote,
 } from "@/components/portfolio/live-prices";
 
-export type HoldingRow = {
-  id: string;
-  quantity: number | null;
-  costBasis: number | null;
-  price: number | null;
-  value: number | null;
-  closePrice: number | null;
-  currency: string | null;
-  ticker: string | null;
-  securityName: string | null;
-  securityType: string | null;
-  accountName: string | null;
-  /** True for user-entered off-Plaid holdings (crypto, fixed-value assets). */
-  manual?: boolean;
-  /** True when imported from a connected wallet (quantity is chain-synced). */
-  fromWallet?: boolean;
-  /** Symbol-scoped key the sector assignment is stored under (see sectorKeyFor). */
-  sectorKey: string;
-  /** Currently assigned sector, or null when untagged. */
-  sector?: string | null;
-  /** Brokerage-reported basis before any user correction (Plaid holdings). */
-  plaidCostBasis?: number | null;
-  /** Raw cost-basis override inputs, for the correction dialog (Plaid holdings). */
-  overrideTotal?: number | null;
-  overrideUnit?: number | null;
-  overrideAsOf?: string | null;
-  /** True when `costBasis` reflects a user correction rather than the brokerage figure. */
-  hasOverride?: boolean;
-};
+export type { HoldingRow };
+
+/**
+ * Whether the Trading desk (Markets, Options, Fundamentals) is switched on.
+ * Rows deep in the table link into the desk, so the flag rides a context
+ * rather than being threaded through every row renderer.
+ */
+const TradingDeskContext = createContext(false);
 
 type PricePoint = { date: string; close: number };
 
+/**
+ * The Holdings tab of /investments: headline value, the value curve against the
+ * benchmarks, and the holdings themselves. Allocation and income have their own
+ * tabs (and their own data), so this no longer carries either.
+ */
 export function PortfolioView({
   holdings,
   histories = {},
@@ -90,11 +71,7 @@ export function PortfolioView({
   comparison = [],
   transactions = [],
   knownSectors = [],
-  allocationTargets = {},
-  assetClassOverrides = {},
-  geographyOverrides = {},
-  dividendSummary,
-  dividendCalendar = [],
+  tradingDesk = false,
 }: {
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
@@ -111,66 +88,27 @@ export function PortfolioView({
   comparison?: ComparisonRow[];
   transactions?: InvestmentTxnRow[];
   knownSectors?: string[];
-  /** User-set target allocation percentages, keyed by dimension (see targetKeyFor). */
-  allocationTargets?: Record<string, number>;
-  /** Per-position asset-class overrides, keyed by sectorKey. */
-  assetClassOverrides?: Record<string, string>;
-  /** Per-position geography overrides, keyed by sectorKey. */
-  geographyOverrides?: Record<string, string>;
-  /** Derived dividend income stream (trailing/projected/yield-on-cost). */
-  dividendSummary?: DividendSummary;
-  /** Yahoo ex-dividend calendar for held tickers. */
-  dividendCalendar?: DividendCalendarEntry[];
+  /** Trading desk on: rows get Chain/Vol/Fundamentals links and options get a summary card. */
+  tradingDesk?: boolean;
 }) {
-  // Exclude option (OCC-symbol) legs — Finnhub can't quote them, so skip the
-  // wasted live-price subscriptions; they're valued from Plaid instead.
-  const symbols = useMemo(() => {
-    const plain = holdings
-      .filter((h) => !parseOccSymbol(h.ticker))
-      .map((h) => h.ticker)
-      .filter((t): t is string => Boolean(t));
-    // Option legs can't be quoted, but their UNDERLYINGS can — and the option
-    // rows need a spot price for their in-the-money and assignment flags. They
-    // used to come from the full option chains this page fetched; a Finnhub
-    // quote is the same number for a fraction of the bytes.
-    const underlyings = holdings
-      .map((h) => parseOccSymbol(h.ticker)?.underlying)
-      .filter((u): u is string => Boolean(u));
-    return [...new Set([...plain, ...underlyings])];
-  }, [holdings]);
+  const symbols = useMemo(() => liveSymbols(holdings), [holdings]);
 
   return (
-    <LivePricesProvider symbols={symbols}>
-      <PortfolioInner
-        holdings={holdings}
-        histories={histories}
-        portfolioSeries={portfolioSeries}
-        portfolioReturnSeries={portfolioReturnSeries}
-        benchmarks={benchmarks}
-        comparison={comparison}
-        transactions={transactions}
-        knownSectors={knownSectors}
-        allocationTargets={allocationTargets}
-        assetClassOverrides={assetClassOverrides}
-        geographyOverrides={geographyOverrides}
-        dividendSummary={dividendSummary}
-        dividendCalendar={dividendCalendar}
-      />
-    </LivePricesProvider>
+    <TradingDeskContext.Provider value={tradingDesk}>
+      <LivePricesProvider symbols={symbols}>
+        <PortfolioInner
+          holdings={holdings}
+          histories={histories}
+          portfolioSeries={portfolioSeries}
+          portfolioReturnSeries={portfolioReturnSeries}
+          benchmarks={benchmarks}
+          comparison={comparison}
+          transactions={transactions}
+          knownSectors={knownSectors}
+        />
+      </LivePricesProvider>
+    </TradingDeskContext.Provider>
   );
-}
-
-/**
- * Effective price for a holding, in priority order:
- *   live Finnhub quote → Plaid institution price → security close price.
- * The closePrice fallback matters for instruments Finnhub can't quote and Plaid
- * leaves without an institution price (e.g. some mutual funds), which would
- * otherwise render as $0.00.
- */
-function effectivePrice(h: HoldingRow, quotes: Record<string, LiveQuote>): number | null {
-  const q = h.ticker ? quotes[h.ticker.toUpperCase()] : undefined;
-  if (q?.price != null) return q.price;
-  return h.price ?? h.closePrice ?? null;
 }
 
 /** Day-change % from the live quote's previous close, or null if unavailable. */
@@ -206,12 +144,6 @@ function cleanSecurityName(name: string | null | undefined): string | null {
     if (norm(parts[0]) === norm(parts[1])) return parts[1].trim();
   }
   return name;
-}
-
-function effectiveValue(h: HoldingRow, quotes: Record<string, LiveQuote>): number {
-  const price = effectivePrice(h, quotes);
-  if (price != null && h.quantity != null) return price * h.quantity;
-  return h.value ?? 0;
 }
 
 /** Unrealized P&L = current value − total cost basis, or null with no basis. */
@@ -535,11 +467,6 @@ function PortfolioInner({
   comparison,
   transactions,
   knownSectors,
-  allocationTargets,
-  assetClassOverrides,
-  geographyOverrides,
-  dividendSummary,
-  dividendCalendar,
 }: {
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
@@ -549,13 +476,9 @@ function PortfolioInner({
   comparison: ComparisonRow[];
   transactions: InvestmentTxnRow[];
   knownSectors: string[];
-  allocationTargets: Record<string, number>;
-  assetClassOverrides: Record<string, string>;
-  geographyOverrides: Record<string, string>;
-  dividendSummary?: DividendSummary;
-  dividendCalendar?: DividendCalendarEntry[];
 }) {
   const { quotes, status } = useLivePrices();
+  const tradingDesk = useContext(TradingDeskContext);
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -565,7 +488,6 @@ function PortfolioInner({
   // sector lights up every position of that ticker instantly (the server action
   // persists in the background and a refresh reconciles).
   const [sectorEdits, setSectorEdits] = useState<Record<string, string | null>>({});
-  const [sectorFilter, setSectorFilter] = useState<string | null>(null);
   /** Un-folds the sub-1% tail. Off by default; the money is never hidden, only the rows. */
   const [showAll, setShowAll] = useState(false);
   const { visible: visibleCols, toggle: toggleColumn, reset: resetColumns } = useColumnPrefs();
@@ -586,46 +508,24 @@ function PortfolioInner({
     });
   }
 
-  // Stable color per sector: index by alphabetical name so a sector keeps its
-  // hue as live prices reorder it by value. Unassigned is always muted gray.
-  const sectorColor = useMemo(() => {
-    const names = Array.from(
-      new Set(holdings.map((h) => sectorOf(h) ?? UNASSIGNED).filter((s) => s !== UNASSIGNED)),
-    ).sort();
-    const map: Record<string, string> = { [UNASSIGNED]: "#8b948c" };
-    names.forEach((n, i) => (map[n] = PIE_COLORS[i % PIE_COLORS.length]));
-    return map;
+  const sectorColor = useMemo(
+    () => sectorColorMap(holdings.map(sectorOf)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holdings, sectorEdits]);
-
-  // Allocation by sector, recomputed on every live-price tick and sector edit.
-  const allocation = useMemo<SectorSlice[]>(() => {
-    const agg = new Map<string, { value: number; count: number }>();
-    for (const h of holdings) {
-      const s = sectorOf(h) ?? UNASSIGNED;
-      const cur = agg.get(s) ?? { value: 0, count: 0 };
-      cur.value += effectiveValue(h, quotes);
-      cur.count += 1;
-      agg.set(s, cur);
-    }
-    return Array.from(agg.entries())
-      .map(([sector, { value, count }]) => ({
-        sector,
-        value,
-        count,
-        color: sectorColor[sector] ?? "#8b948c",
-      }))
-      .sort((a, b) => b.value - a.value);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holdings, quotes, sectorEdits, sectorColor]);
+    [holdings, sectorEdits],
+  );
 
   // Suggestions for the sector editor: known sectors from the DB plus any added
   // optimistically this session, deduped.
   const sectorOptions = useMemo(
-    () => Array.from(new Set([...knownSectors, ...allocation.map((a) => a.sector)]))
-      .filter((s) => s !== UNASSIGNED)
-      .sort(),
-    [knownSectors, allocation],
+    () =>
+      Array.from(
+        new Set([
+          ...knownSectors,
+          ...holdings.map(sectorOf).filter((s): s is string => Boolean(s)),
+        ]),
+      ).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [knownSectors, holdings, sectorEdits],
   );
 
   // Group investment transactions by ticker for each holding's expanded panel.
@@ -639,37 +539,10 @@ function PortfolioInner({
     return map;
   }, [transactions]);
 
-  // Holdings shown in the table, narrowed to the drilled-into sector if any.
-  const visible = useMemo(
-    () =>
-      sectorFilter
-        ? holdings.filter((h) => (sectorOf(h) ?? UNASSIGNED) === sectorFilter)
-        : holdings,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [holdings, sectorFilter, sectorEdits],
-  );
-
   // Whole-portfolio market value — the denominator for each row's "% of total".
   const total = useMemo(
     () => holdings.reduce((s, h) => s + effectiveValue(h, quotes), 0),
     [holdings, quotes],
-  );
-
-  // Live-valued rows for the asset-allocation / targets panel, recomputed on each
-  // price tick and sector edit (sector drives the sector-target drift).
-  const allocRows = useMemo<AllocRow[]>(
-    () =>
-      holdings.map((h) => ({
-        id: h.id,
-        ticker: h.ticker,
-        securityType: h.securityType,
-        securityName: h.securityName,
-        sectorKey: h.sectorKey,
-        sector: sectorOf(h),
-        value: effectiveValue(h, quotes),
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [holdings, quotes, sectorEdits],
   );
 
   // Every option (OCC) leg across all holdings — drives the analytics panel.
@@ -683,8 +556,8 @@ function PortfolioInner({
   // normalized metrics and are sorted together by the chosen column, with rows
   // missing that metric sinking to the bottom in both directions.
   const items = useMemo(() => {
-    const singles = mergeCashRows(visible.filter((h) => !parseOccSymbol(h.ticker)), quotes);
-    const optionLegs = visible.filter((h) => parseOccSymbol(h.ticker) != null);
+    const singles = mergeCashRows(holdings.filter((h) => !parseOccSymbol(h.ticker)), quotes);
+    const optionLegs = holdings.filter((h) => parseOccSymbol(h.ticker) != null);
 
     const byUnderlying = new Map<string, HoldingRow[]>();
     for (const h of optionLegs) {
@@ -725,7 +598,7 @@ function PortfolioInner({
       if (bv === Number.NEGATIVE_INFINITY) return -1;
       return (av - bv) * dir;
     });
-  }, [visible, quotes, sortKey, sortDir, total]);
+  }, [holdings, quotes, sortKey, sortDir, total]);
 
   /**
    * The table's real shape: one section per kind of thing, each with its own
@@ -856,11 +729,6 @@ function PortfolioInner({
 
   return (
     <div className="space-y-7">
-      <SectionJump
-        hasOptions={optionLegs.length > 0}
-        hasDividends={Boolean(dividendSummary && dividendSummary.payments.length > 0)}
-      />
-
       <div id="value" className="scroll-mt-28 space-y-4">
         <StandingHeader
           standing={standing}
@@ -957,20 +825,6 @@ function PortfolioInner({
 
       <BenchmarkComparison comparison={comparison} standing={standing} />
 
-      <div id="allocation" className="scroll-mt-28">
-        <AssetAllocation
-          rows={allocRows}
-          total={total}
-          targets={allocationTargets}
-          assetClassOverrides={assetClassOverrides}
-          geographyOverrides={geographyOverrides}
-          knownSectors={sectorOptions}
-          sectorSlices={allocation}
-          activeSector={sectorFilter}
-          onSelectSector={setSectorFilter}
-        />
-      </div>
-
       <Card id="holdings" className="scroll-mt-28 overflow-hidden p-0">
         <div className="border-b border-line px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
@@ -979,18 +833,6 @@ function PortfolioInner({
               <StatusBadge status={status} />
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              {sectorFilter && (
-                <button
-                  onClick={() => setSectorFilter(null)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
-                >
-                  <Tag size={11} />
-                  {sectorFilter}
-                  <span className="text-[var(--faint)]">·</span>
-                  {visible.length}
-                  <X size={11} />
-                </button>
-              )}
               {/* The sheet has no column headers to click, so its sort is explicit. */}
               {view === "sheet" && (
                 <SheetSort sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
@@ -1061,9 +903,7 @@ function PortfolioInner({
             empty={
               holdings.length === 0
                 ? "No holdings yet. Connect a brokerage account and hit Sync."
-                : visible.length === 0
-                  ? `No holdings in ${sectorFilter}.`
-                  : null
+                : null
             }
           />
         ) : (
@@ -1189,16 +1029,6 @@ function PortfolioInner({
                   </td>
                 </tr>
               )}
-              {holdings.length > 0 && visible.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={orderedCols.length + 2}
-                    className="px-6 py-10 text-center text-[var(--muted)]"
-                  >
-                    No holdings in {sectorFilter}.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
           </div>
@@ -1206,80 +1036,14 @@ function PortfolioInner({
         )}
       </Card>
 
-      {optionLegs.length > 0 && (
+      {/* With the desk off the legs are just holdings — they're already in the
+          table above, and there's no desk for a summary to point at. */}
+      {tradingDesk && optionLegs.length > 0 && (
         <div id="options" className="scroll-mt-28">
           <OptionsSummaryCard legs={optionLegs} quotes={quotes} />
         </div>
       )}
-
-      {dividendSummary && dividendSummary.payments.length > 0 && (
-        <div id="dividends" className="scroll-mt-28">
-          <DividendPanel summary={dividendSummary} calendar={dividendCalendar} />
-        </div>
-      )}
     </div>
-  );
-}
-
-/**
- * Jump strip for the desk's five sections. The Portfolio desk is a long scroll —
- * value, allocation, holdings, options, dividends — and "show me my option
- * positions" used to mean scrolling past everything above it. Anchors only: no
- * data moves and nothing re-fetches, and sections that aren't rendered (no
- * option legs, no dividends) are simply absent from the strip.
- */
-function SectionJump({ hasOptions, hasDividends }: { hasOptions: boolean; hasDividends: boolean }) {
-  const sections = [
-    { id: "value", label: "Value" },
-    { id: "allocation", label: "Allocation" },
-    { id: "holdings", label: "Holdings" },
-    ...(hasOptions ? [{ id: "options", label: "Options" }] : []),
-    ...(hasDividends ? [{ id: "dividends", label: "Dividends" }] : []),
-  ];
-  const key = sections.map((s) => s.id).join(",");
-  const [active, setActive] = useState("value");
-
-  useEffect(() => {
-    const els = key
-      .split(",")
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => el != null);
-    if (els.length === 0) return;
-    // The band runs from just under the sticky header to 55% down the viewport,
-    // so the section you're reading wins rather than whatever is at the bottom.
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const seen = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (seen[0]) setActive(seen[0].target.id);
-      },
-      { rootMargin: "-96px 0px -55% 0px" },
-    );
-    els.forEach((el) => obs.observe(el));
-    return () => obs.disconnect();
-  }, [key]);
-
-  return (
-    <nav
-      aria-label="Sections of this desk"
-      className="material sticky top-14 z-10 -mx-1 flex gap-1.5 overflow-x-auto rounded-full px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-    >
-      {sections.map((s) => (
-        <a
-          key={s.id}
-          href={`#${s.id}`}
-          aria-current={active === s.id ? "true" : undefined}
-          className={`shrink-0 rounded-full border px-3 py-1 text-xs transition-colors ${
-            active === s.id
-              ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
-              : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-          }`}
-        >
-          {s.label}
-        </a>
-      ))}
-    </nav>
   );
 }
 
@@ -1495,91 +1259,14 @@ function HoldingRowView({
                 {cleanSecurityName(h.securityName)}
               </span>
               {/* Quiet row actions — revealed on hover so 45 rows don't shout. */}
-              <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 md:inline-flex">
-                {isOptionable(h) && (
-                  <>
-                    <Link
-                      href={`/investments/options/chain?ticker=${encodeURIComponent(h.ticker as string)}`}
-                      title={`Option chain for ${h.ticker}`}
-                      className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                    >
-                      Chain
-                      <ArrowUpRight size={10} />
-                    </Link>
-                    <Link
-                      href={`/investments/options/vol?ticker=${encodeURIComponent(h.ticker as string)}`}
-                      title={`Fixed-strike vol for ${h.ticker}`}
-                      className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                    >
-                      Vol
-                      <ArrowUpRight size={10} />
-                    </Link>
-                  </>
-                )}
-                {h.ticker && !parseOccSymbol(h.ticker) && (
-                  <Link
-                    href={`/fundamentals?ticker=${encodeURIComponent(h.ticker)}`}
-                    title={`Fundamentals for ${h.ticker}`}
-                    className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                  >
-                    Fundamentals
-                    <ArrowUpRight size={10} />
-                  </Link>
-                )}
-              </span>
+              <HoldingDeskLinks h={h} />
               {h.manual && (
                 <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
                   {h.securityType ?? "manual"}
                 </span>
               )}
-              {h.manual && (
-                <span className="inline-flex items-center">
-                  <EditManualHoldingButton
-                    id={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                    isTickered={Boolean(h.ticker)}
-                    quantity={h.quantity}
-                    costBasis={h.costBasis}
-                    value={h.value}
-                    fromWallet={h.fromWallet}
-                  />
-                  {/* A wallet row would be re-created by the next sync, so it's
-                      hidden (a persisted rule) rather than deleted. */}
-                  {h.fromWallet ? (
-                    <HideWalletTokenButton
-                      id={h.id}
-                      name={h.securityName ?? h.ticker ?? "holding"}
-                    />
-                  ) : (
-                    <DeleteManualHoldingButton
-                      id={h.id}
-                      name={h.securityName ?? h.ticker ?? "holding"}
-                    />
-                  )}
-                </span>
-              )}
-              {!h.manual && (
-                <span className="inline-flex items-center gap-1.5">
-                  {h.hasOverride && (
-                    <span
-                      title="Cost basis manually corrected"
-                      className="rounded border border-[var(--brass-dim)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]"
-                    >
-                      adj
-                    </span>
-                  )}
-                  <EditCostBasisButton
-                    holdingId={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                    quantity={h.quantity}
-                    plaidCostBasis={h.plaidCostBasis ?? null}
-                    overrideTotal={h.overrideTotal ?? null}
-                    overrideUnit={h.overrideUnit ?? null}
-                    overrideAsOf={h.overrideAsOf ?? null}
-                    hasOverride={Boolean(h.hasOverride)}
-                  />
-                </span>
-              )}
+              {h.hasOverride && <AdjustedBadge />}
+              <HoldingEditButtons h={h} />
             </span>
             <SectorEditor
               sector={sector}
@@ -1607,8 +1294,119 @@ function HoldingRowView({
   );
 }
 
+/**
+ * A holding's links into the Trading desk: Chain and Vol for an equity or ETF,
+ * Fundamentals for any plain ticker. The table row and the sheet row used to
+ * each hand-write these; both render this now. Nothing renders with the desk
+ * off — every route it points at is gated behind the setting.
+ */
+function DeskLinks({
+  ticker,
+  optionable,
+  chainOnly = false,
+}: {
+  ticker: string | null;
+  optionable: boolean;
+  /** Option groups: the underlying's chain is the only link that makes sense. */
+  chainOnly?: boolean;
+}) {
+  const desk = useContext(TradingDeskContext);
+  if (!desk || !ticker) return null;
+  const sym = encodeURIComponent(ticker);
+  const links = [
+    ...(optionable
+      ? [
+          { href: `/investments/options/chain?ticker=${sym}`, label: "Chain", title: `Option chain for ${ticker}` },
+          ...(chainOnly
+            ? []
+            : [{ href: `/investments/options/chain?ticker=${sym}&mode=vol`, label: "Vol", title: `Fixed-strike vol for ${ticker}` }]),
+        ]
+      : []),
+    ...(!chainOnly && !parseOccSymbol(ticker)
+      ? [{ href: `/fundamentals?ticker=${sym}`, label: "Fundamentals", title: `Fundamentals for ${ticker}` }]
+      : []),
+  ];
+  return (
+    <>
+      {links.map((l) => (
+        <Link
+          key={l.label}
+          href={l.href}
+          title={l.title}
+          className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+        >
+          {l.label}
+          <ArrowUpRight size={10} />
+        </Link>
+      ))}
+    </>
+  );
+}
+
+/** The table row's hover strip; the sheet row folds DeskLinks into its own. */
+function HoldingDeskLinks({ h }: { h: HoldingRow }) {
+  const desk = useContext(TradingDeskContext);
+  if (!desk || !h.ticker) return null;
+  return (
+    <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 md:inline-flex">
+      <DeskLinks ticker={h.ticker} optionable={isOptionable(h)} />
+    </span>
+  );
+}
+
+function AdjustedBadge() {
+  return (
+    <span
+      title="Cost basis manually corrected"
+      className="shrink-0 rounded border border-[var(--brass-dim)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]"
+    >
+      adj
+    </span>
+  );
+}
+
+/** Edit/remove for a manual holding, or the cost-basis correction for a Plaid one. */
+function HoldingEditButtons({ h }: { h: HoldingRow }) {
+  const name = h.securityName ?? h.ticker ?? "holding";
+  if (!h.manual) {
+    return (
+      <EditCostBasisButton
+        holdingId={h.id}
+        name={name}
+        quantity={h.quantity}
+        plaidCostBasis={h.plaidCostBasis ?? null}
+        overrideTotal={h.overrideTotal ?? null}
+        overrideUnit={h.overrideUnit ?? null}
+        overrideAsOf={h.overrideAsOf ?? null}
+        hasOverride={Boolean(h.hasOverride)}
+      />
+    );
+  }
+  return (
+    <span className="inline-flex items-center">
+      <EditManualHoldingButton
+        id={h.id}
+        name={name}
+        isTickered={Boolean(h.ticker)}
+        quantity={h.quantity}
+        costBasis={h.costBasis}
+        value={h.value}
+        fromWallet={h.fromWallet}
+      />
+      {/* A wallet row would be re-created by the next sync, so it's hidden (a
+          persisted rule) rather than deleted. */}
+      {h.fromWallet ? (
+        <HideWalletTokenButton id={h.id} name={name} />
+      ) : (
+        <DeleteManualHoldingButton id={h.id} name={name} />
+      )}
+    </span>
+  );
+}
+
 /** Shared "options →" chip used by the mobile holding cards. */
 function OptionsChip({ ticker }: { ticker: string }) {
+  if (!useContext(TradingDeskContext)) return null;
   return (
     <Link
       href={`/investments/options/chain?ticker=${encodeURIComponent(ticker)}`}
@@ -1865,15 +1663,12 @@ function OptionGroupRow({
                 liability
               </span>
             )}
-            <Link
-              href={`/investments/options/chain?ticker=${encodeURIComponent(underlying)}`}
+            <span
               onClick={(e) => e.stopPropagation()}
-              title={`Option chain for ${underlying}`}
-              className="hidden items-center gap-0.5 text-[11px] text-[var(--faint)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-[var(--brass)] md:inline-flex"
+              className="hidden items-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 md:inline-flex"
             >
-              Chain
-              <ArrowUpRight size={10} />
-            </Link>
+              <DeskLinks ticker={underlying} optionable chainOnly />
+            </span>
             {Number.isFinite(soonestDte) && (
               <span
                 className={`mono rounded px-1.5 py-0.5 text-[10px] ${
@@ -2220,83 +2015,11 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
               {h.securityType ?? "manual"}
             </span>
           )}
-          {h.hasOverride && (
-            <span
-              title="Cost basis manually corrected"
-              className="shrink-0 rounded border border-[var(--brass-dim)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]"
-            >
-              adj
-            </span>
-          )}
+          {h.hasOverride && <AdjustedBadge />}
           {/* Quiet row actions — revealed on hover so 40 rows don't shout. */}
           <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100 md:inline-flex">
-            {isOptionable(h) && (
-              <>
-                <Link
-                  href={`/investments/options/chain?ticker=${encodeURIComponent(h.ticker as string)}`}
-                  title={`Option chain for ${h.ticker}`}
-                  className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                >
-                  Chain
-                  <ArrowUpRight size={10} />
-                </Link>
-                <Link
-                  href={`/investments/options/vol?ticker=${encodeURIComponent(h.ticker as string)}`}
-                  title={`Fixed-strike vol for ${h.ticker}`}
-                  className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                >
-                  Vol
-                  <ArrowUpRight size={10} />
-                </Link>
-              </>
-            )}
-            {h.ticker && !parseOccSymbol(h.ticker) && (
-              <Link
-                href={`/fundamentals?ticker=${encodeURIComponent(h.ticker)}`}
-                title={`Fundamentals for ${h.ticker}`}
-                className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-              >
-                Fundamentals
-                <ArrowUpRight size={10} />
-              </Link>
-            )}
-            {h.manual ? (
-              <span className="inline-flex items-center">
-                <EditManualHoldingButton
-                  id={h.id}
-                  name={h.securityName ?? h.ticker ?? "holding"}
-                  isTickered={Boolean(h.ticker)}
-                  quantity={h.quantity}
-                  costBasis={h.costBasis}
-                  value={h.value}
-                  fromWallet={h.fromWallet}
-                />
-                {/* A wallet row would be re-created by the next sync, so it's
-                    hidden (a persisted rule) rather than deleted. */}
-                {h.fromWallet ? (
-                  <HideWalletTokenButton
-                    id={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                  />
-                ) : (
-                  <DeleteManualHoldingButton
-                    id={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                  />
-                )}
-              </span>
-            ) : (
-              <EditCostBasisButton
-                holdingId={h.id}
-                name={h.securityName ?? h.ticker ?? "holding"}
-                quantity={h.quantity}
-                plaidCostBasis={h.plaidCostBasis ?? null}
-                overrideTotal={h.overrideTotal ?? null}
-                overrideUnit={h.overrideUnit ?? null}
-                overrideAsOf={h.overrideAsOf ?? null}
-                hasOverride={Boolean(h.hasOverride)}
-              />
-            )}
+            <DeskLinks ticker={h.ticker} optionable={isOptionable(h)} />
+            <HoldingEditButtons h={h} />
           </span>
         </div>
       }
@@ -2414,14 +2137,9 @@ function SheetOptionRow({
               {f === "assignment" ? "Assign risk" : "Worthless risk"}
             </span>
           ))}
-          <Link
-            href={`/investments/options/chain?ticker=${encodeURIComponent(underlying)}`}
-            title={`Option chain for ${underlying}`}
-            className="hidden items-center gap-0.5 text-[11px] text-[var(--faint)] opacity-0 transition-opacity duration-150 hover:text-[var(--brass)] focus-within:opacity-100 group-hover:opacity-100 md:inline-flex"
-          >
-            Chain
-            <ArrowUpRight size={10} />
-          </Link>
+          <span className="hidden items-center opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 md:inline-flex">
+            <DeskLinks ticker={underlying} optionable chainOnly />
+          </span>
         </div>
       }
       meta={

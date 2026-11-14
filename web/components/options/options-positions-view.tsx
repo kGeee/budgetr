@@ -42,14 +42,14 @@ const TOOLS = [
     needsPosition: false,
   },
   {
-    href: "/investments/options/scanner",
+    href: "/investments/options/wheel?tab=scan",
     label: "Scanner",
     icon: Radar,
     blurb: "Ranked cash-secured puts across a liquid universe, with a trade plan.",
     needsPosition: false,
   },
   {
-    href: "/investments/options/vol",
+    href: "/investments/options/chain?mode=vol",
     label: "Fixed-strike vol",
     icon: Activity,
     blurb: "Whether a strike's implied vol is rich or cheap against its own history.",
@@ -203,7 +203,7 @@ function LegRow({ leg, spot, currency }: { leg: Leg; spot: number | null; curren
       </div>
       <div className="flex shrink-0 items-center gap-3">
         <DeskLink href={`/investments/options/chain?ticker=${encodeURIComponent(p.underlying)}`}>Chain</DeskLink>
-        <DeskLink href={`/investments/options/vol?ticker=${encodeURIComponent(p.underlying)}`}>Vol</DeskLink>
+        <DeskLink href={`/investments/options/chain?ticker=${encodeURIComponent(p.underlying)}&mode=vol`}>Vol</DeskLink>
       </div>
     </li>
   );

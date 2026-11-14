@@ -191,7 +191,7 @@ function Row({ category, categories }: { category: CategoryRow; categories: Cate
       )}
 
       <Link
-        href={`/categories/${category.id}`}
+        href={`/spending?category=${category.id}`}
         aria-label={`View ${category.name} transactions`}
         className="shrink-0 rounded-md p-1.5 text-[var(--faint)] opacity-0 transition hover:text-[var(--brass)] group-hover:opacity-100"
       >

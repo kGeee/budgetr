@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * Analysis desk — portfolio risk + per-holding technicals/fundamentals for
- * calmer, more structured decisions. Portfolio KPIs (beta, concentration) →
- * sector exposure → risk/return scatter → correlation heatmap of the biggest
+ * Risk analysis on the Investments › Allocation tab — portfolio risk +
+ * per-holding technicals/fundamentals for calmer, more structured decisions.
+ * Portfolio KPIs (beta, concentration) → risk/return scatter → correlation heatmap of the biggest
  * positions → a sortable per-holding table. All data is prepared server-side in
  * lib/analysis-data.ts; this only visualizes it.
  */
@@ -64,7 +64,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
   if (data.holdings.length === 0) {
     return (
       <Card className="p-10 text-center text-sm text-[var(--muted)]">
-        No equity holdings to analyze yet. Connect a brokerage or add holdings, then this desk fills in.
+        No equity holdings to analyze yet. Connect a brokerage or add holdings, then this fills in.
       </Card>
     );
   }
@@ -87,45 +87,28 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Sector exposure */}
-        <Card className="p-5">
-          <h3 className="mb-4 text-sm font-medium text-[var(--paper)]">Sector exposure</h3>
-          <div className="space-y-2.5">
-            {data.portfolio.sectors.slice(0, 8).map((s) => (
-              <div key={s.sector}>
-                <div className="flex justify-between text-xs">
-                  <span className="text-[var(--muted)]">{s.sector}</span>
-                  <span className="tabular-nums text-[var(--paper)]">{s.pct.toFixed(0)}%</span>
-                </div>
-                <div className="mt-1 h-1.5 rounded-full bg-[var(--panel-2)]">
-                  <div className="h-full rounded-full bg-[var(--brass)]" style={{ width: `${Math.min(100, s.pct)}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* Risk / return scatter */}
-        <Card className="p-5">
-          <h3 className="mb-1 text-sm font-medium text-[var(--paper)]">Risk vs. return</h3>
-          <p className="mb-3 text-xs text-[var(--muted)]">1-year return against realized volatility; bubble size = weight.</p>
-          <ResponsiveContainer width="100%" height={240}>
-            <ScatterChart margin={{ top: 8, right: 12, bottom: 20, left: 4 }}>
-              <CartesianGrid stroke={t.grid} strokeDasharray="3 3" />
-              <XAxis type="number" dataKey="x" name="Volatility" unit="%" domain={[0, X_MAX]} tick={t.tick} label={{ value: "Volatility", position: "insideBottom", offset: -8, fill: t.muted, fontSize: 11 }} />
-              <YAxis type="number" dataKey="y" name="Return" unit="%" domain={[Y_MIN, Y_MAX]} tick={t.tick} />
-              <ZAxis type="number" dataKey="z" range={[40, 400]} />
-              <Tooltip cursor={{ strokeDasharray: "3 3", stroke: t.grid }} content={<ScatterTip />} />
-              <Scatter data={scatter} isAnimationActive={false}>
-                {scatter.map((d) => (
-                  <Cell key={d.ticker} fill={d.y >= 0 ? t.jade : t.coral} fillOpacity={0.75} stroke={t.dotStroke} />
-                ))}
-              </Scatter>
-            </ScatterChart>
-          </ResponsiveContainer>
-        </Card>
-      </div>
+      {/* Sector exposure lived here too. The Allocation tab above already draws
+          it — from the sectors you tag, which you can edit — so a second,
+          Finnhub-labelled breakdown that disagreed with it was dropped. */}
+      {/* Risk / return scatter */}
+      <Card className="p-5">
+        <h3 className="mb-1 text-sm font-medium text-[var(--paper)]">Risk vs. return</h3>
+        <p className="mb-3 text-xs text-[var(--muted)]">1-year return against realized volatility; bubble size = weight.</p>
+        <ResponsiveContainer width="100%" height={240}>
+          <ScatterChart margin={{ top: 8, right: 12, bottom: 20, left: 4 }}>
+            <CartesianGrid stroke={t.grid} strokeDasharray="3 3" />
+            <XAxis type="number" dataKey="x" name="Volatility" unit="%" domain={[0, X_MAX]} tick={t.tick} label={{ value: "Volatility", position: "insideBottom", offset: -8, fill: t.muted, fontSize: 11 }} />
+            <YAxis type="number" dataKey="y" name="Return" unit="%" domain={[Y_MIN, Y_MAX]} tick={t.tick} />
+            <ZAxis type="number" dataKey="z" range={[40, 400]} />
+            <Tooltip cursor={{ strokeDasharray: "3 3", stroke: t.grid }} content={<ScatterTip />} />
+            <Scatter data={scatter} isAnimationActive={false}>
+              {scatter.map((d) => (
+                <Cell key={d.ticker} fill={d.y >= 0 ? t.jade : t.coral} fillOpacity={0.75} stroke={t.dotStroke} />
+              ))}
+            </Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
+      </Card>
 
       {/* Correlation heatmap */}
       {data.correlation.tickers.length > 1 && (

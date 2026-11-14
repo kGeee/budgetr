@@ -213,16 +213,3 @@ export function getConnectionSummary(now = Date.now()): ConnectionSummary {
     daysSinceAnySync: freshest,
   };
 }
-
-/**
- * Health keyed by the institution name the accounts page groups on. Where two
- * items share a name, the worse state wins — a half-broken bank is broken.
- */
-export function getHealthByInstitution(now = Date.now()): Map<string, ConnectionHealth> {
-  const map = new Map<string, ConnectionHealth>();
-  // getConnectionHealth is already worst-first, so the first write per name wins.
-  for (const c of getConnectionHealth(now)) {
-    if (!map.has(c.institutionName)) map.set(c.institutionName, c);
-  }
-  return map;
-}

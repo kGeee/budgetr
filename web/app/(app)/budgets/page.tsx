@@ -1,5 +1,6 @@
 import { endOfMonth, format } from "date-fns";
 import { PageHead } from "@/components/page-head";
+import { GoalsSection } from "./goals-section";
 import { BudgetsView } from "@/components/budget/budgets-view";
 import { IncompletePeriodNotice } from "@/components/data-freshness";
 import { getLatestTransactionDate, periodCoverage } from "@/lib/data-freshness";
@@ -71,6 +72,7 @@ export default function BudgetsPage() {
         spendByCategoryDay={spendByCategoryDay}
         categories={categories}
       />
+      <GoalsSection />
     </div>
   );
 }

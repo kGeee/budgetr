@@ -117,7 +117,7 @@ export function ReportScheduleForm({ initial }: { initial: ReportSchedule }) {
           {sendPending ? "Sending…" : "Send now"}
         </Button>
         <Link
-          href="/report"
+          href="/spending?report=1"
           className="inline-flex items-center gap-1.5 rounded-full border border-[var(--brass-dim)] px-3.5 py-1.5 text-sm text-[var(--brass)] transition-colors hover:bg-[color-mix(in_srgb,var(--brass)_12%,transparent)]"
         >
           <ExternalLink size={14} />

@@ -4,7 +4,7 @@ import { Sidebar, MobileNav } from "@/components/sidebar";
 import { SyncButton } from "@/components/sync-button";
 import { RegisterSW } from "@/components/register-sw";
 import { ScaleInit, ObfuscationToggle } from "@/components/obfuscation";
-import { CurrencyInit, CurrencySwitcher } from "@/components/currency-switcher";
+import { CurrencyInit } from "@/components/currency-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 import { DemoBanner } from "@/components/demo-banner";
@@ -20,10 +20,8 @@ import {
   countUnreviewed,
   getAccounts,
   getDisplayCurrencyRates,
-  getPendingSummary,
 } from "@/lib/queries";
-import { getIncludePending } from "@/lib/pending";
-import { PendingToggle } from "@/components/pending-toggle";
+import { isTradingDeskEnabled } from "@/lib/trading-desk";
 import { OBF_COOKIE, hiddenFromCookie, setHidden } from "@/lib/scale";
 import {
   CURRENCY_COOKIE,
@@ -79,10 +77,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // actually accumulates, and shows nothing when it's empty.
   const reviewCount = countUnreviewed();
 
-  // Whether pending charges count toward spending, plus what's in flight — the
-  // header toggle shows itself only when it would change a number.
-  const countPending = getIncludePending();
-  const pendingSummary = getPendingSummary();
+  const tradingDesk = isTradingDeskEnabled();
 
   // Demo banner (shown while exploring the bundled sample data). Precompute the
   // Plaid config so its "set up my accounts" modal can resume at the right step.
@@ -103,7 +98,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <CurrencyInit currency={displayCurrency} rates={ratesMap} />
       <RegisterSW />
       <div className="mx-auto flex min-h-dvh max-w-[1500px]">
-        <Sidebar accounts={accounts} reviewCount={reviewCount} webDemo={webDemo} />
+        <Sidebar
+          accounts={accounts}
+          reviewCount={reviewCount}
+          webDemo={webDemo}
+          tradingDesk={tradingDesk}
+        />
         <div className="flex min-w-0 flex-1 flex-col">
           {entitlement?.status === "trial" && (
             <TrialBanner daysLeft={entitlement.trialDaysLeft} />
@@ -112,14 +112,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {/* pt uses the iOS safe-area inset so the notch/status bar never
               covers the controls in standalone (Add to Home Screen) mode. */}
           <header className="material sticky top-0 z-20 flex items-center gap-2 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-4 sm:px-8">
-            <MobileNav accounts={accounts} reviewCount={reviewCount} webDemo={webDemo} />
+            <MobileNav
+              accounts={accounts}
+              reviewCount={reviewCount}
+              webDemo={webDemo}
+              tradingDesk={tradingDesk}
+            />
+            {/* Only the controls you reach for mid-task. Display currency and
+                counting pending charges are set-once preferences — Settings. */}
             <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-              <PendingToggle
-                on={countPending}
-                count={pendingSummary.count}
-                amount={pendingSummary.amount}
-              />
-              <CurrencySwitcher current={displayCurrency} />
               <ThemeToggle initialTheme={theme} />
               <ObfuscationToggle initialHidden={obfHidden} />
               {/* Read-only demo: no live Sync — offer the download instead. */}

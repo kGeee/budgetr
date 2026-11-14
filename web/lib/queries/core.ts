@@ -29,7 +29,7 @@ import {
 import { applySplits, type StockSplit } from "@/lib/import/splits";
 import { settledOnly } from "@/lib/pending";
 import type { SavingsContribution, Dashboard, DashboardWidget } from "@/db/schema";
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
 import {
   computeRealizedLots,
@@ -2479,29 +2479,6 @@ export type SpendShift = {
   delta: number;
 };
 
-export type DashboardListItem = Dashboard & { widgetCount: number };
-
-/** All dashboards, ordered for the sidebar/index, each with its widget count. */
-export function getDashboards(): DashboardListItem[] {
-  const rows = db
-    .select({
-      id: dashboards.id,
-      name: dashboards.name,
-      sortOrder: dashboards.sortOrder,
-      createdAt: dashboards.createdAt,
-      widgetCount: sql<number>`(
-        SELECT COUNT(*) FROM ${dashboardWidgets}
-        WHERE ${dashboardWidgets.dashboardId} = ${dashboards.id}
-      )`,
-    })
-    .from(dashboards)
-    // The reserved Overview board is edited from /overview, not listed here.
-    .where(ne(dashboards.id, OVERVIEW_DASHBOARD_ID))
-    .orderBy(asc(dashboards.sortOrder), asc(dashboards.createdAt))
-    .all();
-  return rows.map((r) => ({ ...r, widgetCount: Number(r.widgetCount) }));
-}
-
 /** A single dashboard plus its widgets in display order, or null if it doesn't exist. */
 export function getDashboardWithWidgets(
   id: string,
@@ -2524,13 +2501,13 @@ export function getDashboardWithWidgets(
  */
 export const OVERVIEW_DASHBOARD_ID = "dash_overview";
 
-/** The stock Overview layout, seeded once — mirrors the old hard-coded overview
- *  (net-worth hero, cashflow, spend + budget) and folds the Review retrospective
- *  and inbox in as widgets. `wide` widgets come from WIDGET_META client-side. */
+/** The stock Home layout, seeded once — net-worth hero, cashflow, spend +
+ *  budget, and the spending retrospective. The review inbox is no longer seeded
+ *  (Transactions → Needs review owns it, and Home's attention card links there)
+ *  but stays in the picker. `wide` widgets come from WIDGET_META client-side. */
 const OVERVIEW_DEFAULT_WIDGETS: { type: WidgetType; config?: WidgetConfig }[] = [
   { type: "net-worth-summary" },
   { type: "spending-review" },
-  { type: "review-queue" },
   { type: "cashflow", config: { months: 6 } },
   { type: "spend-by-category", config: { days: 30 } },
   { type: "budget-summary" },
@@ -2561,7 +2538,6 @@ export function ensureOverviewDashboard(): {
         .values({
           id: OVERVIEW_DASHBOARD_ID,
           name: "Overview",
-          // Sorts first on the /dashboards index; the reserved board leads.
           sortOrder: -1,
           createdAt: new Date(),
         })

@@ -37,7 +37,7 @@ function StaleLedgerNotice({ freshness }: { freshness: DataFreshness }) {
         </span>
       </p>
       <Link
-        href="/settings#connections"
+        href="/accounts"
         className="shrink-0 rounded-md border border-[var(--brass-dim)] px-2.5 py-1 text-xs text-[var(--brass)] transition-colors hover:bg-[var(--panel-2)]"
       >
         Check connections

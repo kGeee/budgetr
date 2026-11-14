@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Check, Sparkles } from "lucide-react";
 import { CategoryIcon } from "@/components/budget/category-pill";
 import { TransactionDetail } from "@/components/transactions/transaction-detail";
@@ -13,10 +14,13 @@ export function ReviewInbox({
   transactions,
   categories,
   total,
+  href,
 }: {
   transactions: TransactionRow[];
   categories: CategoryRow[];
   total: number;
+  /** Where the full inbox lives — set when this is a preview (the Home widget). */
+  href?: string;
 }) {
   const router = useRouter();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -41,7 +45,15 @@ export function ReviewInbox({
         <div>
           <p className="eyebrow">Transactions to review</p>
           <p className="mt-0.5 text-sm text-[var(--muted)]">
-            {total} {total === 1 ? "entry needs" : "entries need"} a look
+            {total.toLocaleString()} {total === 1 ? "entry needs" : "entries need"} a look
+            {href && (
+              <>
+                {" · "}
+                <Link href={href} className="text-[var(--brass)] hover:underline">
+                  Open inbox →
+                </Link>
+              </>
+            )}
           </p>
         </div>
         <button
@@ -49,7 +61,10 @@ export function ReviewInbox({
           onClick={() => review(transactions.map((t) => t.id))}
           className="inline-flex items-center gap-1.5 rounded-full border border-line bg-[var(--panel-2)] px-3.5 py-1.5 text-sm font-medium text-[var(--paper)] transition hover:border-[var(--line-strong)] active:scale-[0.98]"
         >
-          <Check size={14} /> Review all
+          {/* Only the loaded rows are marked — say so when that isn't the whole
+              backlog, so "all" never quietly means "these". */}
+          <Check size={14} />{" "}
+          {transactions.length < total ? `Review these ${transactions.length}` : "Review all"}
         </button>
       </div>
 

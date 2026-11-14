@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { PlaidLink } from "@/components/onboarding/plaid-link";
 import { PageHead } from "@/components/page-head";
@@ -5,7 +6,8 @@ import { AccountVisibilityToggle } from "@/components/account-visibility-toggle"
 import { ConnectWalletButton, WalletsCard } from "@/components/portfolio/connect-wallet-dialog";
 import { ConnectionAlert, ConnectionChip } from "@/components/connection-status";
 import { DisconnectInstitution } from "@/components/disconnect-institution";
-import { getConnectionSummary, getHealthByInstitution } from "@/lib/connection-health";
+import { getConnectionSummary, type ConnectionHealth } from "@/lib/connection-health";
+import { hasPlaidCredentials } from "@/lib/plaid";
 import { getAccounts, getHiddenWalletTokens, getWallets } from "@/lib/queries";
 import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
@@ -25,7 +27,12 @@ export default function AccountsPage() {
   const wallets = getWallets();
   const hiddenWalletTokens = getHiddenWalletTokens();
   const connections = getConnectionSummary();
-  const healthByInstitution = getHealthByInstitution();
+  // Health keyed by item, matching the card grouping below — keying by name
+  // would let two links to the same bank share one chip.
+  const healthByItem = new Map<string, ConnectionHealth>(
+    connections.all.map((c) => [c.itemId, c]),
+  );
+  const demo = demoEnabled();
 
   // Grouped by the owning connection, not by display name: two links can carry
   // the same institution name, and disconnect acts on one item — so the card and
@@ -36,6 +43,14 @@ export default function AccountsPage() {
     const group = byItem.get(key);
     if (group) group.accts.push(a);
     else byItem.set(key, { label: a.institutionName ?? "Other", source: a.itemSource, accts: [a] });
+  }
+  // A Plaid link with no accounts (e.g. NO_ACCOUNTS) still needs a card — it's
+  // the one that most needs disconnecting, and Settings used to be the only
+  // place it showed up.
+  for (const c of connections.all) {
+    if (!byItem.has(c.itemId)) {
+      byItem.set(c.itemId, { label: c.institutionName, source: "plaid", accts: [] });
+    }
   }
 
   // Mixed source currencies — convert each account into the display currency
@@ -55,7 +70,7 @@ export default function AccountsPage() {
         title="Accounts"
         action={
           // Read-only web demo: nothing to connect.
-          demoEnabled() ? undefined : (
+          demo ? undefined : (
             <div className="flex items-center gap-2">
               <ConnectWalletButton />
               <PlaidLink />
@@ -65,6 +80,34 @@ export default function AccountsPage() {
       />
 
       <ConnectionAlert summary={connections} />
+
+      {/* Plaid/Finnhub keys stay in Settings; say so where connecting needs them. */}
+      {!demo && (
+        <p className="-mt-3 text-sm text-[var(--muted)]">
+          {connections.total > 0 &&
+            `${connections.liveCount} of ${connections.total} ${
+              connections.total === 1 ? "institution is" : "institutions are"
+            } reporting normally. `}
+          {hasPlaidCredentials() ? (
+            <>
+              Plaid and Finnhub keys live in{" "}
+              <Link href="/settings#api-keys" className="text-[var(--brass)] hover:underline">
+                Settings → API keys
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              <span className="text-[var(--coral)]">Plaid isn&apos;t configured</span> — add your
+              keys in{" "}
+              <Link href="/settings#api-keys" className="text-[var(--brass)] hover:underline">
+                Settings → API keys
+              </Link>{" "}
+              before connecting a bank.
+            </>
+          )}
+        </p>
+      )}
 
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-display text-3xl tabular">
@@ -95,9 +138,9 @@ export default function AccountsPage() {
               (s, a) => s + convertToDisplay(signedBalance(a.type, a.currentBalance), a.currency),
               0,
             );
-          const health = healthByInstitution.get(institution);
+          const health = healthByItem.get(itemId);
           return (
-            <Card key={itemId} className="p-0">
+            <Card key={itemId} id={`conn-${itemId}`} className="scroll-mt-24 p-0">
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-6 py-4">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] font-display text-sm text-[var(--brass)]">
@@ -113,7 +156,7 @@ export default function AccountsPage() {
                   {/* Read-only demo: nothing to disconnect. The 'manual'
                       container isn't a link — its accounts are removed one by
                       one from where they were created. */}
-                  {!demoEnabled() && source === "plaid" && (
+                  {!demo && source === "plaid" && (
                     <DisconnectInstitution
                       itemId={itemId}
                       institution={institution}
@@ -122,6 +165,26 @@ export default function AccountsPage() {
                   )}
                 </div>
               </div>
+              {/* The chip only carries the state; the why and the fix belong in
+                  view whenever a link isn't healthy. There's no Plaid update
+                  mode yet, so repair is disconnect + Connect account. */}
+              {health && health.state !== "live" && (
+                <p
+                  className={`border-b border-line px-6 py-3 text-xs ${
+                    health.state === "error" ? "text-[var(--coral)]" : "text-[var(--muted)]"
+                  }`}
+                >
+                  {health.message}
+                  {health.state === "error" &&
+                    !demo &&
+                    " To repair it, disconnect this link and connect the bank again."}
+                </p>
+              )}
+              {accts.length === 0 && (
+                <p className="px-6 py-4 text-sm text-[var(--muted)]">
+                  No accounts reported by this connection.
+                </p>
+              )}
               <ul>
                 {accts.map((a) => (
                   <li
