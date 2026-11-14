@@ -16,6 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
+import { PaletteTrigger } from "@/components/command-palette";
 import { formatCurrency, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
 
@@ -305,7 +306,9 @@ export function Sidebar({
           <span className="font-display text-xl tracking-tight">budgetr</span>
         </Link>
 
-        <nav className="mt-6 flex flex-col gap-0.5">
+        <PaletteTrigger className="mt-5" />
+
+        <nav className="mt-4 flex flex-col gap-0.5">
           {primaryNav.map(({ href, label, icon: Icon, badge }) => {
             const active = href === activeHref;
             return (

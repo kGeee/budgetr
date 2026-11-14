@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Users, X } from "lucide-react";
+import { Dialog } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
 import { computeSplit, type SplitMode, type SplitParticipant } from "@/lib/split-math";
 import {
@@ -362,22 +363,15 @@ function SplitModal({
   const clobbers = transaction.splitCount > 0 && !existing;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      role="presentation"
+    <Dialog
+      onClose={onClose}
+      label="Split this bill"
+      // The itemized editor is a table in disguise — a name, who's on it, a
+      // price and four controls per row. At the dialog's usual width the name
+      // column collapses to nothing.
+      size={mode === "items" ? "2xl" : "lg"}
+      className="flex max-h-[92dvh] flex-col"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Split this bill"
-        className={`flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)] ${
-          // The itemized editor is a table in disguise — a name, who's on it, a
-          // price and four controls per row. At the dialog's usual width the
-          // name column collapses to nothing.
-          mode === "items" ? "max-w-3xl" : "max-w-lg"
-        }`}
-      >
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">
             <p className="eyebrow">Split this bill</p>
@@ -606,8 +600,7 @@ function SplitModal({
             Save split
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 

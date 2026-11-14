@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { Dialog } from "@/components/ui/dialog";
 import { disconnectItem, type DisconnectResult } from "@/lib/actions";
 
 /**
@@ -103,14 +104,8 @@ export function DisconnectInstitution({
       )}
 
       {open && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Disconnect ${institution}`}
-          className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
-          onClick={(e) => e.target === e.currentTarget && close()}
-        >
-          <div className="w-full max-w-md rounded-2xl border border-line bg-[var(--panel)] p-6 shadow-[var(--elev-2)]">
+        <Dialog onClose={close} label={`Disconnect ${institution}`} size="md">
+          <div className="p-6">
             <h2 className="font-display text-2xl tracking-tight">Disconnect {institution}?</h2>
 
             <p className="mt-3 text-sm text-[var(--muted)]">
@@ -159,7 +154,7 @@ export function DisconnectInstitution({
               </button>
             </div>
           </div>
-        </div>
+        </Dialog>
       )}
     </>
   );

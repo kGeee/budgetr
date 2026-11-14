@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { Sidebar, MobileNav } from "@/components/sidebar";
 import { SyncButton } from "@/components/sync-button";
+import { CommandPalette } from "@/components/command-palette";
 import { RegisterSW } from "@/components/register-sw";
 import { ScaleInit, ObfuscationToggle } from "@/components/obfuscation";
 import { CurrencyInit } from "@/components/currency-switcher";
@@ -97,6 +98,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <ScaleInit hidden={obfHidden} />
       <CurrencyInit currency={displayCurrency} rates={ratesMap} />
       <RegisterSW />
+      <CommandPalette tradingDesk={tradingDesk} webDemo={webDemo} />
       <div className="mx-auto flex min-h-dvh max-w-[1500px]">
         <Sidebar
           accounts={accounts}
@@ -127,7 +129,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               {webDemo ? <DownloadLink label="Download" className="!px-3 !py-1.5" /> : <SyncButton />}
             </div>
           </header>
-          <main className="flex-1 px-5 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 lg:pt-10">
+          <main className="flex-1 px-5 pt-5pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 lg:pt-6">
             {children}
           </main>
         </div>

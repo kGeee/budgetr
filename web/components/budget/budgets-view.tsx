@@ -8,6 +8,8 @@ import { CategoryIcon } from "@/components/budget/category-pill";
 import { CategoryDetailPanel } from "@/components/budget/category-detail-panel";
 import { BudgetPaceChart } from "@/components/charts";
 import { setBudget, setBudgetRollover, setTagBudget } from "@/lib/actions";
+import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
+import { budgetVerdict } from "@/lib/budget-verdict";
 import { formatCurrency } from "@/lib/utils";
 import type { BudgetRow, CategoryRow, EnvelopeBudgetRow } from "@/lib/queries";
 
@@ -80,6 +82,7 @@ export function BudgetsView({
   return (
     <div className="space-y-7">
       <Summary
+        month={month}
         monthLabel={monthLabel}
         totalBudget={totalBudget}
         totalSpent={totalSpent}
@@ -299,6 +302,7 @@ function Meter({
 // ── Headline ─────────────────────────────────────────────────────────────────
 
 function Summary({
+  month,
   monthLabel,
   totalBudget,
   totalSpent,
@@ -306,6 +310,7 @@ function Summary({
   carriedForward,
   hasRollovers,
 }: {
+  month: string;
   monthLabel: string;
   totalBudget: number;
   totalSpent: number;
@@ -314,31 +319,38 @@ function Summary({
   hasRollovers: boolean;
 }) {
   const over = left < 0;
+  // Local date, not UTC — "today" is the reader's day, and the pace it implies
+  // shouldn't jump at 5pm on the west coast.
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const verdict = budgetVerdict({ month, today, totalBudget, totalSpent });
+  const showCarry = hasRollovers && Math.abs(carriedForward) > 0.01;
+
   return (
-    <Card className="rise p-6">
-      <p className="eyebrow">{over ? "Over budget" : "Left to spend"}</p>
-      {/* The month's headline keeps the display face it has always had — this is
-          the page's one editorial number; the per-envelope figures below stay
-          mono so columns of money line up. */}
-      <p
-        className={`display-1 mt-2 font-display text-5xl tabular ${over ? "text-[var(--coral)]" : ""}`}
-      >
-        {formatCurrency(Math.abs(left))}
-      </p>
-      <p className="mt-3 text-sm text-[var(--muted)]">
-        {formatCurrency(totalSpent)} spent of {formatCurrency(totalBudget)} budgeted · {monthLabel}
-      </p>
-      {/* Silent when the envelopes happen to net to zero — "+$0.00 carried
-          forward" is noise, not information. */}
-      {hasRollovers && Math.abs(carriedForward) > 0.01 && (
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          <span className={carriedForward < 0 ? "text-[var(--coral)]" : "text-[var(--jade)]"}>
-            {carriedForward >= 0 ? "+" : "−"}
-            {formatCurrency(Math.abs(carriedForward))}
-          </span>{" "}
-          carried forward from last month
-        </p>
-      )}
+    // The page's one editorial number sits on the canvas, not in a card: the
+    // figure, a sentence that reads it, then the figures it is made of on one
+    // rule. Per-envelope amounts below stay mono so columns of money line up.
+    <section className="rise space-y-5" aria-label={`${monthLabel} budget`}>
+      <Hero
+        eyebrow={`${over ? "Over budget" : "Left to spend"} · ${monthLabel}`}
+        figure={formatCurrency(Math.abs(left))}
+        tone={over ? "coral" : "default"}
+        verdict={
+          verdict && (
+            <span suppressHydrationWarning>
+              {verdict.lead} <Mark tone={verdict.tone}>{formatCurrency(verdict.amount)}</Mark>{" "}
+              {verdict.tail}
+              {verdict.projectedOver != null && verdict.projectedOver > 0.005 && (
+                <>
+                  {" "}
+                  At this rate the month ends{" "}
+                  <Mark tone="brass">{formatCurrency(verdict.projectedOver)}</Mark> over.
+                </>
+              )}
+            </span>
+          )
+        }
+      />
       {totalBudget > 0 && (
         <Meter
           spent={totalSpent}
@@ -346,7 +358,21 @@ function Summary({
           label={`${Math.round((totalSpent / totalBudget) * 100)}% of this month's budget spent`}
         />
       )}
-    </Card>
+      <StatStrip>
+        <Stat label="Spent" value={formatCurrency(totalSpent)} />
+        <Stat label="Budgeted" value={formatCurrency(totalBudget)} />
+        {/* Silent when the envelopes happen to net to zero — "+$0.00 carried
+            forward" is noise, not information. */}
+        {showCarry && (
+          <Stat
+            label="Carried forward"
+            tone={carriedForward < 0 ? "coral" : "jade"}
+            value={`${carriedForward >= 0 ? "+" : "−"}${formatCurrency(Math.abs(carriedForward))}`}
+            sub="from last month"
+          />
+        )}
+      </StatStrip>
+    </section>
   );
 }
 

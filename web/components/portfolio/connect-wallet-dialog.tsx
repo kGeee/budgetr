@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Filter, RefreshCw, RotateCcw, Trash2, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog } from "@/components/ui/dialog";
 import {
   connectWallet,
   resyncWallet,
@@ -20,23 +21,8 @@ const CHAINS = [
   { id: "solana", label: "Solana", placeholder: "base58 address" },
 ] as const;
 
-function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)]"
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
+// The shared dialog: Escape, focus containment and focus return come with it.
+const Modal = Dialog;
 
 function fmtUsd(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });

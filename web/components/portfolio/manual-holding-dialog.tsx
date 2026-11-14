@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { EyeOff, Pencil, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import {
   addManualHolding,
   clearHoldingCostBasisOverride,
@@ -13,23 +14,8 @@ import {
   updateManualHolding,
 } from "@/lib/actions";
 
-function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)]"
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
+// The shared dialog: Escape, focus containment and focus return come with it.
+const Modal = Dialog;
 
 const num = (s: string): number | null => {
   const n = parseFloat(s);
