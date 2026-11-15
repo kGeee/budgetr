@@ -3,15 +3,21 @@ import { PlaidLink } from "@/components/onboarding/plaid-link";
 import { AlertsPanel } from "@/components/alerts-panel";
 import { DashboardView, type ResolvedWidget } from "@/components/dashboard-view";
 import { DataFreshnessBanner } from "@/components/data-freshness";
+import { ThisMonthStrip } from "@/components/home-strip";
 import { detectAnomalies } from "@/lib/anomalies";
 import { getDataFreshness } from "@/lib/data-freshness";
 import { getDataHealthAlerts } from "@/lib/data-health";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
+import { monthPace, portfolioTotals, presentOrder } from "@/lib/home-layout";
 import {
   countUnreviewed,
   ensureOverviewDashboard,
   getCategories,
+  getHoldings,
   getItems,
+  getMonthlyBudgetSummary,
+  getTransactionsToReview,
+  getUpcomingBills,
   getWidgetData,
 } from "@/lib/queries";
 import type { WidgetConfig } from "@/lib/queries";
@@ -27,11 +33,14 @@ function parseConfig(raw: string | null): WidgetConfig {
   }
 }
 
+/** How many review rows Home lists before pointing at the full inbox. */
+const REVIEW_PREVIEW = 3;
+
 /**
- * Home: a "Needs attention" card (data health, spending alerts, review backlog —
- * what used to be the Insights page) above the customizable widget grid of the
- * reserved Overview board. Users add, remove and reorder widgets here to shape
- * what they see on landing.
+ * Home: the reserved Overview board's widgets — add, remove and reorder them to
+ * shape the landing page — with two fixed pieces woven in: the "this month"
+ * rule under the hero, and "Needs you" (data health, spending alerts, the first
+ * of the review backlog) at the head of the wide column.
  */
 export default async function Overview() {
   let items = getItems();
@@ -46,7 +55,7 @@ export default async function Overview() {
 
   // Resolve each widget's data server-side so the client grid stays a pure,
   // serializable renderer.
-  const resolved: ResolvedWidget[] = widgets.map((w) => ({
+  const resolved: ResolvedWidget[] = presentOrder(widgets).map((w) => ({
     id: w.id,
     config: parseConfig(w.config),
     data: getWidgetData(w.type, parseConfig(w.config)),
@@ -67,6 +76,11 @@ export default async function Overview() {
     ...detectAnomalies(),
   ];
   const reviewCount = countUnreviewed();
+  const review = reviewCount > 0 ? getTransactionsToReview(REVIEW_PREVIEW) : [];
+
+  // The "this month" rule, from the same queries the pages it links to use.
+  const budget = getMonthlyBudgetSummary();
+  const nextBill = getUpcomingBills(31)[0] ?? null;
 
   return (
     <>
@@ -75,7 +89,24 @@ export default async function Overview() {
         dashboard={dashboard}
         widgets={resolved}
         categories={categories}
-        lead={<AlertsPanel alerts={alerts} reviewCount={reviewCount} limit={3} compact />}
+        strip={
+          <ThisMonthStrip
+            budget={budget}
+            pace={monthPace(budget.month, new Date())}
+            portfolio={portfolioTotals(getHoldings())}
+            nextBill={nextBill}
+          />
+        }
+        lead={
+          <AlertsPanel
+            alerts={alerts}
+            reviewCount={reviewCount}
+            review={review}
+            categories={categories}
+            limit={3}
+            compact
+          />
+        }
       />
     </>
   );

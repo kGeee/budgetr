@@ -15,7 +15,8 @@ export function SettingRows({
   children: React.ReactNode;
   className?: string;
 }) {
-  return <div className={cn("divide-y divide-[var(--line)]", className)}>{children}</div>;
+  // Each row rules itself off underneath, so a section never ends ragged.
+  return <div className={cn(className)}>{children}</div>;
 }
 
 export function SettingRow({
@@ -34,13 +35,13 @@ export function SettingRow({
   return (
     <div
       className={cn(
-        "flex flex-wrap justify-between gap-x-10 gap-y-3 py-5",
+        "flex flex-wrap justify-between gap-x-8 gap-y-3 border-b border-line py-3.5",
         align === "start" ? "items-start" : "items-center"
       )}
     >
-      <div className="min-w-0 max-w-md flex-1 basis-64">
-        <div className="text-sm font-medium">{title}</div>
-        {children && <div className="mt-1 text-sm text-[var(--muted)]">{children}</div>}
+      <div className="min-w-0 max-w-lg flex-[1_1_300px]">
+        <div className="font-medium">{title}</div>
+        {children && <div className="mt-0.5 text-[13px] text-[var(--muted)]">{children}</div>}
       </div>
       {control && <div className="min-w-0 max-w-full shrink-0">{control}</div>}
     </div>
@@ -49,5 +50,7 @@ export function SettingRow({
 
 /** The sentence or two under a SectionHead that says what the section is for. */
 export function SectionIntro({ children }: { children: React.ReactNode }) {
-  return <p className="max-w-xl pt-4 text-sm text-[var(--muted)]">{children}</p>;
+  return (
+    <p className="max-w-xl border-b border-line py-3.5 text-[13px] text-[var(--muted)]">{children}</p>
+  );
 }

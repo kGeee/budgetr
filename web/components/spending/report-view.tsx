@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
-import { CategoryChart, MonthlySpendChart, NetWorthChart } from "@/components/charts";
-import { CategoryIcon } from "@/components/budget/category-pill";
+import { MonthlySpendChart, NetWorthChart } from "@/components/charts";
 import { SpendHeatmap } from "@/components/budget/spend-heatmap";
 import { ReportPrintButton } from "@/components/report-print-button";
+import { ReportScheduleForm } from "@/components/report-schedule-form";
+import { getReportSchedule } from "@/lib/actions-reports";
 import {
   buildReportData,
   formatReportMoney,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/report";
 import { spendingVerdict } from "@/lib/spending-verdict";
 import { spendingHref } from "./href";
+import { CategoryDot, RuledRow, ShareBar, ShiftsTable, segment, segmentGroup } from "./ruled";
 
 /**
  * Spending → report mode (?report=1): the printable period report, meant to be
@@ -22,7 +24,7 @@ import { spendingHref } from "./href";
  * the `@media print` rules in globals.css hide the app chrome (`.no-print`) and
  * reset page padding so only this content lands on paper.
  */
-export function ReportView({
+export async function ReportView({
   period,
   rawCurrency,
 }: {
@@ -31,6 +33,7 @@ export function ReportView({
   rawCurrency?: string;
 }) {
   const data = buildReportData(period, rawCurrency);
+  const schedule = await getReportSchedule();
   const cur = data.currency;
   const money = (v: number) => formatReportMoney(v, cur);
 
@@ -38,223 +41,215 @@ export function ReportView({
     spendingHref({ report: true, period: p, currency: rawCurrency ? cur : undefined });
   const topVendor = data.topVendors[0];
   const verdict = spendingVerdict(data.totals);
+  const categoryTotal = data.categories.reduce((sum, c) => sum + c.total, 0);
+  const colorOf = new Map(data.categoryMeta.map((c) => [c.id, c.color]));
 
   return (
-    <div className="report-page mx-auto max-w-[900px] space-y-7 py-2">
-      {/* Header — hidden from print via .no-print, replaced by the printed title below. */}
-      <div className="no-print flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
-        <div>
-          <Link
-            href={spendingHref({ period })}
-            className="mb-3 inline-flex items-center gap-1.5 text-sm text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
-          >
-            <ArrowLeft size={14} /> Spending
-          </Link>
-          <p className="eyebrow">Printable report</p>
-          <h1 className="mt-1.5 font-display text-3xl leading-none tracking-tight sm:text-4xl">
-            {data.label} in review
-          </h1>
+    // The report on the left, the schedule that mails it on the right. The
+    // article is the print root; the aside and every control are `.no-print`.
+    <div className="report-page flex flex-wrap items-start gap-x-12 gap-y-9 py-2">
+      <article aria-label="Printable report" className="flex min-w-0 flex-[3_1_560px] flex-col gap-9">
+        {/* Print-only masthead. */}
+        <div className="print-only">
+          <p className="eyebrow text-[var(--brass)]">budgetr · {REPORT_PERIOD_LABELS[period]}</p>
+          <h1 className="mt-1 font-display text-4xl tracking-tight">{data.label} in review</h1>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Generated {format(parseISO(data.generatedAt), "PPpp")} · figures in {cur}
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {REPORT_PERIODS.map((p) => {
-            const active = p === period;
-            return (
-              <Link
-                key={p}
-                href={q(p)}
-                aria-current={active ? "page" : undefined}
-                className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
-                  active
-                    ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
-                    : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-                }`}
-              >
-                {REPORT_PERIOD_LABELS[p]}
-              </Link>
-            );
-          })}
-          <span className="mx-1 h-5 w-px bg-line" />
-          <ReportPrintButton />
-        </div>
-      </div>
 
-      {/* Print-only masthead. */}
-      <div className="print-only mb-4">
-        <p className="eyebrow text-[var(--brass)]">budgetr · {REPORT_PERIOD_LABELS[period]}</p>
-        <h1 className="mt-1 font-display text-4xl tracking-tight">{data.label} in review</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          Generated {format(parseISO(data.generatedAt), "PPpp")} · figures in {cur}
-        </p>
-      </div>
-
-      {/* Hero — the period's one figure, the sentence that reads it, then the
-          figures it is made of on a single rule. */}
-      <section className="break-avoid space-y-5">
-        {data.empty ? (
-          <>
-            <p className="eyebrow">{data.label} summary</p>
-            <p className="text-[var(--muted)]">Nothing recorded for {data.label} yet.</p>
-          </>
-        ) : (
-          <>
-            <Hero
-              eyebrow={`Total spent · ${data.label} summary`}
-              figure={money(data.totals.expenses)}
-              verdict={
-                verdict && (
-                  <>
-                    {verdict.lead} <Mark tone={verdict.tone}>{money(verdict.amount)}</Mark>{" "}
-                    {verdict.tail}
-                  </>
-                )
-              }
+        {/* Hero — the period's one figure, the sentence that reads it, then the
+            figures it is made of on a single rule. */}
+        <section aria-label="Summary" className="break-avoid flex flex-col gap-5">
+          <div className="no-print flex flex-wrap items-center justify-between gap-2.5">
+            <Link
+              href={spendingHref({ period })}
+              className="inline-flex min-h-11 items-center gap-2 text-sm text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
             >
-              {topVendor && (
-                <p className="max-w-[60ch] text-sm text-[var(--muted)]">
-                  Top vendor was{" "}
-                  <span className="font-medium text-[var(--paper)]">{topVendor.vendor}</span> at{" "}
-                  <span className="mono text-[var(--paper)]">{money(topVendor.total)}</span> over{" "}
-                  {topVendor.count} visit{topVendor.count === 1 ? "" : "s"}.
-                </p>
-              )}
-            </Hero>
-            <StatStrip>
-              <Stat label="Income" value={money(data.totals.income)} tone="jade" />
-              <Stat
-                label="Net"
-                value={`${data.totals.net >= 0 ? "+" : "−"}${money(Math.abs(data.totals.net))}`}
-                tone={data.totals.net >= 0 ? "jade" : "coral"}
-              />
-              <Stat label="Net worth" value={money(data.netWorthCurrent)} />
-              <Stat label="Transactions" value={data.totals.txCount.toLocaleString()} />
-            </StatStrip>
-          </>
-        )}
-      </section>
-
-      {/* Net worth over time. */}
-      <section className="break-avoid space-y-4">
-        <SectionHead title="Net worth" />
-        <NetWorthChart data={data.netWorth} />
-      </section>
-
-      {/* Daily-spend calendar — trailing year. */}
-      <section className="break-avoid space-y-4">
-        <SectionHead title="Daily spend · trailing year" />
-        <SpendHeatmap
-          data={data.heatmap}
-          start={data.heatmapStart}
-          end={data.heatmapEnd}
-          categories={data.categoryMeta}
-        />
-      </section>
-
-      {/* Top vendors + biggest purchases. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="break-avoid space-y-3">
-          <SectionHead title="Top vendors" />
-          {data.topVendors.length > 0 ? (
-            <ul className="space-y-1">
-              {data.topVendors.map((v, i) => (
-                <li key={v.vendor} className="flex items-center gap-3 rounded-lg px-2 py-2">
-                  <span className="mono w-5 shrink-0 text-center text-xs text-[var(--muted)]">
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{v.vendor}</p>
-                    <p className="text-xs text-[var(--muted)]">
-                      {v.count} transaction{v.count === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                  <span className="mono shrink-0 text-sm text-[var(--paper)]">{money(v.total)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Blank>No vendor spend in this period.</Blank>
-          )}
-        </section>
-
-        <section className="break-avoid space-y-3">
-          <SectionHead title="Biggest purchases" />
-          {data.biggest.length > 0 ? (
-            <ul className="space-y-1">
-              {data.biggest.map((b) => (
-                <li key={b.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-[var(--brass)]">
-                    <CategoryIcon icon={b.categoryIcon} size={14} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{b.vendor}</p>
-                    <p className="truncate text-xs text-[var(--muted)]">
-                      {b.categoryName} · {format(parseISO(b.date), "MMM d")}
-                    </p>
-                  </div>
-                  <span className="mono shrink-0 text-sm text-[var(--paper)]">{money(b.amount)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Blank>No purchases in this period.</Blank>
-          )}
-        </section>
-      </div>
-
-      {/* Category shifts vs prior period. */}
-      <section className="break-avoid space-y-2">
-        <SectionHead title={`Category shifts · vs ${data.prevLabel}`} />
-        {data.shifts.length > 0 ? (
-          <ul className="divide-y divide-line/60">
-            {data.shifts.map((s) => {
-              const up = s.delta >= 0;
-              const pct = s.prev > 0 ? (s.delta / s.prev) * 100 : null;
-              return (
-                <li key={s.category} className="flex items-center gap-3 py-3">
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-[var(--brass)]">
-                    <CategoryIcon icon={s.icon} size={14} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{s.category}</p>
-                    <p className="mono text-xs text-[var(--muted)]">
-                      {money(s.prev)} → {money(s.current)}
-                    </p>
-                  </div>
-                  <span
-                    className={`mono inline-flex shrink-0 items-center gap-1 text-sm ${
-                      up ? "text-[var(--coral)]" : "text-[var(--jade)]"
-                    }`}
+              <ArrowLeft size={16} aria-hidden /> Spending
+            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <div role="group" aria-label="Period" className={segmentGroup}>
+                {REPORT_PERIODS.map((p) => (
+                  <Link
+                    key={p}
+                    href={q(p)}
+                    aria-current={p === period ? "page" : undefined}
+                    className={segment(p === period)}
                   >
-                    {up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-                    {up ? "+" : "−"}
-                    {money(Math.abs(s.delta))}
-                    {pct != null && (
-                      <span className="text-[var(--muted)]">({Math.abs(pct).toFixed(0)}%)</span>
-                    )}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <Blank>No category changes to compare against {data.prevLabel}.</Blank>
-        )}
-      </section>
-
-      {/* Month-by-month + category mix. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <section className="break-avoid space-y-4 lg:col-span-3">
-          <SectionHead title={`Month by month · ${data.year}`} />
-          <MonthlySpendChart data={data.monthlySpend} />
+                    {REPORT_PERIOD_LABELS[p]}
+                  </Link>
+                ))}
+              </div>
+              <ReportPrintButton />
+            </div>
+          </div>
+          {data.empty ? (
+            <>
+              <p className="eyebrow">Printable report · {data.label} in review</p>
+              <p className="text-[var(--muted)]">Nothing recorded for {data.label} yet.</p>
+            </>
+          ) : (
+            <>
+              <Hero
+                eyebrow={`Printable report · ${data.label} in review`}
+                figure={money(data.totals.expenses)}
+                verdict={
+                  verdict && (
+                    <>
+                      {verdict.lead} <Mark tone={verdict.tone}>{money(verdict.amount)}</Mark>{" "}
+                      {verdict.tail}
+                    </>
+                  )
+                }
+              >
+                {topVendor && (
+                  <p className="max-w-[60ch] text-sm text-[var(--muted)]">
+                    Top vendor was{" "}
+                    <span className="font-medium text-[var(--paper)]">{topVendor.vendor}</span> at{" "}
+                    <span className="mono text-[var(--paper)]">{money(topVendor.total)}</span> over{" "}
+                    {topVendor.count} visit{topVendor.count === 1 ? "" : "s"}.
+                  </p>
+                )}
+              </Hero>
+              <StatStrip>
+                <Stat label="Income" value={money(data.totals.income)} tone="jade" />
+                <Stat
+                  label="Net"
+                  value={`${data.totals.net >= 0 ? "+" : "−"}${money(Math.abs(data.totals.net))}`}
+                  tone={data.totals.net >= 0 ? "jade" : "coral"}
+                />
+                <Stat label="Net worth" value={money(data.netWorthCurrent)} />
+                <Stat label="Transactions" value={data.totals.txCount.toLocaleString()} />
+              </StatStrip>
+            </>
+          )}
         </section>
-        <section className="break-avoid space-y-4 lg:col-span-2">
-          <SectionHead title="Where it went" />
-          <CategoryChart data={data.categories} />
-        </section>
-      </div>
 
-      <p className="print-only pt-4 text-center text-xs text-[var(--muted)]">
-        budgetr — your data stays on your machine.
-      </p>
+        {/* Net worth over time. */}
+        <section aria-label="Net worth" className="break-avoid space-y-3">
+          <SectionHead title="Net worth" />
+          <NetWorthChart data={data.netWorth} />
+        </section>
+
+        {/* Daily-spend calendar — trailing year. */}
+        <section aria-label="Daily spend, trailing year" className="break-avoid space-y-3.5">
+          <SectionHead title="Daily spend · trailing year" />
+          <SpendHeatmap
+            data={data.heatmap}
+            start={data.heatmapStart}
+            end={data.heatmapEnd}
+            categories={data.categoryMeta}
+          />
+        </section>
+
+        {/* Top vendors + biggest purchases. */}
+        <div className="flex flex-wrap gap-x-10 gap-y-9">
+          <section aria-label="Top vendors" className="break-avoid min-w-0 flex-[1_1_260px]">
+            <SectionHead title="Top vendors" />
+            {data.topVendors.length > 0 ? (
+              <ul>
+                {data.topVendors.map((v) => (
+                  <RuledRow key={v.vendor} figure={money(v.total)}>
+                    <span className="font-medium">{v.vendor}</span>
+                    <span className="ml-2.5 text-xs text-[var(--muted)]">
+                      {v.count} charge{v.count === 1 ? "" : "s"}
+                    </span>
+                  </RuledRow>
+                ))}
+              </ul>
+            ) : (
+              <Blank>No vendor spend in this period.</Blank>
+            )}
+          </section>
+
+          <section aria-label="Biggest purchases" className="break-avoid min-w-0 flex-[1_1_260px]">
+            <SectionHead title="Biggest purchases" />
+            {data.biggest.length > 0 ? (
+              <ul>
+                {data.biggest.map((b) => (
+                  <RuledRow key={b.id} figure={money(b.amount)}>
+                    <span className="mono mr-3 text-xs text-[var(--muted)]">
+                      {format(parseISO(b.date), "MMM d")}
+                    </span>
+                    {b.vendor}
+                    <span className="ml-2.5 text-xs text-[var(--muted)]">{b.categoryName}</span>
+                  </RuledRow>
+                ))}
+              </ul>
+            ) : (
+              <Blank>No purchases in this period.</Blank>
+            )}
+          </section>
+        </div>
+
+        {/* Category shifts vs prior period. */}
+        <div className="break-avoid">
+          <ShiftsTable
+            shifts={data.shifts}
+            prevLabel={data.prevLabel}
+            label={data.label}
+            fmt={money}
+          />
+        </div>
+
+        {/* Month-by-month + category mix. */}
+        <div className="flex flex-wrap gap-x-10 gap-y-9">
+          <section
+            aria-label={`Month by month, ${data.year}`}
+            className="break-avoid min-w-0 flex-[1_1_260px] space-y-3"
+          >
+            <SectionHead title={`Month by month · ${data.year}`} />
+            <MonthlySpendChart data={data.monthlySpend} />
+          </section>
+          <section aria-label="Where it went" className="break-avoid min-w-0 flex-[1_1_260px]">
+            <SectionHead title="Where it went" />
+            {data.categories.length > 0 ? (
+              <ul className="pt-1.5">
+                {data.categories.map((c) => {
+                  const key = c.categoryId ?? c.category;
+                  const color = c.categoryId ? colorOf.get(c.categoryId) : null;
+                  return (
+                    <li
+                      key={key}
+                      className="grid min-h-[34px] grid-cols-[minmax(0,1fr)_70px_92px] items-center gap-3 text-sm"
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <CategoryDot id={key} color={color} />
+                        <span className="truncate">{c.category}</span>
+                      </span>
+                      <ShareBar
+                        pct={categoryTotal > 0 ? (c.total / categoryTotal) * 100 : 0}
+                        id={key}
+                        color={color}
+                      />
+                      <span className="mono text-right text-[13px] tabular">{money(c.total)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <Blank>No spending in this period.</Blank>
+            )}
+          </section>
+        </div>
+
+        <p className="print-only pt-4 text-center text-xs text-[var(--muted)]">
+          budgetr — your data stays on your machine.
+        </p>
+      </article>
+
+      <aside
+        aria-label="Scheduled report"
+        className="no-print min-w-0 flex-[1_1_280px] lg:max-w-[360px]"
+      >
+        <SectionHead title="Send it on a schedule" />
+        <ReportScheduleForm initial={schedule} />
+        <p className="text-xs text-[var(--muted)]">
+          &ldquo;Send now&rdquo; renders this month&rsquo;s report; delivery stays a stub until a
+          mail provider is wired up. Printing strips the sidebar and this panel.
+        </p>
+      </aside>
     </div>
   );
 }

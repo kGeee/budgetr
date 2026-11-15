@@ -4,6 +4,7 @@ import { useEffect, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setTradingDesk } from "@/lib/actions-settings";
 import { SettingRow } from "./setting-row";
+import { Switch } from "./switch";
 
 /**
  * The trading-desk switch, plus the notice shown when someone arrives from a
@@ -45,7 +46,7 @@ export function TradingDeskSwitch({ on }: { on: boolean }) {
   return (
     <div>
       {arrived && (
-        <p className="mt-4 rounded-[var(--radius)] border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_12%,transparent)] px-4 py-3 text-sm">
+        <p role="status" className="border-b border-line py-3.5 text-sm text-[var(--brass)]">
           That page is part of the trading desk, which is off. Switch it on to bring Markets,
           Options and Fundamentals back.
         </p>
@@ -53,22 +54,7 @@ export function TradingDeskSwitch({ on }: { on: boolean }) {
       <SettingRow
         title="Show the trading desk"
         control={
-          <button
-            role="switch"
-            aria-checked={on}
-            aria-label="Show the trading desk"
-            onClick={toggle}
-            disabled={busy}
-            className={`relative h-6 w-11 shrink-0 rounded-full border transition disabled:opacity-40 ${
-              on ? "border-[var(--brass-dim)] bg-[var(--brass)]" : "border-line bg-[var(--panel-2)]"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 h-4.5 w-4.5 rounded-full transition-all ${
-                on ? "left-[1.4rem] bg-[var(--on-brass)]" : "left-0.5 bg-[var(--faint)]"
-              }`}
-            />
-          </button>
+          <Switch on={on} label="Show the trading desk" onToggle={toggle} disabled={busy} />
         }
       >
         Adds the trading tools to the sidebar: the Markets watchlist, the Options desk, and SEC

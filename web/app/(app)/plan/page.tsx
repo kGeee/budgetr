@@ -2,7 +2,7 @@ import { PageHead } from "@/components/page-head";
 import { BillsTab } from "./bills-tab";
 import { ForecastTab } from "./forecast-tab";
 import { LongRunTab } from "./long-run-tab";
-import { PlanTabs, isPlanTab } from "./plan-tabs";
+import { isPlanTab } from "./plan-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +21,7 @@ export default async function PlanPage({
 
   return (
     <div className="space-y-7">
-      <PageHead title="What's coming?" />
-      <div className="-mt-2">
-        <PlanTabs active={tab} />
-      </div>
+      <PageHead title="Plan" />
       {tab === "bills" ? <BillsTab /> : tab === "long-run" ? <LongRunTab /> : <ForecastTab />}
     </div>
   );

@@ -1,5 +1,3 @@
-import { InvestmentsTabs } from "@/components/investments-tabs";
-import { isTradingDeskEnabled } from "@/lib/trading-desk";
 
 // The desk flag is a DB read; never let a prerender bake in whichever value the
 // setting had at build time.
@@ -11,9 +9,7 @@ export const dynamic = "force-dynamic";
 // flag is read here and passed down.
 export default function InvestmentsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="space-y-7">
-      <InvestmentsTabs tradingDesk={isTradingDeskEnabled()} />
-      {children}
-    </div>
+    // The section tabs are in the top bar now (components/topbar.tsx).
+    <div className="space-y-7">{children}</div>
   );
 }

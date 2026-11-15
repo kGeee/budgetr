@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Archive,
+  ArchiveRestore,
   Briefcase,
   Car,
-  ChevronDown,
   GraduationCap,
   Heart,
   Home,
@@ -19,6 +20,7 @@ import {
   ShieldCheck,
   Trash2,
   Umbrella,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -134,137 +136,369 @@ function IconPicker({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
+const COLS =
+  "grid grid-cols-[minmax(170px,1.2fr)_minmax(150px,1.5fr)_52px_110px_110px_110px_132px] gap-4";
+
+/**
+ * Savings goals as one ruled table — name, progress, saved, target, to go —
+ * with the selected goal's add/withdraw form and contribution history in a
+ * panel under it, and archived goals behind a disclosure.
+ */
 export function SavingsGoals({ goals }: { goals: SavingsGoalRow[] }) {
   const active = goals.filter((g) => !g.archived);
   const archived = goals.filter((g) => g.archived);
   const [showArchived, setShowArchived] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = openId ? (active.find((g) => g.id === openId) ?? null) : null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <p className="eyebrow">
-          {active.length} active goal{active.length === 1 ? "" : "s"}
-        </p>
-        <AddGoalButton />
-      </div>
-
-      {active.length === 0 ? (
-        <div className="rounded-[var(--radius)] border border-dashed border-line px-6 py-16 text-center">
-          <PiggyBank size={28} className="mx-auto text-[var(--muted)]" />
-          <p className="mt-3 text-sm text-[var(--muted)]">No savings goals yet.</p>
-          <p className="mt-1 text-xs text-[var(--muted)]">
-            Earmark money toward a vacation, an emergency fund, or your next big purchase.
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {active.map((g) => (
-            <GoalTile key={g.id} goal={g} />
-          ))}
-        </div>
-      )}
+    <div className="space-y-9">
+      <section aria-label="Active goals">
+        {active.length === 0 ? (
+          <div className="border-y border-dashed border-line px-6 py-12 text-center">
+            <PiggyBank size={26} className="mx-auto text-[var(--muted)]" aria-hidden />
+            <p className="mt-3 text-sm text-[var(--muted)]">No savings goals yet.</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Earmark money toward a vacation, an emergency fund, or your next big purchase.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <div className="min-w-[800px]">
+                <div
+                  className={`${COLS} items-end border-b border-[var(--line-strong)] pb-2.5 text-xs text-[var(--muted)]`}
+                >
+                  <h3 className="font-display text-lg tracking-tight text-[var(--paper)]">
+                    Active
+                    <span className="mono ml-2 text-xs text-[var(--muted)]">{active.length}</span>
+                  </h3>
+                  <span>Progress</span>
+                  <span />
+                  <span className="text-right">Saved</span>
+                  <span className="text-right">Target</span>
+                  <span className="text-right">To go</span>
+                  <span />
+                </div>
+                <ul>
+                  {active.map((g) => (
+                    <GoalRow
+                      key={g.id}
+                      goal={g}
+                      open={openId === g.id}
+                      onToggle={() => setOpenId(openId === g.id ? null : g.id)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            </div>
+            {open ? (
+              <GoalDetail key={open.id} goal={open} />
+            ) : (
+              <p className="pt-3 text-[13px] text-[var(--muted)]">
+                Open a goal to add to it, withdraw from it, or see its contribution history.
+              </p>
+            )}
+          </>
+        )}
+      </section>
 
       {archived.length > 0 && (
-        <div className="pt-2">
-          <button
-            onClick={() => setShowArchived((v) => !v)}
-            className="flex items-center gap-1.5 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
-          >
-            <ChevronDown size={14} className={`transition-transform ${showArchived ? "rotate-180" : ""}`} />
-            {archived.length} archived goal{archived.length === 1 ? "" : "s"}
-          </button>
+        <section aria-label="Archived goals">
+          <div className="flex items-baseline justify-between border-b border-[var(--line-strong)] pb-1">
+            <h3 className="font-display text-lg tracking-tight text-[var(--muted)]">
+              {archived.length} archived goal{archived.length === 1 ? "" : "s"}
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowArchived((v) => !v)}
+              aria-expanded={showArchived}
+              className="min-h-9 cursor-pointer px-3 text-[13px] text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+            >
+              {showArchived ? "Hide" : "Show"}
+            </button>
+          </div>
           {showArchived && (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {archived.map((g) => (
-                <GoalTile key={g.id} goal={g} />
-              ))}
-            </div>
+            <>
+              <ul>
+                {archived.map((g) => (
+                  <ArchivedRow key={g.id} goal={g} />
+                ))}
+              </ul>
+              <p className="mt-3 text-[13px] text-[var(--muted)]">
+                Deleting a goal removes its contribution history too.
+              </p>
+            </>
           )}
-        </div>
+        </section>
       )}
     </div>
   );
 }
 
-function GoalTile({ goal }: { goal: SavingsGoalRow }) {
+/** "by Mar 1, 2027", "Past due · …", "Funded" or "No target date" — and its colour. */
+function dateLine(goal: SavingsGoalRow): { text: string; className: string } {
+  const funded = goal.saved >= goal.targetAmount && goal.targetAmount > 0;
+  if (funded) return { text: "Funded", className: "text-[var(--jade)]" };
+  if (!goal.targetDate) return { text: "No target date", className: "text-[var(--muted)]" };
+  return isBehind(goal)
+    ? { text: `Past due · ${formatDate(goal.targetDate)}`, className: "text-[var(--coral)]" }
+    : { text: `by ${formatDate(goal.targetDate)}`, className: "text-[var(--muted)]" };
+}
+
+function GoalRow({
+  goal,
+  open,
+  onToggle,
+}: {
+  goal: SavingsGoalRow;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const behind = isBehind(goal);
   const funded = goal.saved >= goal.targetAmount && goal.targetAmount > 0;
-  const accent = goal.color || undefined;
+  const date = dateLine(goal);
 
   return (
-    <div
-      className={`flex flex-col rounded-[var(--radius)] border p-5 ${
-        goal.archived ? "opacity-70" : ""
-      } ${behind ? "border-[color-mix(in_srgb,var(--coral)_45%,var(--line))]" : "border-line"}`}
+    <li
+      className={`${COLS} min-h-16 items-center border-b border-line transition-colors ${
+        open ? "bg-[var(--panel)]" : ""
+      }`}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)]"
-            style={{ color: accent ?? "var(--brass)" }}
-          >
-            <GoalIcon icon={goal.icon} size={16} />
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="group flex min-w-0 cursor-pointer items-center gap-2.5 py-2 pl-1 text-left"
+      >
+        <span
+          aria-hidden
+          className="shrink-0 text-[var(--brass)]"
+          style={goal.color ? { color: goal.color } : undefined}
+        >
+          <GoalIcon icon={goal.icon} size={15} />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate font-medium transition-colors group-hover:text-[var(--brass)]">
+            {goal.name}
           </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{goal.name}</p>
-            {goal.targetDate && (
-              <p className={`text-xs ${behind ? "text-[var(--coral)]" : "text-[var(--muted)]"}`}>
-                {behind ? "Past due · " : "by "}
-                {formatDate(goal.targetDate)}
-              </p>
-            )}
-          </div>
-        </div>
-        <GoalMenu goal={goal} />
-      </div>
-
-      {/* Amounts */}
-      <div className="mt-4">
-        <p className="font-display text-2xl leading-none tabular">
-          {formatCurrency(goal.saved)}
-          <span className="ml-1 text-sm text-[var(--muted)]">/ {formatCurrency(goal.targetAmount)}</span>
-        </p>
-      </div>
-
-      {/* Progress bar — reuses the BudgetBar visual pattern. */}
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--panel-2)]">
-        <div
-          className={`h-full rounded-full transition-all ${behind ? "bg-[var(--coral)]" : "bg-[var(--jade)]"}`}
+          <span className={`block truncate text-xs ${date.className}`}>{date.text}</span>
+        </span>
+      </button>
+      <span
+        className="h-1 overflow-hidden rounded-full bg-[var(--panel-2)]"
+        role="img"
+        aria-label={`${Math.round(goal.pct)}% saved`}
+      >
+        <span
+          className={`block h-full rounded-full transition-all ${behind ? "bg-[var(--coral)]" : "bg-[var(--jade)]"}`}
           style={{ width: `${Math.max(goal.pct, goal.saved > 0 ? 2 : 0)}%` }}
         />
-      </div>
-      <div className="mt-2 flex items-center justify-between text-xs">
-        <span className={`mono ${behind ? "text-[var(--coral)]" : "text-[var(--muted)]"}`}>
-          {Math.round(goal.pct)}%
-        </span>
-        <span className="mono text-[var(--muted)]">
-          {funded ? "Funded" : `${formatCurrency(goal.remaining)} to go`}
-        </span>
-      </div>
-
-      {/* Actions */}
-      <div className="mt-4 flex items-center gap-2">
-        <ContributeButton goal={goal} kind="deposit" />
-        <ContributeButton goal={goal} kind="withdraw" />
-      </div>
-
-      <LedgerHistory goalId={goal.id} />
-    </div>
+      </span>
+      <span className={`mono text-xs ${behind ? "text-[var(--coral)]" : "text-[var(--muted)]"}`}>
+        {Math.round(goal.pct)}%
+      </span>
+      <span className="mono text-right">{formatCurrency(goal.saved)}</span>
+      <span className="mono text-right text-[var(--muted)]">
+        {formatCurrency(goal.targetAmount)}
+      </span>
+      <span className="mono text-right">{funded ? "—" : formatCurrency(goal.remaining)}</span>
+      <GoalMenu goal={goal} />
+    </li>
   );
 }
 
 function GoalMenu({ goal }: { goal: SavingsGoalRow }) {
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
+    <span className="flex shrink-0 items-center justify-end">
       <EditGoalButton goal={goal} />
       <ArchiveButton goal={goal} />
       <DeleteButton goal={goal} />
+    </span>
+  );
+}
+
+function ArchivedRow({ goal }: { goal: SavingsGoalRow }) {
+  const date = dateLine(goal);
+  const funded = goal.saved >= goal.targetAmount && goal.targetAmount > 0;
+  return (
+    <li className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-line py-3">
+      <div className="min-w-0 flex-[1_1_220px]">
+        <p className="truncate font-medium text-[var(--muted)]">{goal.name}</p>
+        <p className={`text-xs ${date.className}`}>{date.text}</p>
+      </div>
+      <div className="h-1 flex-[1_1_200px] overflow-hidden rounded-full bg-[var(--panel-2)]">
+        <div
+          className="h-full rounded-full bg-[var(--muted)]"
+          style={{ width: `${Math.max(goal.pct, goal.saved > 0 ? 2 : 0)}%` }}
+        />
+      </div>
+      <span className="mono text-[13px] text-[var(--muted)]">
+        {formatCurrency(goal.saved)} of {formatCurrency(goal.targetAmount)}
+        {!funded && ` · ${formatCurrency(goal.remaining)} to go`}
+      </span>
+      <div className="flex items-center gap-2">
+        <ArchiveButton goal={goal} labelled />
+        <DeleteButton goal={goal} labelled />
+      </div>
+    </li>
+  );
+}
+
+/**
+ * The open goal's panel: an add/withdraw form on the left and the contribution
+ * ledger on the right. History is fetched when the panel opens and again after
+ * every entry, so the two halves can't disagree.
+ */
+function GoalDetail({ goal }: { goal: SavingsGoalRow }) {
+  const router = useRouter();
+  const [kind, setKind] = useState<"deposit" | "withdraw">("deposit");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [rows, setRows] = useState<SavingsContribution[] | null>(null);
+  const [pending, start] = useTransition();
+  const isDeposit = kind === "deposit";
+  const max = goal.saved; // can't withdraw more than what's saved
+
+  useEffect(() => {
+    let live = true;
+    listGoalContributions(goal.id).then((r) => {
+      if (live) setRows(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, [goal.id]);
+
+  const value = num(amount);
+  const valid = value != null && value > 0 && (isDeposit || value <= max + 0.0001);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!valid || value == null) return;
+    start(async () => {
+      if (isDeposit) await contributeToGoal(goal.id, value, note);
+      else await withdrawFromGoal(goal.id, value, note);
+      setAmount("");
+      setNote("");
+      setRows(await listGoalContributions(goal.id));
+      router.refresh();
+    });
+  }
+
+  function remove(id: string) {
+    start(async () => {
+      await deleteContribution(id);
+      setRows(await listGoalContributions(goal.id));
+      router.refresh();
+    });
+  }
+
+  return (
+    <div
+      role="region"
+      aria-label={`${goal.name} detail`}
+      className="flex flex-wrap gap-x-12 gap-y-8 rounded-b-[var(--radius)] border border-t-0 border-[var(--line-strong)] bg-[var(--panel)] p-5"
+    >
+      <form onSubmit={submit} className="flex min-w-0 flex-[1_1_300px] flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="eyebrow">
+            {isDeposit ? "Add to" : "Withdraw from"} {goal.name}
+          </span>
+          <div
+            role="group"
+            aria-label="Direction"
+            className="flex rounded-full border border-line p-[3px] text-xs"
+          >
+            {(["deposit", "withdraw"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={kind === k}
+                disabled={k === "withdraw" && max <= 0}
+                onClick={() => setKind(k)}
+                className={`min-h-8 cursor-pointer rounded-full px-3.5 transition-colors disabled:cursor-default disabled:opacity-40 ${
+                  kind === k
+                    ? "bg-[var(--panel-2)] text-[var(--paper)]"
+                    : "text-[var(--muted)] hover:text-[var(--paper)]"
+                }`}
+              >
+                {k === "deposit" ? "Add" : "Withdraw"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Field label="Amount">
+          <Input value={amount} onChange={setAmount} placeholder="100" mono />
+        </Field>
+        <Field label="Note (optional)">
+          <Input
+            value={note}
+            onChange={setNote}
+            placeholder={isDeposit ? "Tax refund" : "Rebooked flights"}
+          />
+        </Field>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-[var(--muted)]">
+            Withdrawals are capped at what&rsquo;s saved: up to {formatCurrency(max)} available.
+          </span>
+          <Button type="submit" size="sm" variant="primary" disabled={!valid || pending}>
+            {isDeposit ? "Add" : "Withdraw"}
+            {valid && value != null ? ` ${formatCurrency(value)}` : ""}
+          </Button>
+        </div>
+      </form>
+
+      <div className="min-w-0 flex-[1.4_1_360px]">
+        <div className="flex items-baseline justify-between border-b border-[var(--line-strong)] pb-2">
+          <span className="eyebrow">Contribution history</span>
+          <span className="mono text-xs text-[var(--muted)]">
+            {formatCurrency(goal.saved)} saved
+          </span>
+        </div>
+        {rows == null ? (
+          <p className="py-3 text-[13px] text-[var(--muted)]">Loading…</p>
+        ) : rows.length === 0 ? (
+          <p className="py-3 text-[13px] text-[var(--muted)]">No contributions yet.</p>
+        ) : (
+          <ul>
+            {rows.map((r) => {
+              const deposit = r.amount >= 0;
+              return (
+                <li key={r.id} className="flex min-h-11 items-center gap-3.5 border-b border-line">
+                  <span className="mono w-24 shrink-0 text-xs text-[var(--muted)]">
+                    {formatDate(r.date)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{r.note ?? ""}</span>
+                  <span className={`mono ${deposit ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
+                    {deposit ? "+" : "−"}
+                    {formatCurrency(Math.abs(r.amount))}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => remove(r.id)}
+                    disabled={pending}
+                    aria-label="Delete entry"
+                    className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)] hover:text-[var(--coral)] disabled:opacity-40"
+                  >
+                    <X size={14} aria-hidden />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
 
-function ContributeButton({ goal, kind }: { goal: SavingsGoalRow; kind: "deposit" | "withdraw" }) {
+/**
+ * Add-to / withdraw-from a goal in a dialog. The Goals table uses the inline
+ * panel instead; this is for places that show a goal without its detail (the
+ * Plan → This month summary).
+ */
+export function GoalContributeButton({ goal, kind }: { goal: SavingsGoalRow; kind: "deposit" | "withdraw" }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
@@ -295,16 +529,20 @@ function ContributeButton({ goal, kind }: { goal: SavingsGoalRow; kind: "deposit
 
   return (
     <>
-      <Button
-        size="sm"
-        variant={isDeposit ? "primary" : "secondary"}
-        className="flex-1"
+      <button
+        type="button"
         onClick={() => setOpen(true)}
         disabled={!isDeposit && max <= 0}
+        aria-label={`${isDeposit ? "Add to" : "Withdraw from"} ${goal.name}`}
+        className={`inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 text-[13px] transition-colors disabled:cursor-default disabled:opacity-40 ${
+          isDeposit
+            ? "border-[var(--line-strong)] text-[var(--paper)] hover:bg-[var(--panel-2)]"
+            : "border-line text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--paper)]"
+        }`}
       >
-        {isDeposit ? <Plus size={14} /> : <Minus size={14} />}
+        {isDeposit ? <Plus size={13} aria-hidden /> : <Minus size={13} aria-hidden />}
         {isDeposit ? "Add" : "Withdraw"}
-      </Button>
+      </button>
 
       {open && (
         <Dialog onClose={close} label={`${isDeposit ? "Add to" : "Withdraw from"} ${goal.name}`}>
@@ -340,78 +578,7 @@ function ContributeButton({ goal, kind }: { goal: SavingsGoalRow; kind: "deposit
   );
 }
 
-function LedgerHistory({ goalId }: { goalId: string }) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<SavingsContribution[] | null>(null);
-  const [pending, start] = useTransition();
-
-  function toggle() {
-    const next = !open;
-    setOpen(next);
-    if (next && rows == null) {
-      start(async () => setRows(await listGoalContributions(goalId)));
-    }
-  }
-
-  function remove(id: string) {
-    start(async () => {
-      await deleteContribution(id);
-      setRows(await listGoalContributions(goalId));
-      router.refresh();
-    });
-  }
-
-  return (
-    <div className="mt-3 border-t border-line pt-2">
-      <button
-        onClick={toggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-1.5 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
-      >
-        <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
-        History
-      </button>
-      {open && (
-        <div className="mt-2 space-y-1">
-          {rows == null ? (
-            <p className="py-2 text-xs text-[var(--muted)]">{pending ? "Loading…" : ""}</p>
-          ) : rows.length === 0 ? (
-            <p className="py-2 text-xs text-[var(--muted)]">No contributions yet.</p>
-          ) : (
-            rows.map((r) => {
-              const deposit = r.amount >= 0;
-              return (
-                <div key={r.id} className="group flex items-center justify-between gap-2 py-0.5 text-xs">
-                  <span className="min-w-0 truncate text-[var(--muted)]">
-                    {formatDate(r.date)}
-                    {r.note ? ` · ${r.note}` : ""}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    <span className={`mono ${deposit ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
-                      {deposit ? "+" : "−"}
-                      {formatCurrency(Math.abs(r.amount))}
-                    </span>
-                    <button
-                      onClick={() => remove(r.id)}
-                      disabled={pending}
-                      aria-label="Delete entry"
-                      className="rounded p-0.5 text-[var(--muted)] opacity-0 transition hover:text-[var(--coral)] group-hover:opacity-100 disabled:opacity-40"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </span>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AddGoalButton() {
+export function AddGoalButton() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -446,8 +613,8 @@ function AddGoalButton() {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <Plus size={14} /> New goal
+      <Button size="sm" variant="primary" onClick={() => setOpen(true)}>
+        <Plus size={14} /> New savings goal
       </Button>
 
       {open && (
@@ -518,9 +685,9 @@ function EditGoalButton({ goal }: { goal: SavingsGoalRow }) {
         onClick={() => setOpen(true)}
         aria-label={`Edit ${goal.name}`}
         title="Edit goal"
-        className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--brass)]"
+        className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
       >
-        <Pencil size={13} />
+        <Pencil size={15} aria-hidden />
       </button>
 
       {open && (
@@ -556,11 +723,15 @@ function EditGoalButton({ goal }: { goal: SavingsGoalRow }) {
   );
 }
 
-function ArchiveButton({ goal }: { goal: SavingsGoalRow }) {
+const PILL =
+  "inline-flex min-h-9 cursor-pointer items-center rounded-full border px-4 text-[13px] transition-colors disabled:cursor-default disabled:opacity-40";
+
+function ArchiveButton({ goal, labelled = false }: { goal: SavingsGoalRow; labelled?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   return (
     <button
+      type="button"
       onClick={() =>
         start(async () => {
           if (goal.archived) await unarchiveSavingsGoal(goal.id);
@@ -571,14 +742,24 @@ function ArchiveButton({ goal }: { goal: SavingsGoalRow }) {
       disabled={pending}
       aria-label={goal.archived ? `Restore ${goal.name}` : `Archive ${goal.name}`}
       title={goal.archived ? "Restore goal" : "Archive goal"}
-      className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--paper)] disabled:opacity-40"
+      className={
+        labelled
+          ? `${PILL} border-[var(--line-strong)] text-[var(--paper)] hover:bg-[var(--panel-2)]`
+          : "grid h-9 w-9 cursor-pointer place-items-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)] hover:text-[var(--paper)] disabled:opacity-40"
+      }
     >
-      {goal.archived ? <ChevronDown size={13} className="rotate-180" /> : <ShieldCheck size={13} />}
+      {labelled ? (
+        goal.archived ? "Restore" : "Archive"
+      ) : goal.archived ? (
+        <ArchiveRestore size={15} aria-hidden />
+      ) : (
+        <Archive size={15} aria-hidden />
+      )}
     </button>
   );
 }
 
-function DeleteButton({ goal }: { goal: SavingsGoalRow }) {
+function DeleteButton({ goal, labelled = false }: { goal: SavingsGoalRow; labelled?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   function remove() {
@@ -590,13 +771,18 @@ function DeleteButton({ goal }: { goal: SavingsGoalRow }) {
   }
   return (
     <button
+      type="button"
       onClick={remove}
       disabled={pending}
       aria-label={`Delete ${goal.name}`}
       title="Delete goal"
-      className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--coral)] disabled:opacity-40"
+      className={
+        labelled
+          ? `${PILL} border-line text-[var(--coral)] hover:border-[var(--coral)]`
+          : "grid h-9 w-9 cursor-pointer place-items-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)] hover:text-[var(--coral)] disabled:opacity-40"
+      }
     >
-      <Trash2 size={13} />
+      {labelled ? "Delete" : <Trash2 size={15} aria-hidden />}
     </button>
   );
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `budgets` ADD `fixed` integer DEFAULT false NOT NULL;

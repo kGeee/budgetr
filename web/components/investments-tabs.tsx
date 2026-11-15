@@ -78,7 +78,7 @@ const DESK: Tab[] = [
   { key: "fundamentals", href: "/fundamentals", label: "Fundamentals" },
 ];
 
-function sectionTabs(tradingDesk: boolean): Tab[] {
+export function sectionTabs(tradingDesk: boolean): Tab[] {
   const own = INVESTMENTS_TABS.map((t) => ({
     key: t.key,
     href: investmentsTabHref(t.key),
@@ -88,7 +88,7 @@ function sectionTabs(tradingDesk: boolean): Tab[] {
 }
 
 /** Which section tab a URL belongs to. Import is a Holdings action, so it lights Holdings. */
-function activeSection(pathname: string, tab: string | null): string | null {
+export function activeSection(pathname: string, tab: string | null): string | null {
   for (const d of DESK) if (matches(pathname, d.href)) return d.key;
   if (pathname === "/investments") return parseInvestmentsTab(tab);
   if (matches(pathname, "/investments/import")) return "holdings";

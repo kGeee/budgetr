@@ -16,14 +16,14 @@ export function AccountVisibilityToggle({ id, excluded }: { id: string; excluded
     <button
       type="button"
       disabled={pending}
+      aria-pressed={excluded}
       onClick={() => startTransition(() => setAccountExcluded(id, !excluded))}
       aria-label={excluded ? "Show account" : "Hide account"}
-      title={excluded ? "Hidden — click to show" : "Hide from totals & sidebar"}
-      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line transition-colors hover:bg-[var(--panel-2)] disabled:opacity-50 ${
-        excluded ? "text-[var(--muted)]" : "text-[var(--faint)] hover:text-[var(--paper)]"
-      }`}
+      title={excluded ? "Hidden — click to count it again" : "Hide from totals & sidebar"}
+      className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-full border border-line px-3 text-[13px] text-[var(--muted)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--paper)] disabled:opacity-50"
     >
-      {excluded ? <EyeOff size={15} /> : <Eye size={15} />}
+      {excluded ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
+      {excluded ? "Show" : "Hide"}
     </button>
   );
 }

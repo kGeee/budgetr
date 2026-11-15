@@ -140,6 +140,10 @@ export const budgets = sqliteTable("budgets", {
   // Envelope mode: when set, this category's unused (or overspent) balance
   // carries forward month to month via the budget_rollovers ledger.
   rollover: integer("rollover", { mode: "boolean" }).notNull().default(false),
+  // A fixed cost (rent, a loan payment): it lands in one or two charges rather
+  // than burning evenly, so the Budgets page reads it as paid/unpaid and leaves
+  // it out of the spending pace. Off by default — nothing changes until flagged.
+  fixed: integer("fixed", { mode: "boolean" }).notNull().default(false),
 });
 
 /**

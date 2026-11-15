@@ -31,6 +31,7 @@ import { settledOnly } from "@/lib/pending";
 import type { SavingsContribution, Dashboard, DashboardWidget } from "@/db/schema";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
+import { OVERVIEW_DEFAULT_WIDGETS, monthPace, type MonthPace } from "@/lib/home-layout";
 import {
   computeRealizedLots,
   summarize,
@@ -453,6 +454,8 @@ export function getBudgetsWithSpend(): BudgetRow[] {
 /** A BudgetRow plus its envelope/rollover state for the budget month. */
 export type EnvelopeBudgetRow = BudgetRow & {
   rollover: boolean;
+  /** A fixed cost — judged as paid/unpaid and left out of the spending pace. */
+  fixed: boolean;
   carryIn: number; // balance carried into this month (+ unused, − overspent)
   available: number; // budget + carryIn − spent — what's actually spendable
   carryOut: number; // projected balance rolling into next month (= available)
@@ -479,6 +482,7 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
       icon: string | null;
       budget: number | null;
       rollover: number;
+      fixed: number;
       carryIn: number;
       spent: number;
     }>(
@@ -486,6 +490,7 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
           SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
              b.amount AS budget,
              COALESCE(b.rollover, 0) AS rollover,
+             COALESCE(b.fixed, 0) AS fixed,
              COALESCE((
                SELECT r.carry_in FROM budget_rollovers r
                WHERE r.category_id = cat.id AND r.month = ${month}
@@ -517,6 +522,7 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
         spent,
         remaining: budget == null ? null : budget - spent,
         rollover,
+        fixed: budget != null && Boolean(r.fixed),
         carryIn,
         available,
         carryOut: available,
@@ -2501,20 +2507,6 @@ export function getDashboardWithWidgets(
  */
 export const OVERVIEW_DASHBOARD_ID = "dash_overview";
 
-/** The stock Home layout, seeded once — net-worth hero, cashflow, spend +
- *  budget, and the spending retrospective. The review inbox is no longer seeded
- *  (Transactions → Needs review owns it, and Home's attention card links there)
- *  but stays in the picker. `wide` widgets come from WIDGET_META client-side. */
-const OVERVIEW_DEFAULT_WIDGETS: { type: WidgetType; config?: WidgetConfig }[] = [
-  { type: "net-worth-summary" },
-  { type: "spending-review" },
-  { type: "cashflow", config: { months: 6 } },
-  { type: "spend-by-category", config: { days: 30 } },
-  { type: "budget-summary" },
-  { type: "recent-activity", config: { limit: 6 } },
-  { type: "upcoming-bills", config: { days: 14 } },
-];
-
 /**
  * Ensure the reserved Overview dashboard exists (seeding its default widgets on
  * first ever render), then return it with its widgets. Idempotent and race-safe:
@@ -2572,7 +2564,7 @@ export type WidgetData =
   | { type: "spend-by-category"; series: CategorySpend[] }
   | { type: "top-vendors"; merchants: TopMerchant[] }
   | { type: "daily-spend"; series: { date: string; spent: number }[]; start: string; end: string }
-  | { type: "budget-summary"; summary: BudgetSummary }
+  | { type: "budget-summary"; summary: BudgetSummary; rows: BudgetRow[]; pace: MonthPace }
   | {
       type: "net-worth-summary";
       nw: NetWorth;
@@ -2630,8 +2622,17 @@ export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetDa
         end: endStr,
       };
     }
-    case "budget-summary":
-      return { type: "budget-summary", summary: getMonthlyBudgetSummary() };
+    case "budget-summary": {
+      // The totals, each budgeted category so the widget can list them, and
+      // where today falls in the budget month, for the tick on each bar.
+      const summary = getMonthlyBudgetSummary();
+      return {
+        type: "budget-summary",
+        summary,
+        rows: getBudgetsWithSpend().filter((r) => r.budget != null),
+        pace: monthPace(summary.month, new Date()),
+      };
+    }
     case "net-worth-summary":
       return getNetWorthSummaryWidget();
     case "review-queue": {

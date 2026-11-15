@@ -1,33 +1,65 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, ChevronDown, Pencil, Repeat, Tags, Wallet, X } from "lucide-react";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { CategoryIcon } from "@/components/budget/category-pill";
+import { Check, ChevronDown, Lock, Repeat, Tags, X } from "lucide-react";
 import { CategoryDetailPanel } from "@/components/budget/category-detail-panel";
-import { BudgetPaceChart } from "@/components/charts";
-import { setBudget, setBudgetRollover, setTagBudget } from "@/lib/actions";
-import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
-import { budgetVerdict } from "@/lib/budget-verdict";
-import { formatCurrency } from "@/lib/utils";
+import { PaceChart } from "@/components/budget/pace-chart";
+import { CategoryDot } from "@/components/spending/ruled";
+import { Dialog, DialogBody, DialogHeader } from "@/components/ui/dialog";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
+import { setBudget, setBudgetFixed, setBudgetRollover, setTagBudget } from "@/lib/actions";
+import { budgetStatus, budgetVerdict, paceSeries } from "@/lib/budget-verdict";
+import { cn, formatCurrency } from "@/lib/utils";
 import type { BudgetRow, CategoryRow, EnvelopeBudgetRow } from "@/lib/queries";
 
 /**
- * The Budgets page body — the month's headline, the pace chart, an envelope card
- * per budgeted category, and one detail panel underneath.
+ * The Budgets page body — the month's headline beside its pace chart, then one
+ * ruled table of every budget, grouped Fixed and Flexible.
  *
- * Built on the same idea as the Shared page: navigation hinges on *focus*.
- * Selecting an envelope re-scopes the pace chart to that category and opens its
- * breakdown below, so "how is Groceries doing" is one click rather than a chart
- * for everything and a separate expandable row. Focus lives in client state
- * (instant — the per-category daily spend is already on the page) and is
- * mirrored into `?c=` so the view survives a reload and can be linked.
+ * Navigation hinges on *focus*: selecting a row re-scopes the pace chart to that
+ * category and opens its breakdown under the table, so "how is Groceries doing"
+ * is one click. Focus lives in client state (instant — the per-category daily
+ * spend is already on the page) and is mirrored into `?c=` so the view survives
+ * a reload and can be linked.
+ *
+ * Fixed budgets (rent, a loan payment) are read as paid or not and left out of
+ * the pace; with none flagged, everything is judged as one month, as before.
  */
 
 type EnvelopeRow = BudgetRow & Partial<Omit<EnvelopeBudgetRow, keyof BudgetRow>>;
 
 export type DaySpend = { categoryId: string; date: string; spent: number };
+
+// One column set for every group, so figures line up down the whole table.
+const GRID =
+  "grid grid-cols-[minmax(150px,1.2fr)_minmax(180px,2fr)_104px_104px_110px_96px] gap-5";
+
+const PILL =
+  "inline-flex min-h-11 cursor-pointer items-center rounded-full border border-[var(--line-strong)] px-4 text-sm text-[var(--paper)] transition-colors duration-200 hover:bg-[var(--panel)]";
+
+const STATUS_TEXT = {
+  jade: "text-[var(--jade)]",
+  brass: "text-[var(--brass)]",
+  coral: "text-[var(--coral)]",
+  muted: "text-[var(--muted)]",
+} as const;
+
+const STATUS_FILL = {
+  jade: "bg-[var(--jade)]",
+  brass: "bg-[var(--brass)]",
+  coral: "bg-[var(--coral)]",
+  muted: "bg-[var(--jade)]",
+} as const;
+
+/** Local date, not UTC — "today" is the reader's day. */
+function localToday(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+const hasLimit = (r: BudgetRow) => r.budget != null && r.budget > 0;
 
 export function BudgetsView({
   month,
@@ -58,7 +90,10 @@ export function BudgetsView({
   // owned by React from then on — the URL is written back imperatively below.
   const searchParams = useSearchParams();
   const [focus, setFocusState] = useState<string | null>(() => searchParams.get("c"));
-  const [showUnbudgeted, setShowUnbudgeted] = useState(false);
+  const [showIdle, setShowIdle] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [rolloverOpen, setRolloverOpen] = useState(false);
+  const [today] = useState(localToday);
 
   function setFocus(id: string | null) {
     setFocusState(id);
@@ -66,271 +101,294 @@ export function BudgetsView({
     if (id) url.searchParams.set("c", id);
     else url.searchParams.delete("c");
     // Native history update — Next.js keeps this out of the RSC round-trip, so
-    // focusing an envelope stays instant.
+    // focusing a row stays instant.
     window.history.replaceState(null, "", url);
   }
+  const toggleFocus = (id: string) => setFocus(focus === id ? null : id);
 
-  const budgeted = envelopes.filter((r) => r.budget != null && r.budget > 0);
+  const budgeted = envelopes.filter(hasLimit);
+  const fixed = budgeted.filter((r) => r.fixed);
+  const flexible = budgeted.filter((r) => !r.fixed);
   // No limit set. Ones with spend are worth seeing (they're leaking money
   // somewhere unplanned); the rest stay behind a disclosure.
-  const unbudgeted = envelopes.filter((r) => !(r.budget != null && r.budget > 0));
+  const unbudgeted = envelopes.filter((r) => !hasLimit(r));
   const unbudgetedSpending = unbudgeted.filter((r) => r.spent > 0.01);
   const unbudgetedIdle = unbudgeted.filter((r) => r.spent <= 0.01);
 
+  const fixedBudget = fixed.reduce((s, r) => s + (r.budget ?? 0), 0);
+  const fixedSpent = fixed.reduce((s, r) => s + r.spent, 0);
+  const flexibleBudget = totalBudget - fixedBudget;
+  const hasFixed = fixed.length > 0;
+
   const focused = focus ? (envelopes.find((r) => r.categoryId === focus) ?? null) : null;
 
+  // Share of the month gone — where the tick sits on every flexible bar.
+  const [yy, mm] = month.split("-").map(Number);
+  const daysInMonth = new Date(yy, mm, 0).getDate();
+  const current = today.slice(0, 7) === month;
+  const elapsed = current ? Math.min(1, Math.max(1, Number(today.slice(8, 10))) / daysInMonth) : 1;
+
+  const rolloverCount = budgeted.filter((r) => r.rollover).length;
+  const rowProps = { elapsed, current, editing, setEditing };
+
   return (
-    <div className="space-y-7">
-      <Summary
-        month={month}
-        monthLabel={monthLabel}
-        totalBudget={totalBudget}
-        totalSpent={totalSpent}
-        left={left}
-        carriedForward={carriedForward}
-        hasRollovers={hasRollovers}
-      />
+    <div className="space-y-9">
+      <section
+        className="rise flex flex-wrap items-stretch gap-10"
+        aria-label={`${monthLabel} budget`}
+      >
+        <Summary
+          month={month}
+          monthLabel={monthLabel}
+          today={today}
+          totalBudget={totalBudget}
+          totalSpent={totalSpent}
+          left={left}
+          fixedBudget={fixedBudget}
+          fixedSpent={fixedSpent}
+          hasFixed={hasFixed}
+          carriedForward={carriedForward}
+          hasRollovers={hasRollovers}
+        />
+        <Pace
+          month={month}
+          today={today}
+          totalBudget={totalBudget}
+          flexibleBudget={flexibleBudget}
+          fixedIds={fixed.map((r) => r.categoryId)}
+          spendByCategoryDay={spendByCategoryDay}
+          focused={focused}
+          onClearFocus={() => setFocus(null)}
+        />
+      </section>
 
-      <PaceCard
-        month={month}
-        monthLabel={monthLabel}
-        totalBudget={totalBudget}
-        spendByCategoryDay={spendByCategoryDay}
-        focused={focused}
-        onClearFocus={() => setFocus(null)}
-      />
+      <section aria-label="Budget categories">
+        <div className="overflow-x-auto">
+          <div className="min-w-[760px]">
+            {budgeted.length === 0 && (
+              <>
+                <GroupHead title="Budgets" columns />
+                <p className="border-b border-line py-6 text-sm text-[var(--muted)]">
+                  No budgets set yet. Give a category a monthly limit below and it gets a pace
+                  line, a status, and a warning before you run it dry.
+                </p>
+              </>
+            )}
 
-      <section aria-labelledby="envelopes-heading">
-        <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-baseline gap-2.5">
-            <h2 id="envelopes-heading" className="eyebrow">
-              Envelopes
-            </h2>
+            {hasFixed && (
+              <>
+                <GroupHead title="Fixed" count={fixed.length} columns />
+                {fixed.map((row) => (
+                  <Row
+                    key={row.categoryId}
+                    row={row}
+                    focused={focus === row.categoryId}
+                    onFocus={() => toggleFocus(row.categoryId)}
+                    {...rowProps}
+                  />
+                ))}
+              </>
+            )}
+
+            {flexible.length > 0 && (
+              <>
+                <GroupHead
+                  title={hasFixed ? "Flexible" : "Budgets"}
+                  count={flexible.length}
+                  columns={!hasFixed}
+                  spaced={hasFixed}
+                />
+                {flexible.map((row) => (
+                  <Row
+                    key={row.categoryId}
+                    row={row}
+                    focused={focus === row.categoryId}
+                    onFocus={() => toggleFocus(row.categoryId)}
+                    {...rowProps}
+                  />
+                ))}
+              </>
+            )}
+
             {budgeted.length > 0 && (
-              <span className="text-xs text-[var(--faint)]">{budgeted.length}</span>
+              <div className={cn(GRID, "mono min-h-14 items-center text-sm")}>
+                <span className="font-sans text-[var(--muted)]">Total</span>
+                <span />
+                <span className="text-right">{formatCurrency(totalSpent)}</span>
+                <span className="text-right">{formatCurrency(totalBudget)}</span>
+                <span
+                  className={cn("text-right", left < 0 ? "text-[var(--coral)]" : "text-[var(--jade)]")}
+                >
+                  {left < 0 ? "−" : ""}
+                  {formatCurrency(Math.abs(left))}
+                </span>
+                <span />
+              </div>
+            )}
+
+            {/* Categories with no limit. Spending ones first — money going
+                somewhere unplanned is more interesting than a dormant category. */}
+            {unbudgeted.length > 0 && (
+              <>
+                <GroupHead
+                  title="No budget"
+                  count={unbudgeted.length}
+                  spaced={budgeted.length > 0}
+                  note="spending with no limit set"
+                />
+                {unbudgetedSpending.map((row) => (
+                  <Row
+                    key={row.categoryId}
+                    row={row}
+                    focused={focus === row.categoryId}
+                    onFocus={() => toggleFocus(row.categoryId)}
+                    {...rowProps}
+                  />
+                ))}
+                {unbudgetedIdle.length > 0 && (
+                  <>
+                    <div className="flex min-h-11 items-center border-b border-line">
+                      <button
+                        type="button"
+                        onClick={() => setShowIdle((v) => !v)}
+                        aria-expanded={showIdle}
+                        className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 text-[13px] text-[var(--muted)] transition-colors duration-200 hover:text-[var(--paper)]"
+                      >
+                        <ChevronDown
+                          size={13}
+                          aria-hidden
+                          className={cn("transition-transform duration-200", showIdle && "rotate-180")}
+                        />
+                        No spend this month · {unbudgetedIdle.length}
+                      </button>
+                    </div>
+                    {showIdle &&
+                      unbudgetedIdle.map((row) => (
+                        <Row
+                          key={row.categoryId}
+                          row={row}
+                          focused={focus === row.categoryId}
+                          onFocus={() => toggleFocus(row.categoryId)}
+                          {...rowProps}
+                        />
+                      ))}
+                  </>
+                )}
+              </>
+            )}
+
+            {tags.length > 0 && (
+              <>
+                <GroupHead
+                  title="Tag budgets"
+                  count={tags.length}
+                  spaced
+                  note="counts alongside categories"
+                />
+                {tags.map((row) => (
+                  <Row key={row.categoryId} row={row} kind="tag" {...rowProps} />
+                ))}
+              </>
             )}
           </div>
-          {budgeted.length > 0 && (
-            <span className="text-xs text-[var(--faint)]">
-              {formatCurrency(totalSpent)} of {formatCurrency(totalBudget)} used
-            </span>
-          )}
         </div>
 
-        {budgeted.length === 0 ? (
-          <EmptyState
-            icon={<Wallet size={18} aria-hidden />}
-            title="No budgets set yet"
-            body="Give a category a monthly limit and it becomes an envelope — with a pace line, a carried-over balance, and a warning before you run it dry."
-          />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {budgeted.map((row, i) => (
-              <EnvelopeCard
-                key={row.categoryId}
-                row={row}
-                index={i}
-                focused={focus === row.categoryId}
-                onFocus={() => setFocus(focus === row.categoryId ? null : row.categoryId)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Categories with no limit. Spending ones first — an envelope you
-            haven't drawn yet is more interesting than a dormant category. */}
-        {unbudgetedSpending.length > 0 && (
-          <UnbudgetedStrip
-            className="mt-4"
-            rows={unbudgetedSpending}
-            focus={focus}
-            onFocus={(id) => setFocus(focus === id ? null : id)}
-          />
-        )}
-
-        {unbudgetedIdle.length > 0 && (
-          <div className="mt-4">
-            <button
-              onClick={() => setShowUnbudgeted((v) => !v)}
-              aria-expanded={showUnbudgeted}
-              className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[var(--faint)] transition-colors duration-200 hover:text-[var(--muted)]"
-            >
-              <ChevronDown
-                size={13}
-                aria-hidden
-                className={`transition-transform duration-200 ${showUnbudgeted ? "rotate-180" : ""}`}
-              />
-              No spend this month · {unbudgetedIdle.length}
-            </button>
-            {showUnbudgeted && (
-              <UnbudgetedStrip
-                className="mt-3"
-                rows={unbudgetedIdle}
-                focus={focus}
-                onFocus={(id) => setFocus(focus === id ? null : id)}
-              />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3.5 text-[13px] text-[var(--muted)]">
+          <span className="max-w-[62ch]">
+            Click any budget figure to change it
+            {hasFixed ? "" : ", or to mark a bill like rent as fixed so it stays out of the pace"}.{" "}
+            {budgeted.length > 0 &&
+              (rolloverCount === 0
+                ? "Rollover is off for every category."
+                : `Rollover is on for ${rolloverCount} of ${budgeted.length} categor${budgeted.length === 1 ? "y" : "ies"}.`)}
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {budgeted.length > 0 && (
+              <button type="button" onClick={() => setRolloverOpen(true)} className={PILL}>
+                Rollover settings
+              </button>
             )}
+            <Link href="/settings#categories" className={PILL}>
+              Add category
+            </Link>
           </div>
-        )}
+        </div>
       </section>
 
       {focused && (
-        <FocusDetail row={focused} categories={categories} onClear={() => setFocus(null)} />
-      )}
-
-      {tags.length > 0 && (
-        <section aria-labelledby="tags-heading">
-          <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-baseline gap-2.5">
-              <h2 id="tags-heading" className="eyebrow">
-                Tag budgets
-              </h2>
-              <span className="text-xs text-[var(--faint)]">{tags.length}</span>
-            </div>
-            <span className="text-xs text-[var(--faint)]">counts alongside categories</span>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {tags.map((row, i) => (
-              <EnvelopeCard key={row.categoryId} row={row} index={i} kind="tag" />
-            ))}
-          </div>
+        <section aria-label={`${focused.name} breakdown`} className="rise">
+          <SectionHead
+            title={focused.name}
+            count={`${formatCurrency(focused.spent)} spent${hasLimit(focused) ? ` of ${formatCurrency(focused.budget ?? 0)}` : ""} this month`}
+            action={
+              <button
+                type="button"
+                onClick={() => setFocus(null)}
+                aria-label={`Close the ${focused.name} breakdown`}
+                className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-full text-[var(--muted)] transition-colors duration-200 hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
+              >
+                <X size={14} aria-hidden />
+              </button>
+            }
+            className="items-center"
+          />
+          <CategoryDetailPanel
+            categoryId={focused.categoryId}
+            categories={categories}
+            group="spending"
+          />
         </section>
       )}
-    </div>
-  );
-}
 
-// ── Identity ─────────────────────────────────────────────────────────────────
-
-/**
- * The same fixed hue ring the Shared page gives people, here carrying category
- * identity: one colour per envelope, reused by its disc, its focus chip and its
- * bar so a category is recognisable before its name is read. Lightness and
- * saturation come from the theme (`.tint`), so one hue works on both canvases.
- */
-const HUES = [152, 40, 208, 12, 268, 96, 330, 186];
-
-function hueFor(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return HUES[h % HUES.length];
-}
-
-const DISC_SIZE = { sm: "h-6 w-6", md: "h-8 w-8", lg: "h-10 w-10" } as const;
-
-/** Tinted category disc. Decorative — the name is always adjacent in the DOM. */
-function Disc({
-  row,
-  size = "md",
-  kind = "category",
-}: {
-  row: BudgetRow;
-  size?: keyof typeof DISC_SIZE;
-  kind?: "category" | "tag";
-}) {
-  return (
-    <span
-      aria-hidden
-      style={{ "--tint-h": hueFor(row.categoryId) } as React.CSSProperties}
-      className={`tint grid shrink-0 place-items-center rounded-full border border-[color-mix(in_srgb,var(--tint)_38%,transparent)] bg-[color-mix(in_srgb,var(--tint)_15%,transparent)] text-[var(--tint)] ${DISC_SIZE[size]}`}
-    >
-      {kind === "tag" ? (
-        <Tags size={size === "sm" ? 11 : 14} />
-      ) : (
-        <CategoryIcon icon={row.icon} size={size === "sm" ? 11 : 14} />
-      )}
-    </span>
-  );
-}
-
-// ── Shared bits ──────────────────────────────────────────────────────────────
-
-function EmptyState({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div className="rounded-[var(--radius)] border border-dashed border-line px-6 py-10 text-center">
-      <span className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-full border border-line bg-[var(--panel)] text-[var(--faint)]">
-        {icon}
-      </span>
-      <p className="text-sm font-medium">{title}</p>
-      <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-[var(--muted)]">{body}</p>
-    </div>
-  );
-}
-
-/**
- * How far through an envelope the month's spend has eaten. Three tones rather
- * than two: jade while there's room, brass from four fifths on (the warning you
- * can still act on), coral once it's gone.
- */
-function Meter({
-  spent,
-  budget,
-  label,
-}: {
-  spent: number;
-  budget: number;
-  label: string;
-}) {
-  const raw = budget > 0 ? (spent / budget) * 100 : 0;
-  const pct = Math.max(0, Math.min(100, raw));
-  const tone = raw > 100 ? "var(--coral)" : raw >= 80 ? "var(--brass)" : "var(--jade)";
-  return (
-    <div
-      role="progressbar"
-      aria-valuenow={Math.round(raw)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-label={label}
-      className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--panel-2)]"
-    >
-      <div
-        className="h-full rounded-full transition-[width] duration-500 ease-out"
-        style={{ width: `${Math.max(pct, budget > 0 && spent > 0 ? 2 : 0)}%`, background: tone }}
-      />
+      {rolloverOpen && <RolloverDialog rows={budgeted} onClose={() => setRolloverOpen(false)} />}
     </div>
   );
 }
 
 // ── Headline ─────────────────────────────────────────────────────────────────
 
+function Of({ spent, budget }: { spent: number; budget: number }) {
+  return (
+    <>
+      {formatCurrency(spent)} <span className="text-[var(--muted)]">of {formatCurrency(budget)}</span>
+    </>
+  );
+}
+
 function Summary({
   month,
   monthLabel,
+  today,
   totalBudget,
   totalSpent,
   left,
+  fixedBudget,
+  fixedSpent,
+  hasFixed,
   carriedForward,
   hasRollovers,
 }: {
   month: string;
   monthLabel: string;
+  today: string;
   totalBudget: number;
   totalSpent: number;
   left: number;
+  fixedBudget: number;
+  fixedSpent: number;
+  hasFixed: boolean;
   carriedForward: number;
   hasRollovers: boolean;
 }) {
   const over = left < 0;
-  // Local date, not UTC — "today" is the reader's day, and the pace it implies
-  // shouldn't jump at 5pm on the west coast.
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const verdict = budgetVerdict({ month, today, totalBudget, totalSpent });
+  const verdict = budgetVerdict({ month, today, totalBudget, totalSpent, fixedBudget, fixedSpent });
   const showCarry = hasRollovers && Math.abs(carriedForward) > 0.01;
 
   return (
     // The page's one editorial number sits on the canvas, not in a card: the
     // figure, a sentence that reads it, then the figures it is made of on one
-    // rule. Per-envelope amounts below stay mono so columns of money line up.
-    <section className="rise space-y-5" aria-label={`${monthLabel} budget`}>
+    // rule pinned to the foot of the column so it lines up with the chart's axis.
+    <div className="flex min-w-0 flex-[1_1_380px] flex-col gap-3.5">
       <Hero
         eyebrow={`${over ? "Over budget" : "Left to spend"} · ${monthLabel}`}
         figure={formatCurrency(Math.abs(left))}
@@ -343,24 +401,37 @@ function Summary({
               {verdict.projectedOver != null && verdict.projectedOver > 0.005 && (
                 <>
                   {" "}
-                  At this rate the month ends{" "}
+                  At this rate {verdict.scope === "flexible" ? "it" : "the month"} ends{" "}
                   <Mark tone="brass">{formatCurrency(verdict.projectedOver)}</Mark> over.
+                </>
+              )}
+              {verdict.scope === "flexible" && (
+                <>
+                  {" "}
+                  Fixed costs have taken {formatCurrency(fixedSpent)} of{" "}
+                  {formatCurrency(fixedBudget)} and are left out of the pace.
                 </>
               )}
             </span>
           )
         }
       />
-      {totalBudget > 0 && (
-        <Meter
-          spent={totalSpent}
-          budget={totalBudget}
-          label={`${Math.round((totalSpent / totalBudget) * 100)}% of this month's budget spent`}
-        />
-      )}
-      <StatStrip>
-        <Stat label="Spent" value={formatCurrency(totalSpent)} />
-        <Stat label="Budgeted" value={formatCurrency(totalBudget)} />
+      <StatStrip className="mt-auto">
+        {hasFixed ? (
+          <>
+            <Stat label="Fixed" value={<Of spent={fixedSpent} budget={fixedBudget} />} />
+            <Stat
+              label="Flexible"
+              value={<Of spent={totalSpent - fixedSpent} budget={totalBudget - fixedBudget} />}
+            />
+            <Stat label="Month total" value={<Of spent={totalSpent} budget={totalBudget} />} />
+          </>
+        ) : (
+          <>
+            <Stat label="Spent" value={formatCurrency(totalSpent)} />
+            <Stat label="Budgeted" value={formatCurrency(totalBudget)} />
+          </>
+        )}
         {/* Silent when the envelopes happen to net to zero — "+$0.00 carried
             forward" is noise, not information. */}
         {showCarry && (
@@ -372,250 +443,345 @@ function Summary({
           />
         )}
       </StatStrip>
-    </section>
+    </div>
   );
 }
 
 // ── Pace ─────────────────────────────────────────────────────────────────────
 
 /**
- * Cumulative spend against an even burn of the budget. Follows focus: with an
- * envelope selected it charts that envelope against its own limit, which is the
- * question you actually asked by selecting it.
+ * Cumulative spend against an even burn of the budget. Follows focus: with a row
+ * selected it charts that category against its own limit, which is the question
+ * you asked by selecting it. Unfocused, it leaves fixed budgets out — one rent
+ * charge on the 1st would otherwise put every month ahead of pace.
  */
-function PaceCard({
+function Pace({
   month,
-  monthLabel,
+  today,
   totalBudget,
+  flexibleBudget,
+  fixedIds,
   spendByCategoryDay,
   focused,
   onClearFocus,
 }: {
   month: string;
-  monthLabel: string;
+  today: string;
   totalBudget: number;
+  flexibleBudget: number;
+  fixedIds: string[];
   spendByCategoryDay: DaySpend[];
   focused: EnvelopeRow | null;
   onClearFocus: () => void;
 }) {
-  const budget = focused ? (focused.budget ?? 0) : totalBudget;
+  // Same rule as the verdict: narrow to flexible only when some budget is fixed
+  // and some is not.
+  const flexibleOnly = !focused && fixedIds.length > 0 && flexibleBudget > 0.005;
+  const budget = focused ? (focused.budget ?? 0) : flexibleOnly ? flexibleBudget : totalBudget;
+  const focusId = focused?.categoryId ?? null;
+  const fixedKey = fixedIds.join("|");
 
-  const { data, spentToDate, paceToDate, projected, aheadOfPace } = useMemo(() => {
-    const [yy, mm] = month.split("-").map(Number);
-    const daysInMonth = new Date(yy, mm, 0).getDate();
-    const isCurrentMonth = new Date().toISOString().slice(0, 7) === month;
-    const lastActualDay = isCurrentMonth
-      ? Math.min(new Date().getDate(), daysInMonth)
-      : daysInMonth;
-
-    const byDate = new Map<string, number>();
-    for (const row of spendByCategoryDay) {
-      if (focused && row.categoryId !== focused.categoryId) continue;
-      byDate.set(row.date, (byDate.get(row.date) ?? 0) + row.spent);
-    }
-
-    let cum = 0;
-    const series: { date: string; spent: number | null; pace: number }[] = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      cum += byDate.get(`${month}-${String(d).padStart(2, "0")}`) ?? 0;
-      series.push({
-        date: `${month}-${String(d).padStart(2, "0")}`,
-        spent: d <= lastActualDay ? cum : null,
-        pace: (budget * d) / daysInMonth,
-      });
-    }
-
-    const spent = series[lastActualDay - 1]?.spent ?? 0;
-    const pace = (budget * lastActualDay) / daysInMonth;
-    return {
-      data: series,
-      spentToDate: spent,
-      paceToDate: pace,
-      projected: lastActualDay > 0 ? (spent / lastActualDay) * daysInMonth : 0,
-      aheadOfPace: spent > pace,
-    };
-  }, [month, budget, spendByCategoryDay, focused]);
+  const series = useMemo(() => {
+    const skip = new Set(flexibleOnly ? fixedKey.split("|") : []);
+    return paceSeries({
+      month,
+      today,
+      budget,
+      rows: spendByCategoryDay,
+      include: focusId
+        ? (id) => id === focusId
+        : flexibleOnly
+          ? (id) => !skip.has(id)
+          : undefined,
+    });
+  }, [month, today, budget, spendByCategoryDay, focusId, flexibleOnly, fixedKey]);
 
   if (budget <= 0 && !focused) return null;
 
+  const title = focused ? `${focused.name} pace` : flexibleOnly ? "Flexible pace" : "Spending pace";
+  const { spentToDate, paceToDate, projected, aheadOfPace } = series;
+
   return (
-    <Card className="rise p-0">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-6 py-4">
+    <div className="flex min-w-0 flex-[1.4_1_420px] flex-col gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-          <span className="eyebrow">Spending pace · {monthLabel}</span>
+          <span className="eyebrow">{title}</span>
           {focused && (
             <button
+              type="button"
               onClick={onClearFocus}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_12%,transparent)] py-1 pl-1 pr-2.5 text-xs text-[var(--brass)] transition-colors duration-200 hover:bg-[color-mix(in_srgb,var(--brass)_20%,transparent)]"
+              className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-line px-3 text-xs text-[var(--muted)] transition-colors duration-200 hover:border-[var(--line-strong)] hover:text-[var(--paper)]"
             >
-              <Disc row={focused} size="sm" />
-              {focused.name}
+              All {fixedIds.length > 0 ? "flexible" : "budgets"}
               <X size={12} aria-hidden />
-              <span className="sr-only">Clear category filter</span>
+              <span className="sr-only">— clear the category focus</span>
             </button>
           )}
         </div>
-        <span className="flex items-center gap-3 text-xs text-[var(--muted)]">
+        <span className="flex items-center gap-4 text-xs text-[var(--muted)]">
           <span className="flex items-center gap-1.5">
             <span
-              className="h-2 w-2 rounded-full"
-              style={{ background: aheadOfPace ? "var(--coral)" : "var(--jade)" }}
+              aria-hidden
+              className={cn(
+                "h-0.5 w-3.5",
+                aheadOfPace && budget > 0 ? "bg-[var(--coral)]" : "bg-[var(--jade)]",
+              )}
             />
             Spent
           </span>
           {budget > 0 && (
             <span className="flex items-center gap-1.5">
-              <span className="inline-block h-px w-3 border-t border-dashed border-[var(--muted)]" />
-              Budget pace
+              <span aria-hidden className="w-3.5 border-t-2 border-dashed border-[var(--muted)]" />
+              Even pace
             </span>
           )}
         </span>
       </div>
 
-      <div className="px-3 py-5 sm:px-5">
-        <BudgetPaceChart data={data} over={aheadOfPace} />
-      </div>
+      <PaceChart series={series} budget={budget} label={title} />
 
-      <p className="border-t border-line px-6 py-3 text-xs text-[var(--muted)]">
+      <p className="text-xs text-[var(--muted)]" suppressHydrationWarning>
         {budget > 0 ? (
           <>
-            <span className={aheadOfPace ? "text-[var(--coral)]" : "text-[var(--jade)]"}>
-              {aheadOfPace ? "Ahead of pace" : "On pace"}
-            </span>{" "}
-            · {formatCurrency(spentToDate)} spent vs {formatCurrency(paceToDate)} budgeted so far ·
-            projected {formatCurrency(projected)} of {formatCurrency(budget)}
+            <span className="mono text-[var(--paper)]">{formatCurrency(spentToDate)}</span> spent
+            against <span className="mono">{formatCurrency(paceToDate)}</span> at an even pace ·
+            projected <span className="mono">{formatCurrency(projected)}</span> of{" "}
+            <span className="mono">{formatCurrency(budget)}</span>
           </>
         ) : (
           <>
-            {formatCurrency(spentToDate)} spent so far · no limit set for {focused?.name}, so
-            there&rsquo;s no pace to keep
+            <span className="mono text-[var(--paper)]">{formatCurrency(spentToDate)}</span> spent so
+            far · no limit set for {focused?.name}, so there&rsquo;s no pace to keep
           </>
         )}
       </p>
-    </Card>
+    </div>
   );
 }
 
-// ── Envelopes ────────────────────────────────────────────────────────────────
+// ── Table ────────────────────────────────────────────────────────────────────
 
-function EnvelopeCard({
+/** A group's display-face title on a strong rule; the first one carries the column labels. */
+function GroupHead({
+  title,
+  count,
+  columns = false,
+  spaced = false,
+  note,
+  id,
+}: {
+  title: string;
+  count?: number;
+  columns?: boolean;
+  spaced?: boolean;
+  note?: string;
+  id?: string;
+}) {
+  return (
+    <div
+      id={id}
+      className={cn(
+        GRID,
+        "items-end border-b border-[var(--line-strong)] pb-2.5 text-xs text-[var(--muted)]",
+        spaced && "pt-8",
+      )}
+    >
+      <h2 className="font-display text-lg tracking-tight text-[var(--paper)]">
+        {title}
+        {count != null && <span className="mono ml-2 text-xs text-[var(--muted)]">{count}</span>}
+      </h2>
+      {columns ? (
+        <>
+          <span>Progress · tick marks today</span>
+          <span className="text-right">Spent</span>
+          <span className="text-right">Budget</span>
+          <span className="text-right">Left</span>
+          <span />
+        </>
+      ) : (
+        note && <span className="col-span-5">{note}</span>
+      )}
+    </div>
+  );
+}
+
+function Row({
   row,
-  index,
   kind = "category",
   focused = false,
   onFocus,
+  elapsed,
+  current,
+  editing,
+  setEditing,
 }: {
   row: EnvelopeRow;
-  index: number;
   kind?: "category" | "tag";
   focused?: boolean;
   onFocus?: () => void;
+  elapsed: number;
+  current: boolean;
+  editing: string | null;
+  setEditing: (key: string | null) => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const key = `${kind}:${row.categoryId}`;
+  const open = editing === key;
   const budget = row.budget ?? 0;
   const limited = budget > 0;
-  const remaining = row.remaining ?? budget - row.spent;
-  const over = limited && row.spent > budget;
-  const rollover = kind === "category" && (row.rollover ?? false);
+  const isFixed = kind === "category" && limited && (row.fixed ?? false);
+  const remaining = budget - row.spent;
+  const over = limited && remaining < -0.005;
+  const status = budgetStatus({ spent: row.spent, budget, fixed: isFixed, elapsed });
+  const pct = limited ? Math.max(0, Math.min(100, (row.spent / budget) * 100)) : 0;
+  const rollover = kind === "category" && limited && (row.rollover ?? false);
+  const carryIn = rollover ? (row.carryIn ?? 0) : 0;
 
-  return (
-    <Card
-      className={`rise flex flex-col p-5 transition-[border-color,box-shadow] duration-200 ${
-        focused ? "border-[var(--brass)] shadow-[var(--elev-3)]" : ""
-      }`}
-      style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}
-    >
-      <div className="flex items-start justify-between gap-3">
-        {onFocus ? (
-          // The identity block is the filter control — one click scopes the pace
-          // chart and opens this envelope's breakdown below.
-          <button
-            onClick={onFocus}
-            aria-pressed={focused}
-            className="group flex min-w-0 cursor-pointer items-center gap-3 text-left"
-          >
-            <Disc row={row} kind={kind} />
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-medium transition-colors duration-200 group-hover:text-[var(--brass)]">
-                {row.name}
-              </span>
-              <span className="mono mt-0.5 block truncate text-xs text-[var(--muted)]">
-                {limited ? `${formatCurrency(row.spent)} of ${formatCurrency(budget)}` : "no limit set"}
-              </span>
-            </span>
-          </button>
-        ) : (
-          <span className="flex min-w-0 items-center gap-3">
-            <Disc row={row} kind={kind} />
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-medium">{row.name}</span>
-              <span className="mono mt-0.5 block truncate text-xs text-[var(--muted)]">
-                {limited ? `${formatCurrency(row.spent)} of ${formatCurrency(budget)}` : "no limit set"}
-              </span>
-            </span>
+  const identity = (
+    <>
+      {kind === "tag" ? (
+        <Tags size={12} aria-hidden className="shrink-0 text-[var(--muted)]" />
+      ) : (
+        <CategoryDot id={row.categoryId} />
+      )}
+      <span className="min-w-0">
+        <span
+          className={cn(
+            "block truncate font-medium transition-colors duration-200",
+            focused ? "text-[var(--brass)]" : onFocus && "group-hover:text-[var(--brass)]",
+          )}
+        >
+          {row.name}
+        </span>
+        {rollover && (
+          <span className="mono block truncate text-[11px] font-normal text-[var(--muted)]">
+            rollover
+            {Math.abs(carryIn) > 0.01 && (
+              <>
+                {" · "}
+                <span className={carryIn < 0 ? "text-[var(--coral)]" : "text-[var(--jade)]"}>
+                  {carryIn >= 0 ? "+" : "−"}
+                  {formatCurrency(Math.abs(carryIn))}
+                </span>{" "}
+                carried in
+              </>
+            )}
+            {row.available != null && (
+              <>
+                {" · "}
+                <span className={row.available < 0 ? "text-[var(--coral)]" : "text-[var(--paper)]"}>
+                  {formatCurrency(row.available)}
+                </span>{" "}
+                available
+              </>
+            )}
           </span>
         )}
+      </span>
+    </>
+  );
 
-        <button
-          onClick={() => setEditing((v) => !v)}
-          aria-label={`Edit the ${row.name} budget`}
-          aria-expanded={editing}
-          title="Edit budget"
-          className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-full text-[var(--faint)] transition-colors duration-200 hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
+  return (
+    <>
+      <div className={cn(GRID, "min-h-14 items-center border-b border-line text-sm")}>
+        {onFocus ? (
+          // The name is the filter control — one click scopes the pace chart to
+          // this category and opens its breakdown under the table.
+          <button
+            type="button"
+            onClick={onFocus}
+            aria-pressed={focused}
+            title={focused ? "Clear focus" : `Chart ${row.name} and list its transactions`}
+            className="group flex min-h-11 min-w-0 cursor-pointer items-center gap-2.5 text-left"
+          >
+            {identity}
+          </button>
+        ) : (
+          <span className="flex min-w-0 items-center gap-2.5">{identity}</span>
+        )}
+
+        {limited ? (
+          <div
+            role="progressbar"
+            aria-valuenow={Math.round((row.spent / budget) * 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${row.name}: ${formatCurrency(row.spent)} of ${formatCurrency(budget)} spent`}
+            className="relative h-1 rounded-full bg-[var(--panel-2)]"
+          >
+            <span
+              className={cn(
+                "absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out",
+                STATUS_FILL[status?.tone ?? "jade"],
+              )}
+              style={{ width: `${Math.max(pct, row.spent > 0 ? 1.5 : 0)}%` }}
+            />
+            {/* Where an even burn would be today. Fixed bills have no pace, and
+                a closed month has no today. */}
+            {!isFixed && current && (
+              <span
+                aria-hidden
+                suppressHydrationWarning
+                className="absolute -top-1 h-3 w-px bg-[var(--paper)]"
+                style={{ left: `${(elapsed * 100).toFixed(1)}%` }}
+              />
+            )}
+          </div>
+        ) : (
+          <span />
+        )}
+
+        <span className="mono text-right">{formatCurrency(row.spent)}</span>
+
+        <span className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setEditing(open ? null : key)}
+            aria-expanded={open}
+            aria-label={
+              limited
+                ? `Edit ${row.name} budget, ${formatCurrency(budget)}`
+                : `Set a budget for ${row.name}`
+            }
+            className={cn(
+              "mono inline-flex min-h-11 cursor-pointer items-center gap-1.5 border-b border-dashed border-[var(--line-strong)] text-right transition-colors duration-200 hover:border-[var(--brass)]",
+              limited ? "text-[var(--paper)]" : "font-sans text-[13px] text-[var(--muted)] hover:text-[var(--paper)]",
+            )}
+          >
+            {isFixed && <Lock size={11} aria-hidden className="text-[var(--brass)]" />}
+            {limited ? formatCurrency(budget) : "Set"}
+          </button>
+        </span>
+
+        <span className={cn("mono text-right", over && "text-[var(--coral)]")}>
+          {limited ? (
+            <>
+              {over ? "−" : ""}
+              {formatCurrency(Math.abs(remaining))}
+            </>
+          ) : (
+            <span className="text-[var(--muted)]">—</span>
+          )}
+        </span>
+
+        <span
+          className={cn("text-right text-xs", STATUS_TEXT[status?.tone ?? "muted"])}
+          suppressHydrationWarning
         >
-          <Pencil size={13} aria-hidden />
-        </button>
+          {status?.label ?? (row.spent > 0.01 ? "No limit" : "")}
+        </span>
       </div>
 
-      {/* With no limit there is nothing left *of*, so the figure that means
-          something is what the category actually spent. */}
-      <p className={`mono mt-4 text-3xl tabular ${over ? "text-[var(--coral)]" : ""}`}>
-        {formatCurrency(Math.abs(limited ? remaining : row.spent))}
-      </p>
-      <p className="mt-1 text-xs text-[var(--muted)]">
-        {!limited ? "spent this month" : over ? "over budget" : "left this month"}
-        {/* "346%" lands faster than "$1,037.73 of $300.00" — the ratio is the
-            thing being judged, and it was only ever available as a division the
-            reader had to do. */}
-        {limited && (
-          <>
-            {" · "}
-            <span className={over ? "text-[var(--coral)]" : ""}>
-              {Math.round((row.spent / budget) * 100)}%
-            </span>
-          </>
-        )}
-        {rollover && row.carryIn != null && Math.abs(row.carryIn) > 0.01 && (
-          <>
-            {" · "}
-            <span className={row.carryIn < 0 ? "text-[var(--coral)]" : "text-[var(--jade)]"}>
-              {row.carryIn >= 0 ? "+" : "−"}
-              {formatCurrency(Math.abs(row.carryIn))}
-            </span>{" "}
-            carried in
-          </>
-        )}
-      </p>
-
-      <Meter
-        spent={row.spent}
-        budget={budget}
-        label={`${row.name}: ${formatCurrency(row.spent)} of ${formatCurrency(budget)} spent`}
-      />
-
-      <div className="mt-auto pt-4">
-        {editing ? (
-          <BudgetForm row={row} kind={kind} onDone={() => setEditing(false)} />
-        ) : kind === "category" ? (
-          <RolloverToggle row={row} />
-        ) : null}
-      </div>
-    </Card>
+      {open && <Editor row={row} kind={kind} onDone={() => setEditing(null)} />}
+    </>
   );
 }
 
-/** Set or clear this envelope's monthly limit. */
-function BudgetForm({
+/**
+ * The edit affordance behind a budget figure: the monthly limit, and — for a
+ * category that has one — whether it is a fixed cost and whether it rolls over.
+ * The two switches save on click; the amount saves with the form.
+ */
+function Editor({
   row,
   kind,
   onDone,
@@ -628,6 +794,7 @@ function BudgetForm({
   const [value, setValue] = useState(row.budget != null ? String(row.budget) : "");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const limited = row.budget != null && row.budget > 0;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -648,55 +815,93 @@ function BudgetForm({
   }
 
   return (
-    <form
-      onSubmit={submit}
-      className="space-y-2.5 rounded-xl border border-line bg-[color-mix(in_srgb,var(--ink)_50%,transparent)] p-3"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <label
-          htmlFor={`budget-${row.categoryId}`}
-          className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]"
-        >
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-line bg-[var(--panel)] px-4 py-3">
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
+        <label htmlFor={`budget-${kind}-${row.categoryId}`} className="text-[13px] text-[var(--muted)]">
           Monthly budget
         </label>
-        <button
-          type="button"
-          onClick={onDone}
-          aria-label={`Cancel editing the ${row.name} budget`}
-          className="grid h-6 w-6 cursor-pointer place-items-center rounded-full text-[var(--faint)] transition-colors duration-200 hover:text-[var(--paper)]"
-        >
-          <X size={13} aria-hidden />
-        </button>
-      </div>
-
-      <div className="flex items-center gap-2">
         <span className="mono text-sm text-[var(--muted)]">$</span>
         <input
-          id={`budget-${row.categoryId}`}
+          id={`budget-${kind}-${row.categoryId}`}
           value={value}
           inputMode="decimal"
           autoFocus
           onChange={(e) => setValue(e.target.value.replace(/[^0-9.]/g, ""))}
+          onKeyDown={(e) => e.key === "Escape" && onDone()}
           placeholder="0"
-          className="mono min-w-0 flex-1 rounded-lg border border-line bg-[var(--ink)] px-2.5 py-2 text-sm tabular outline-none transition-colors duration-200 focus:border-[var(--brass-dim)]"
+          aria-describedby={`budget-hint-${kind}-${row.categoryId}`}
+          className="mono h-11 w-28 rounded-lg border border-line bg-[var(--ink)] px-2.5 text-sm tabular outline-none transition-colors duration-200 focus:border-[var(--brass-dim)]"
         />
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[var(--brass)] px-3.5 py-2 text-xs font-medium text-[var(--on-brass)] transition duration-200 hover:brightness-105 active:scale-[0.97] disabled:cursor-default disabled:opacity-40"
+          className="inline-flex h-11 cursor-pointer items-center gap-1.5 rounded-full bg-[var(--brass)] px-4 text-sm font-medium text-[var(--on-brass)] transition duration-200 hover:brightness-105 active:scale-[0.97] disabled:cursor-default disabled:opacity-40"
         >
-          <Check size={12} aria-hidden /> {pending ? "Saving…" : "Save"}
+          <Check size={13} aria-hidden /> {pending ? "Saving…" : "Save"}
         </button>
-      </div>
+      </form>
 
-      <p className="text-[11px] leading-relaxed text-[var(--faint)]">
+      {kind === "category" && limited && (
+        <div className="flex flex-wrap items-center gap-2">
+          <FixedToggle row={row} />
+          <RolloverToggle row={row} />
+        </div>
+      )}
+
+      <p
+        id={`budget-hint-${kind}-${row.categoryId}`}
+        className="min-w-0 flex-1 text-xs text-[var(--muted)]"
+      >
         {error ? (
           <span className="text-[var(--coral)]">{error}</span>
+        ) : kind === "category" && limited ? (
+          "Fixed is for bills that land in one charge, like rent: read as paid or not, and left out of the pace. Clear the amount to remove the budget."
         ) : (
-          "Clear the field to remove this budget."
+          "Clear the amount to remove this budget."
         )}
       </p>
-    </form>
+
+      <button
+        type="button"
+        onClick={onDone}
+        aria-label={`Close the ${row.name} budget editor`}
+        className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-full text-[var(--muted)] transition-colors duration-200 hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
+      >
+        <X size={14} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+const SWITCH =
+  "inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium transition-colors duration-200 disabled:cursor-default disabled:opacity-40";
+const SWITCH_ON =
+  "border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_12%,transparent)] text-[var(--brass)]";
+const SWITCH_OFF =
+  "border-line text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--paper)]";
+
+/** Fixed cost: judged as paid or not, and left out of the spending pace. */
+function FixedToggle({ row }: { row: EnvelopeRow }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const enabled = row.fixed ?? false;
+
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        start(async () => {
+          await setBudgetFixed(row.categoryId, !enabled);
+          router.refresh();
+        })
+      }
+      aria-pressed={enabled}
+      disabled={pending}
+      className={cn(SWITCH, enabled ? SWITCH_ON : SWITCH_OFF)}
+    >
+      <Lock size={12} aria-hidden />
+      Fixed cost {enabled ? "on" : "off"}
+    </button>
   );
 }
 
@@ -712,119 +917,61 @@ function RolloverToggle({ row }: { row: EnvelopeRow }) {
   if (row.budget == null) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5">
-      <button
-        onClick={() =>
-          start(async () => {
-            await setBudgetRollover(row.categoryId, !enabled);
-            router.refresh();
-          })
-        }
-        aria-pressed={enabled}
-        disabled={pending}
-        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-200 disabled:cursor-default disabled:opacity-40 ${
-          enabled
-            ? "border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_12%,transparent)] text-[var(--brass)]"
-            : "border-line text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--paper)]"
-        }`}
-      >
-        <Repeat size={12} aria-hidden />
-        Rollover {enabled ? "on" : "off"}
-      </button>
-      {enabled && row.available != null && (
-        <span className="mono text-xs text-[var(--muted)]">
-          <span className={row.available < 0 ? "text-[var(--coral)]" : "text-[var(--paper)]"}>
-            {formatCurrency(row.available)}
-          </span>{" "}
-          available
-        </span>
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={() =>
+        start(async () => {
+          await setBudgetRollover(row.categoryId, !enabled);
+          router.refresh();
+        })
+      }
+      aria-pressed={enabled}
+      disabled={pending}
+      className={cn(SWITCH, enabled ? SWITCH_ON : SWITCH_OFF)}
+    >
+      <Repeat size={12} aria-hidden />
+      Rollover {enabled ? "on" : "off"}
+    </button>
   );
 }
 
-/** Categories with no limit, at chip weight — present, but out of the way. */
-function UnbudgetedStrip({
-  rows,
-  focus,
-  onFocus,
-  className = "",
-}: {
-  rows: EnvelopeRow[];
-  focus: string | null;
-  onFocus: (id: string) => void;
-  className?: string;
-}) {
+/** Every budget's rollover switch in one place, with what each has to carry. */
+function RolloverDialog({ rows, onClose }: { rows: EnvelopeRow[]; onClose: () => void }) {
   return (
-    <ul className={`flex flex-wrap gap-2 ${className}`}>
-      {rows.map((r) => {
-        const active = focus === r.categoryId;
-        return (
-          <li key={r.categoryId}>
-            <button
-              onClick={() => onFocus(r.categoryId)}
-              aria-pressed={active}
-              className={`flex cursor-pointer items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3.5 text-xs transition-colors duration-200 ${
-                active
-                  ? "border-[var(--brass)] bg-[var(--panel-2)] text-[var(--paper)]"
-                  : "border-line bg-[var(--panel)] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--paper)]"
-              }`}
+    <Dialog onClose={onClose} label="Rollover settings" size="md">
+      <DialogHeader
+        title="Rollover settings"
+        description="With rollover on, what a category leaves unspent carries into next month, and an overspend eats into it."
+        onClose={onClose}
+      />
+      <DialogBody className="py-2">
+        <ul>
+          {rows.map((row) => (
+            <li
+              key={row.categoryId}
+              className="flex min-h-14 items-center justify-between gap-3 border-b border-line last:border-b-0"
             >
-              <Disc row={r} size="sm" />
-              {r.name}
-              {/* Say which side of the ledger the figure is. A bare "$8.00" on
-                  a chip is equally readable as a budget or as a spend, and
-                  these rows have no budget at all. */}
-              <span className="mono text-[var(--faint)]">
-                {r.spent > 0.01 ? `${formatCurrency(r.spent)} spent` : "no budget"}
+              <span className="flex min-w-0 items-center gap-2.5">
+                <CategoryDot id={row.categoryId} />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{row.name}</span>
+                  {row.rollover && row.available != null && (
+                    <span className="mono block text-[11px] text-[var(--muted)]">
+                      <span
+                        className={row.available < 0 ? "text-[var(--coral)]" : "text-[var(--paper)]"}
+                      >
+                        {formatCurrency(row.available)}
+                      </span>{" "}
+                      available
+                    </span>
+                  )}
+                </span>
               </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/**
- * The focused envelope's breakdown — twelve months of spend and its
- * transactions. Lazily loaded by CategoryDetailPanel, so nothing is fetched
- * until a category is actually selected.
- */
-function FocusDetail({
-  row,
-  categories,
-  onClear,
-}: {
-  row: EnvelopeRow;
-  categories: CategoryRow[];
-  onClear: () => void;
-}) {
-  const budget = row.budget ?? 0;
-  return (
-    <Card className="rise p-0">
-      <CardHeader className="flex-wrap items-center px-5 pt-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <Disc row={row} />
-          <div className="min-w-0">
-            <CardTitle className="truncate text-sm normal-case tracking-normal text-[var(--paper)]">
-              {row.name}
-            </CardTitle>
-            <p className="mono mt-0.5 text-xs text-[var(--muted)]">
-              {formatCurrency(row.spent)} spent
-              {budget > 0 && ` of ${formatCurrency(budget)}`} this month
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={onClear}
-          aria-label={`Close the ${row.name} breakdown`}
-          className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-full text-[var(--faint)] transition-colors duration-200 hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
-        >
-          <X size={14} aria-hidden />
-        </button>
-      </CardHeader>
-      <CategoryDetailPanel categoryId={row.categoryId} categories={categories} group="spending" />
-    </Card>
+              <RolloverToggle row={row} />
+            </li>
+          ))}
+        </ul>
+      </DialogBody>
+    </Dialog>
   );
 }

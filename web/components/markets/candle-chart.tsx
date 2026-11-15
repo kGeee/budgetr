@@ -498,7 +498,7 @@ export function CandleChart({
   if (bars.length === 0) {
     return (
       <div
-        className="flex items-center justify-center rounded-[var(--radius)] border border-dashed border-line text-xs text-[var(--faint)]"
+        className="flex items-center justify-center border-b border-line text-xs text-[var(--muted)]"
         style={{ height }}
       >
         No price history.
@@ -528,16 +528,16 @@ export function CandleChart({
       {readBar && (
         <div className="pointer-events-none absolute left-2 top-1.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 font-mono text-[10px] leading-tight">
           <span className="text-[var(--muted)]">{fmtFullTime(readBar.t, interval)}</span>
-          <span className="text-[var(--faint)]">
+          <span className="text-[var(--muted)]">
             O<span className="ml-0.5 text-[var(--paper)]">{fmtPrice(readBar.open, decimals)}</span>
           </span>
-          <span className="text-[var(--faint)]">
+          <span className="text-[var(--muted)]">
             H<span className="ml-0.5 text-[var(--paper)]">{fmtPrice(readBar.high, decimals)}</span>
           </span>
-          <span className="text-[var(--faint)]">
+          <span className="text-[var(--muted)]">
             L<span className="ml-0.5 text-[var(--paper)]">{fmtPrice(readBar.low, decimals)}</span>
           </span>
-          <span className="text-[var(--faint)]">
+          <span className="text-[var(--muted)]">
             C<span className="ml-0.5 text-[var(--paper)]">{fmtPrice(readBar.close, decimals)}</span>
           </span>
           {chg != null && (
@@ -547,11 +547,11 @@ export function CandleChart({
             </span>
           )}
           {readBar.volume != null && (
-            <span className="text-[var(--faint)]">
+            <span className="text-[var(--muted)]">
               V<span className="ml-0.5 text-[var(--muted)]">{fmtVolume(readBar.volume)}</span>
             </span>
           )}
-          <span className="text-[var(--faint)]">
+          <span className="text-[var(--muted)]">
             Hull{" "}
             <span
               style={{

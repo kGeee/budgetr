@@ -3,12 +3,14 @@
 /**
  * Opinion-driven strategy builder for the per-ticker options desk.
  *
- * You give it a view (direction + price target), a timeframe (the page's selected
- * expiry), and a risk appetite (a preset or explicit budget / max-loss + a
- * defined-risk toggle). It ranks candidate strategies priced off the live chain,
- * shows each one's payoff + safety numbers, and lets you hand-build any custom
- * position with the same analytics. All math lives in `lib/strategy.ts` (pure +
- * tested); this is inputs, wiring, and presentation.
+ * Two columns on the canvas. Left: the legs you are building (by hand, from a
+ * template, or by clicking a bid/ask in the chain above) and the payoff of the
+ * position in focus. Right: that position's safety numbers, then the suggester —
+ * a view (direction + price target), a risk appetite (preset or explicit budget
+ * / max-loss + a defined-risk toggle) and the candidates it ranks off the live
+ * chain. One position is in focus at a time: your own legs once you have any,
+ * or a suggested candidate when you pick one. All math lives in
+ * `lib/strategy.ts` (pure + tested); this is inputs, wiring, and presentation.
  */
 
 import { useMemo, useState } from "react";
@@ -23,12 +25,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ChevronDown, Compass, Plus, Shield, Sparkles, Trash2, Wand2 } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { Plus, X } from "lucide-react";
+import { ChoicePill, DeskHead, DeskNote, FigureRow } from "@/components/options/desk-ui";
+import { Segmented, pill, ruled } from "@/components/portfolio/ruled";
 import { PayoffDiagram } from "@/components/options/payoff-diagram";
 import { PnlMatrix, type MatrixMode } from "@/components/options/pnl-matrix";
 import { formatCurrency } from "@/lib/utils";
-import { daysToExpiry, formatOptionExpiry, formatStrike } from "@/lib/options";
+import { classifyOptionLegs, daysToExpiry, formatOptionExpiry, formatStrike } from "@/lib/options";
 import { computeGreeks } from "@/lib/greeks";
 import { probabilityOfProfit } from "@/lib/option-analytics";
 import {
@@ -53,11 +56,11 @@ import {
 import type { OptionQuote } from "@/lib/yahoo";
 
 
-const BIASES: { key: Bias; label: string; hint: string }[] = [
-  { key: "bullish", label: "Bullish", hint: "up" },
-  { key: "bearish", label: "Bearish", hint: "down" },
-  { key: "neutral", label: "Neutral", hint: "range-bound" },
-  { key: "volatile", label: "Volatile", hint: "big move either way" },
+const BIASES: { value: Bias; label: string }[] = [
+  { value: "bullish", label: "Bullish" },
+  { value: "bearish", label: "Bearish" },
+  { value: "neutral", label: "Neutral" },
+  { value: "volatile", label: "Volatile" },
 ];
 
 type PresetKey = "conservative" | "balanced" | "aggressive";
@@ -67,18 +70,48 @@ const PRESETS: Record<PresetKey, { label: string; budget: number; maxLoss: numbe
   aggressive: { label: "Aggressive", budget: 20000, maxLoss: 20000, definedOnly: false },
 };
 
+/**
+ * One hand-built leg. `contracts` is signed whole CONTRACTS (+ long, − short);
+ * it is multiplied by CONTRACT_SIZE (100 shares) only where the payoff engine
+ * needs a share quantity.
+ */
+export type ManualLeg = { id: number; right: "call" | "put"; strike: number; contracts: number };
+
+type PayoffView = "payoff" | MatrixMode;
+
+/** The one position the payoff and safety columns are describing. */
+type Focus = {
+  title: string;
+  legs: PayoffLeg[];
+  analysis: PayoffAnalysis;
+  pop: number | null;
+  capital: number;
+  netDebit: number;
+};
+
+const legsSig = (legs: ManualLeg[]) =>
+  legs.map((l) => `${l.right}:${l.strike}:${l.contracts}`).join("|");
+
+const fieldCls =
+  "rounded-lg border border-line bg-[var(--panel)] px-2.5 py-1.5 text-sm text-[var(--paper)] outline-none focus:border-[var(--brass-dim)]";
+
 export function StrategyBuilder({
   ticker,
   contracts,
   selectedExpiry,
   spot,
   currency = "USD",
+  legs: controlledLegs,
+  onLegsChange,
 }: {
   ticker: string;
   contracts: OptionQuote[];
   selectedExpiry: string | null;
   spot: number | null;
   currency?: string;
+  /** Hand-built legs, when the parent owns them (the chain adds legs by click). */
+  legs?: ManualLeg[];
+  onLegsChange?: (legs: ManualLeg[]) => void;
 }) {
   const expiryContracts = useMemo(
     () => (selectedExpiry ? contractsForExpiry(contracts, selectedExpiry) : []),
@@ -140,92 +173,325 @@ export function StrategyBuilder({
   }, [ticker, selectedExpiry, expiryContracts, spot, sigma, target, bias, budget, maxLoss, definedOnly]);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const selected =
-    candidates.find((c) => c.key === selectedKey) ?? candidates[0] ?? null;
+  const selected = candidates.find((c) => c.key === selectedKey) ?? candidates[0] ?? null;
+
+  // ── Hand-built legs ────────────────────────────────────────────────────────
+  const [ownLegs, setOwnLegs] = useState<ManualLeg[]>([]);
+  const legs = controlledLegs ?? ownLegs;
+  const setLegs = (next: ManualLeg[]) => (onLegsChange ? onLegsChange(next) : setOwnLegs(next));
+  const nextId = legs.reduce((mx, l) => Math.max(mx, l.id), 0) + 1;
+  const sig = legsSig(legs);
+  // Picking a suggestion puts it in focus until the hand-built legs change again.
+  const [suggestedAtSig, setSuggestedAtSig] = useState<string | null>(null);
+  const [template, setTemplate] = useState<{ key: TemplateKey; sig: string } | null>(null);
+
+  const strikes = useMemo(
+    () => Array.from(new Set(expiryContracts.map((c) => c.strike))).sort((a, b) => a - b),
+    [expiryContracts],
+  );
+  const atmStrike = useMemo(
+    () =>
+      spot == null
+        ? (strikes[0] ?? 0)
+        : strikes.reduce((b, s) => (Math.abs(s - spot) < Math.abs(b - spot) ? s : b), strikes[0] ?? spot),
+    [strikes, spot],
+  );
+
+  function addLeg() {
+    setLegs([...legs, { id: nextId, right: "call", strike: atmStrike, contracts: 1 }]);
+  }
+  // Drop in a named strategy (bull-call, iron condor, …), replacing the legs with
+  // strikes chosen off the live grid relative to spot.
+  function applyTemplate(key: TemplateKey) {
+    if (spot == null) return;
+    const specs = buildTemplate(key, strikes, spot);
+    if (!specs) return;
+    let id = nextId;
+    const next = specs.map((s) => ({ id: id++, right: s.right, strike: s.strike, contracts: s.contracts }));
+    setLegs(next);
+    setTemplate({ key, sig: legsSig(next) });
+  }
+  function update(id: number, patch: Partial<ManualLeg>) {
+    setLegs(legs.map((leg) => (leg.id === id ? { ...leg, ...patch } : leg)));
+  }
+  function remove(id: number) {
+    setLegs(legs.filter((leg) => leg.id !== id));
+  }
+
+  const at = useMemo(() => {
+    const m = new Map<number, { call: OptionQuote | null; put: OptionQuote | null }>();
+    for (const c of expiryContracts) {
+      const e = m.get(c.strike) ?? { call: null, put: null };
+      if (c.right === "call") e.call = c;
+      else e.put = c;
+      m.set(c.strike, e);
+    }
+    return m;
+  }, [expiryContracts]);
+
+  const midFor = (leg: ManualLeg): number | null => {
+    const q = leg.right === "call" ? at.get(leg.strike)?.call : at.get(leg.strike)?.put;
+    return q && spot != null ? midQuote(q, spot, T) : null;
+  };
+
+  const built = useMemo(() => {
+    if (spot == null || sigma == null || !selectedExpiry) return null;
+    const payoffLegs: PayoffLeg[] = [];
+    for (const leg of legs) {
+      const q = leg.right === "call" ? at.get(leg.strike)?.call : at.get(leg.strike)?.put;
+      if (!q || leg.contracts === 0) continue;
+      const mid = midQuote(q, spot, T);
+      if (mid == null) continue;
+      const quantity = leg.contracts * CONTRACT_SIZE;
+      payoffLegs.push({
+        parsed: {
+          occ: `${ticker}${selectedExpiry}${leg.right}${leg.strike}`,
+          underlying: ticker,
+          expiry: selectedExpiry,
+          right: leg.right,
+          strike: leg.strike,
+        },
+        quantity,
+        costBasis: mid * quantity,
+      });
+    }
+    if (!payoffLegs.length) return null;
+    const analysis = analyzePayoff(payoffLegs);
+    const density = marketImpliedDensity(expiryContracts, spot, sigma, T);
+    const pop = probabilityOfProfit(payoffLegs, analysis, spot, sigma, T, density);
+    const capital = analysis.maxLoss ?? Math.abs(analysis.netDebit);
+    return { payoffLegs, analysis, pop, capital };
+  }, [legs, at, spot, sigma, T, ticker, selectedExpiry, expiryContracts]);
 
   const canModel = spot != null && sigma != null && selectedExpiry != null;
 
+  if (!canModel) {
+    return (
+      <section aria-label="Strategy builder" className="space-y-3">
+        <DeskHead
+          title="Build a strategy"
+          sub={selectedExpiry ? `${formatOptionExpiry(selectedExpiry)} · ${dte}d` : undefined}
+        />
+        <DeskNote className="border-t-0 pt-0">
+          Need a live spot price and implied vol on the selected expiry to model strategies. Pick an
+          expiry with quoted options above.
+        </DeskNote>
+      </section>
+    );
+  }
+
+  // What the hand-built legs amount to, in the desk's own vocabulary.
+  const customName = (() => {
+    if (!built) return null;
+    const structures = classifyOptionLegs(built.payoffLegs);
+    return structures.length === 1 ? structures[0].label : "Custom position";
+  })();
+
+  const showCustom = built != null && suggestedAtSig !== sig;
+  const focus: Focus | null = showCustom
+    ? {
+        title: customName ?? "Custom position",
+        legs: built.payoffLegs,
+        analysis: built.analysis,
+        pop: built.pop,
+        capital: built.capital,
+        netDebit: built.analysis.netDebit,
+      }
+    : selected
+      ? {
+          title: selected.name,
+          legs: selected.payoffLegs,
+          analysis: selected.analysis,
+          pop: selected.pop,
+          capital: selected.capital,
+          netDebit: selected.netDebit,
+        }
+      : null;
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 pt-2">
-        <span className="eyebrow inline-flex items-center gap-2">
-          <Wand2 size={13} className="text-[var(--brass)]" />
-          Strategy builder
-        </span>
-        <span className="h-px flex-1 bg-line" />
-        {selectedExpiry && (
-          <span className="text-xs text-[var(--muted)]">
-            {formatOptionExpiry(selectedExpiry)} · {dte}d
-          </span>
+    <section aria-label="Strategy builder" className="grid gap-x-12 gap-y-9 lg:grid-cols-5">
+      <div className="min-w-0 space-y-5 lg:col-span-3">
+        <div>
+          <DeskHead
+            title="Build a strategy"
+            sub={
+              <>
+                {legs.length > 0
+                  ? `${customName ?? "Unpriced"} · ${legs.length} ${legs.length === 1 ? "leg" : "legs"} · `
+                  : ""}
+                {formatOptionExpiry(selectedExpiry!)} · {dte}d
+              </>
+            }
+            action={
+              <button type="button" onClick={addLeg} className={pill}>
+                <Plus size={14} />
+                Add leg
+              </button>
+            }
+          />
+          {legs.length === 0 ? (
+            <p className="border-b border-line py-4 text-sm text-[var(--muted)]">
+              Add legs from the {formatOptionExpiry(selectedExpiry!)} chain — click a bid or ask
+              above, start from a strategy below, or use Add leg — to sketch any position and see
+              its payoff and safety.
+            </p>
+          ) : (
+            legs.map((leg) => {
+              const mid = midFor(leg);
+              const long = leg.contracts >= 0;
+              const n = Math.abs(leg.contracts);
+              return (
+                <div
+                  key={leg.id}
+                  className="mono flex flex-wrap items-center gap-2 border-b border-line py-2 text-[13px]"
+                >
+                  <Segmented
+                    label="Side"
+                    value={long ? "long" : "short"}
+                    onChange={(v) =>
+                      update(leg.id, { contracts: (v === "long" ? 1 : -1) * Math.abs(leg.contracts || 1) })
+                    }
+                    options={[
+                      { value: "long", label: "Long" },
+                      { value: "short", label: "Short" },
+                    ]}
+                  />
+                  <select
+                    aria-label="Type"
+                    value={leg.right}
+                    onChange={(e) => update(leg.id, { right: e.target.value as "call" | "put" })}
+                    className={fieldCls}
+                  >
+                    <option value="call">Call</option>
+                    <option value="put">Put</option>
+                  </select>
+                  <select
+                    aria-label="Strike"
+                    value={leg.strike}
+                    onChange={(e) => update(leg.id, { strike: Number(e.target.value) })}
+                    className={fieldCls}
+                  >
+                    {strikes.map((s) => (
+                      <option key={s} value={s}>
+                        {formatStrike(s)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="px-1 text-[var(--muted)]">{formatOptionExpiry(selectedExpiry!)}</span>
+                  <label className="inline-flex items-center gap-1.5 text-[var(--muted)]">
+                    <input
+                      type="number"
+                      min={1}
+                      aria-label="Contracts"
+                      value={n}
+                      onChange={(e) =>
+                        update(leg.id, {
+                          contracts: Math.sign(leg.contracts || 1) * Math.max(1, Number(e.target.value)),
+                        })
+                      }
+                      className={`${fieldCls} w-16`}
+                    />
+                    {n === 1 ? "contract" : "contracts"}
+                  </label>
+                  <span className="grow text-right text-[var(--muted)]">
+                    {mid != null ? `${mid.toFixed(2)} mid` : "no quote"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => remove(leg.id)}
+                    className="grid h-10 w-10 place-items-center rounded-full text-[var(--muted)] transition-colors hover:text-[var(--coral)]"
+                    aria-label="Remove leg"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* One-click strategy templates — build a structure off the live grid */}
+        <div className="space-y-2">
+          <p className="text-xs text-[var(--muted)]">Start from a strategy</p>
+          <div className="flex flex-wrap gap-1.5">
+            {STRATEGY_TEMPLATES.map((t) => (
+              <ChoicePill
+                key={t.key}
+                mono={false}
+                on={template?.key === t.key && template.sig === sig}
+                disabled={buildTemplate(t.key, strikes, spot!) == null}
+                onClick={() => applyTemplate(t.key)}
+                title={t.note}
+              >
+                {t.label}
+              </ChoicePill>
+            ))}
+          </div>
+        </div>
+
+        {focus ? (
+          <PayoffBlock
+            // Remount per position so the days slider and view start fresh.
+            key={showCustom ? "custom" : `s:${selected?.key}`}
+            focus={focus}
+            expiryContracts={expiryContracts}
+            spot={spot!}
+            sigma={sigma!}
+            T={T}
+            currency={currency}
+          />
+        ) : (
+          <p className="text-sm text-[var(--muted)]">
+            Nothing to chart yet — add a leg or pick a suggestion.
+          </p>
         )}
       </div>
 
-      {!canModel ? (
-        <Card className="p-8 text-center">
-          <p className="text-sm text-[var(--muted)]">
-            Need a live spot price and implied vol on the selected expiry to model strategies. Pick an
-            expiry with quoted options above.
-          </p>
-        </Card>
-      ) : (
-        <>
-          <Card className="space-y-5 p-5 sm:p-6">
-            {/* View */}
-            <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
-              <div>
-                <p className="eyebrow mb-2 inline-flex items-center gap-1.5">
-                  <Compass size={12} className="text-[var(--brass)]" />
-                  Your view
-                </p>
-                <Segmented
-                  value={bias}
-                  onChange={(v) => {
-                    setBias(v as Bias);
-                    setTargetOverride(null);
-                  }}
-                  options={BIASES}
-                />
-              </div>
-              <label className="block">
-                <span className="eyebrow mb-2 block">
-                  {bias === "neutral" ? "Pin price" : bias === "volatile" ? "Center" : "Price target"}
-                </span>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center rounded-lg border border-line bg-[var(--panel)] px-3 py-1.5">
-                    <span className="mono text-sm text-[var(--muted)]">$</span>
-                    <input
-                      type="number"
-                      value={target ?? ""}
-                      onChange={(e) => setTargetOverride(e.target.value === "" ? null : Number(e.target.value))}
-                      className="w-24 bg-transparent px-1 text-sm text-[var(--paper)] outline-none"
-                      step="0.5"
-                    />
-                  </div>
-                  {em != null && spot != null && (
-                    <span className="text-xs text-[var(--muted)]">
-                      ±1σ {formatCurrency(em, currency)} · spot {formatStrike(Number(spot.toFixed(2)))}
-                    </span>
-                  )}
-                </div>
-              </label>
-            </div>
+      <div className="min-w-0 space-y-7 lg:col-span-2">
+        {focus && (
+          <SafetyList
+            focus={focus}
+            expiryContracts={expiryContracts}
+            spot={spot!}
+            sigma={sigma!}
+            T={T}
+            currency={currency}
+          />
+        )}
 
-            {/* Risk appetite */}
-            <div className="flex flex-wrap items-end gap-x-6 gap-y-4 border-t border-line/60 pt-5">
-              <div>
-                <p className="eyebrow mb-2 inline-flex items-center gap-1.5">
-                  <Shield size={12} className="text-[var(--brass)]" />
-                  Risk appetite
-                </p>
-                <Segmented
-                  value={preset}
-                  onChange={(v) => applyPreset(v as PresetKey)}
-                  options={(Object.keys(PRESETS) as PresetKey[]).map((k) => ({ key: k, label: PRESETS[k].label }))}
-                />
-              </div>
-              <NumberField label="Capital budget" value={budget} onChange={setBudget} currency={currency} />
-              <NumberField label="Max loss" value={maxLoss} onChange={setMaxLoss} currency={currency} />
-              <label className="flex cursor-pointer items-center gap-2 pb-1.5 text-sm text-[var(--muted)]">
+        <div>
+          <DeskHead title="Or have one suggested" />
+          <div className="flex flex-col gap-2.5 border-b border-line py-3">
+            <Segmented
+              label="Outlook"
+              className="self-start"
+              value={bias}
+              onChange={(v) => {
+                setBias(v);
+                setTargetOverride(null);
+              }}
+              options={BIASES}
+            />
+            <Segmented
+              label="Risk profile"
+              className="self-start"
+              value={preset}
+              onChange={applyPreset}
+              options={(Object.keys(PRESETS) as PresetKey[]).map((k) => ({ value: k, label: PRESETS[k].label }))}
+            />
+            <div className="flex flex-wrap items-end gap-3">
+              <NumberField
+                label={bias === "neutral" ? "Pin price" : bias === "volatile" ? "Center" : "Price target"}
+                value={target}
+                onChange={setTargetOverride}
+                step={0.5}
+                nullable
+              />
+              <NumberField label="Capital budget" value={budget} onChange={(v) => setBudget(v ?? 0)} currency={currency} />
+              <NumberField label="Max loss" value={maxLoss} onChange={(v) => setMaxLoss(v ?? 0)} currency={currency} />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
+              <label className="flex min-h-9 cursor-pointer items-center gap-2 text-[13px]">
                 <input
                   type="checkbox"
                   checked={definedOnly}
@@ -234,171 +500,136 @@ export function StrategyBuilder({
                 />
                 Defined risk only
               </label>
+              {em != null && (
+                <span className="mono">
+                  ±1σ {formatCurrency(em, currency)} · spot {formatStrike(Number(spot!.toFixed(2)))}
+                </span>
+              )}
             </div>
-          </Card>
+          </div>
 
           {candidates.length === 0 ? (
-            <Card className="p-8 text-center">
-              <p className="text-sm text-[var(--muted)]">
-                No priceable strategies for this view on {formatOptionExpiry(selectedExpiry!)} — the chain may
-                be missing quotes near your target. Try another expiry or widen your budget.
-              </p>
-            </Card>
+            <p className="py-4 text-sm text-[var(--muted)]">
+              No priceable strategies for this view on {formatOptionExpiry(selectedExpiry!)} — the
+              chain may be missing quotes near your target. Try another expiry or widen your budget.
+            </p>
           ) : (
-            <>
-              {/* Ranked suggestions */}
-              <div className="grid gap-3 sm:grid-cols-2">
-                {candidates.map((c) => (
-                  <SuggestionCard
-                    key={c.key}
-                    c={c}
-                    active={selected?.key === c.key}
-                    currency={currency}
-                    spot={spot!}
-                    onSelect={() => setSelectedKey(c.key)}
-                  />
-                ))}
-              </div>
-
-              {/* Safety panel for the chosen strategy */}
-              {selected && (
-                <SafetyPanel
-                  title={`${selected.name} · safety`}
-                  legs={selected.payoffLegs}
-                  analysis={selected.analysis}
-                  pop={selected.pop}
-                  capital={selected.capital}
-                  netDebit={selected.netDebit}
-                  expiryContracts={expiryContracts}
-                  spot={spot!}
-                  sigma={sigma!}
-                  T={T}
-                  currency={currency}
-                />
-              )}
-            </>
+            <div className={ruled.scroll}>
+              <table className="w-full min-w-[420px] text-[13px]">
+                <thead>
+                  <tr className="text-left">
+                    {["Candidate", "Fit", "Max P", "Max L", "POP", "R:R"].map((h, i) => (
+                      <th
+                        key={h}
+                        className={`py-2.5 pr-3 text-xs font-normal text-[var(--muted)] last:pr-0 ${i ? "text-right" : ""}`}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {candidates.map((c) => (
+                    <CandidateRow
+                      key={c.key}
+                      c={c}
+                      active={!showCustom && selected?.key === c.key}
+                      currency={currency}
+                      onSelect={() => {
+                        setSelectedKey(c.key);
+                        setSuggestedAtSig(sig);
+                      }}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-
-          {/* Manual builder */}
-          <ManualBuilder
-            expiryContracts={expiryContracts}
-            spot={spot!}
-            sigma={sigma!}
-            T={T}
-            ticker={ticker}
-            expiry={selectedExpiry!}
-            currency={currency}
-          />
-        </>
-      )}
-    </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
-// ── Suggestion card ──────────────────────────────────────────────────────────
+// ── Suggested candidate row ──────────────────────────────────────────────────
 
-function SuggestionCard({
+function CandidateRow({
   c,
   active,
   currency,
-  spot,
   onSelect,
 }: {
   c: StrategyCandidate;
   active: boolean;
   currency: string;
-  spot: number;
   onSelect: () => void;
 }) {
-  const rr =
-    c.analysis.maxProfitUnbounded
-      ? "∞"
-      : c.analysis.maxProfit != null && c.analysis.maxLoss != null && c.analysis.maxLoss > 0
-        ? `${(c.analysis.maxProfit / c.analysis.maxLoss).toFixed(2)}×`
-        : "—";
+  const rr = c.analysis.maxProfitUnbounded
+    ? "∞"
+    : c.analysis.maxProfit != null && c.analysis.maxLoss != null && c.analysis.maxLoss > 0
+      ? `${(c.analysis.maxProfit / c.analysis.maxLoss).toFixed(2)}×`
+      : "—";
+  const cell = "mono py-2.5 pr-3 text-right align-top last:pr-0";
   return (
-    <button
-      type="button"
+    <tr
       onClick={onSelect}
-      className={`rounded-[var(--radius)] border p-4 text-left transition-colors ${
-        active
-          ? "border-[var(--brass-dim)] bg-[var(--panel-2)]/50"
-          : "border-line bg-[var(--panel)]/40 hover:border-[var(--brass-dim)]"
+      aria-selected={active}
+      className={`cursor-pointer border-t border-line transition-colors ${
+        active ? "bg-[var(--panel)]" : "hover:bg-[var(--panel)]/60"
       }`}
     >
-      <div className="flex items-center gap-2">
-        <span className="font-medium text-[var(--paper)]">{c.name}</span>
-        {!c.withinBudget && (
-          <span className="rounded-full border border-[var(--coral)]/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-[var(--coral)]">
-            over budget
+      <td className="py-2.5 pr-3 align-top">
+        <button type="button" onClick={onSelect} className="text-left">
+          <span className={active ? "text-[var(--brass)]" : "text-[var(--paper)]"}>{c.name}</span>
+          {!c.withinBudget && (
+            <span className="ml-2 rounded-full border border-[var(--coral)]/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--coral)]">
+              over budget
+            </span>
+          )}
+          <span className="mono block text-xs text-[var(--muted)]">{c.summary}</span>
+          <span className="mono block text-xs text-[var(--muted)]">
+            {c.netDebit >= 0 ? "Debit" : "Credit"} {compact(Math.abs(c.netDebit), currency)} · capital{" "}
+            {compact(c.capital, currency)} · EV{" "}
+            <span className={c.ev != null && c.ev >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}>
+              {c.ev != null ? `${c.ev >= 0 ? "+" : "−"}${compact(Math.abs(c.ev), currency)}` : "—"}
+            </span>
           </span>
-        )}
-        <span className="ml-auto inline-flex items-center gap-1.5">
-          <FitBar fit={c.fit} />
-          <span className="mono text-[10px] text-[var(--muted)]">{Math.round(c.fit * 100)}</span>
-        </span>
-      </div>
-      <p className="mono mt-0.5 text-xs text-[var(--muted)]">{c.summary}</p>
-
-      <PayoffDiagram legs={c.payoffLegs} currentPrice={spot} breakevens={c.analysis.breakevens} className="mt-3" />
-
-      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-        <Mini label="Max P" tone="jade">
-          {c.analysis.maxProfitUnbounded ? "∞" : c.analysis.maxProfit != null ? `+${compact(c.analysis.maxProfit, currency)}` : "—"}
-        </Mini>
-        <Mini label="Max L" tone="coral">
-          {c.analysis.maxLossUnbounded ? "∞" : c.analysis.maxLoss != null ? `−${compact(c.analysis.maxLoss, currency)}` : "—"}
-        </Mini>
-        <Mini label="POP">{c.pop != null ? `${Math.round(c.pop * 100)}%` : "—"}</Mini>
-        <Mini label="R:R">{rr}</Mini>
-      </div>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--muted)]">
-        <span>
-          {c.netDebit >= 0 ? "Debit" : "Credit"} {compact(Math.abs(c.netDebit), currency)}
-        </span>
-        <span>
-          Capital {compact(c.capital, currency)} · EV{" "}
-          <span className={c.ev != null && c.ev >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}>
-            {c.ev != null ? `${c.ev >= 0 ? "+" : "−"}${compact(Math.abs(c.ev), currency)}` : "—"}
-          </span>
-        </span>
-      </div>
-    </button>
+        </button>
+      </td>
+      <td className={cell} title="How well this fits your view and risk inputs, 0–100">
+        {Math.round(c.fit * 100)}
+      </td>
+      <td className={`${cell} text-[var(--jade)]`}>
+        {c.analysis.maxProfitUnbounded
+          ? "∞"
+          : c.analysis.maxProfit != null
+            ? compact(c.analysis.maxProfit, currency)
+            : "—"}
+      </td>
+      <td className={`${cell} text-[var(--coral)]`}>
+        {c.analysis.maxLossUnbounded
+          ? "∞"
+          : c.analysis.maxLoss != null
+            ? compact(c.analysis.maxLoss, currency)
+            : "—"}
+      </td>
+      <td className={cell}>{c.pop != null ? `${Math.round(c.pop * 100)}%` : "—"}</td>
+      <td className={cell}>{rr}</td>
+    </tr>
   );
 }
 
-function FitBar({ fit }: { fit: number }) {
-  return (
-    <span className="inline-block h-1.5 w-14 overflow-hidden rounded-full bg-[var(--panel-2)]">
-      <span
-        className="block h-full rounded-full bg-[var(--jade)]"
-        style={{ width: `${Math.round(fit * 100)}%` }}
-      />
-    </span>
-  );
-}
+// ── Payoff: today and at expiry, or the price × date heatmap ────────────────
 
-// ── Safety panel ─────────────────────────────────────────────────────────────
-
-function SafetyPanel({
-  title,
-  legs,
-  analysis,
-  pop,
-  capital,
-  netDebit,
+function PayoffBlock({
+  focus,
   expiryContracts,
   spot,
   sigma,
   T,
   currency,
 }: {
-  title: string;
-  legs: PayoffLeg[];
-  analysis: PayoffAnalysis;
-  pop: number | null;
-  capital: number;
-  netDebit: number;
+  focus: Focus;
   expiryContracts: OptionQuote[];
   spot: number;
   sigma: number;
@@ -406,6 +637,7 @@ function SafetyPanel({
   currency: string;
 }) {
   const ct = useChartTheme();
+  const { legs, analysis, capital } = focus;
   // Score against the market-implied (smile) density recovered from the chain, so
   // multi-strike structures (butterflies/condors) aren't mispriced by a single
   // flat-vol lognormal. Falls back to the lognormal when the chain is too sparse.
@@ -417,17 +649,12 @@ function SafetyPanel({
     () => pnlDistribution(legs, spot, sigma, T, { density }),
     [legs, spot, sigma, T, density],
   );
-  const greeks = useMemo(
-    () => netGreeks(legs, expiryContracts, spot, sigma),
-    [legs, expiryContracts, spot, sigma],
-  );
 
   // ── OptionStrat-style time dimension: value the position before expiry ──
   const dte = Math.max(0, Math.round(T * 365));
   const [daysFromNow, setDaysFromNow] = useState(0);
   const dNow = Math.min(daysFromNow, dte);
-  const [matrixOpen, setMatrixOpen] = useState(false);
-  const [matrixMode, setMatrixMode] = useState<MatrixMode>("pnl");
+  const [view, setView] = useState<PayoffView>("payoff");
 
   // Per-leg implied vol (own IV, ATM fallback) — stable for the memos below.
   const sigmaFor: SigmaFor = useMemo(() => {
@@ -447,6 +674,155 @@ function SafetyPanel({
     () => pnlMatrix(legs, { min: domain.min, max: domain.max, dte, sigmaFor }),
     [legs, domain.min, domain.max, dte, sigmaFor],
   );
+  const hasMatrix = dte > 0 && matrix.maxAbs > 0;
+  const shown: PayoffView = hasMatrix ? view : "payoff";
+
+  return (
+    <div className="space-y-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs text-[var(--muted)]">
+          {shown === "payoff" ? "Payoff · today and at expiry" : "P&L over time · price × date"}
+        </span>
+        <div className="flex flex-wrap items-center gap-3 text-[13px] text-[var(--muted)]">
+          {dte > 0 && shown === "payoff" && (
+            <label className="inline-flex items-center gap-2">
+              Days from now
+              <input
+                type="range"
+                min={0}
+                max={dte}
+                value={dNow}
+                onChange={(e) => setDaysFromNow(Number(e.target.value))}
+                className="w-28 accent-[var(--brass)]"
+              />
+            </label>
+          )}
+          {hasMatrix && (
+            <Segmented
+              label="View"
+              value={shown}
+              onChange={setView}
+              options={[
+                { value: "payoff", label: "Payoff" },
+                { value: "pnl", label: "Heatmap P/L ($)" },
+                { value: "pct", label: "P/L (%)" },
+              ]}
+            />
+          )}
+        </div>
+      </div>
+
+      {shown === "payoff" ? (
+        <>
+          <PayoffDiagram
+            legs={legs}
+            currentPrice={spot}
+            breakevens={analysis.breakevens}
+            theoFn={dte > 0 ? theoFn : null}
+            currency={currency}
+          />
+          {dte > 0 && (
+            <div className="flex items-center justify-between text-xs text-[var(--muted)]">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-4 border-t-2 border-dashed border-[var(--brass)]" />
+                Value {dNow <= 0 ? "now" : dNow >= dte ? "at expiry" : `in ${dNow}d`}
+              </span>
+              <span>solid = expiry</span>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <PnlMatrix
+            matrix={matrix}
+            dte={dte}
+            spot={spot}
+            breakevens={analysis.breakevens}
+            currency={currency}
+            mode={shown}
+            capital={capital}
+          />
+          <div className="flex items-center gap-4 text-xs text-[var(--muted)]">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[color-mix(in_srgb,var(--jade)_55%,transparent)]" />
+              profit
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[color-mix(in_srgb,var(--coral)_55%,transparent)]" />
+              loss
+            </span>
+          </div>
+        </>
+      )}
+
+      <p className="pt-3 text-xs text-[var(--muted)]">P&amp;L distribution at expiry</p>
+      {dist && dist.bins.length ? (
+        <ResponsiveContainer width="100%" height={170}>
+          <BarChart data={dist.bins} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
+            <CartesianGrid stroke={ct.grid} strokeDasharray="2 4" vertical={false} />
+            <XAxis
+              dataKey="pnl"
+              type="number"
+              domain={["dataMin", "dataMax"]}
+              tick={ct.tick}
+              tickFormatter={(v) => compact(v, currency)}
+              tickLine={false}
+              axisLine={{ stroke: ct.grid }}
+            />
+            <YAxis tick={ct.tick} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} tickLine={false} axisLine={false} width={38} />
+            <Tooltip
+              contentStyle={ct.tooltipStyle}
+              labelStyle={ct.labelStyle}
+              itemStyle={{ color: ct.paper }}
+              cursor={{ fill: "color-mix(in srgb, var(--paper) 8%, transparent)" }}
+              formatter={(value) => [`${(Number(value) * 100).toFixed(1)}%`, "Probability"]}
+              labelFormatter={(l) => `P&L ${compact(Number(l), currency)}`}
+            />
+            <ReferenceLine x={0} stroke={ct.gridStrong} />
+            <Bar dataKey="prob" isAnimationActive={false}>
+              {dist.bins.map((b, i) => (
+                <Cell key={i} fill={b.pnl >= 0 ? ct.jade : ct.coral} fillOpacity={0.85} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      ) : (
+        <p className="py-8 text-center text-sm text-[var(--muted)]">Not enough vol to model a distribution.</p>
+      )}
+    </div>
+  );
+}
+
+// ── Safety: the numbers for the position in focus ────────────────────────────
+
+function SafetyList({
+  focus,
+  expiryContracts,
+  spot,
+  sigma,
+  T,
+  currency,
+}: {
+  focus: Focus;
+  expiryContracts: OptionQuote[];
+  spot: number;
+  sigma: number;
+  T: number;
+  currency: string;
+}) {
+  const { legs, analysis, pop, capital, netDebit } = focus;
+  const density = useMemo(
+    () => marketImpliedDensity(expiryContracts, spot, sigma, T),
+    [expiryContracts, spot, sigma, T],
+  );
+  const dist = useMemo(
+    () => pnlDistribution(legs, spot, sigma, T, { density }),
+    [legs, spot, sigma, T, density],
+  );
+  const greeks = useMemo(
+    () => netGreeks(legs, expiryContracts, spot, sigma),
+    [legs, expiryContracts, spot, sigma],
+  );
 
   // Probability of the worst case (finishing at/under the lowest breakeven for a
   // long-debit shape, i.e. the max-loss zone). Derived from the win probability.
@@ -457,361 +833,39 @@ function SafetyPanel({
       : null;
 
   return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow inline-flex items-center gap-2">
-          <Shield size={13} className="text-[var(--brass)]" />
-          {title}
-        </span>
-        <span className="text-xs text-[var(--muted)]">estimates · market-implied (lognormal)</span>
+    <div>
+      <DeskHead title={`${focus.title} · safety`} />
+      <FigureRow label="Probability of profit" tone="jade">
+        {pop != null ? `${(pop * 100).toFixed(0)}%` : "—"}
+      </FigureRow>
+      <FigureRow label="Expected value" tone={dist && dist.ev >= 0 ? "jade" : "coral"}>
+        {dist ? `${dist.ev >= 0 ? "+" : "−"}${formatCurrency(Math.abs(dist.ev), currency)}` : "—"}
+      </FigureRow>
+      <FigureRow label="Chance of losing" tone="coral">
+        {pMaxLoss != null ? `${(pMaxLoss * 100).toFixed(0)}%` : "—"}
+      </FigureRow>
+      <FigureRow label="Max loss">
+        {analysis.maxLossUnbounded
+          ? "Unlimited"
+          : analysis.maxLoss != null
+            ? `−${formatCurrency(analysis.maxLoss, currency)}`
+            : "—"}
+      </FigureRow>
+      <FigureRow label="Capital at risk">{formatCurrency(capital, currency)}</FigureRow>
+      <FigureRow label={netDebit >= 0 ? "Net debit" : "Net credit"}>
+        {formatCurrency(Math.abs(netDebit), currency)}
+      </FigureRow>
+      <FigureRow label="Breakeven cushion">
+        {cushion != null ? `${(cushion * 100).toFixed(1)}% from spot` : "—"}
+      </FigureRow>
+      <div className="mono flex flex-wrap gap-x-4 gap-y-1 py-3 text-[13px]">
+        <GreekStat label="Net Δ" value={greeks.delta} digits={0} />
+        <GreekStat label="Γ" value={greeks.gamma} digits={1} />
+        <GreekStat label="Θ / day" value={greeks.theta} digits={0} money currency={currency} />
+        <GreekStat label="Vega" value={greeks.vega} digits={0} money currency={currency} />
       </div>
-      <div className="grid gap-6 p-6 lg:grid-cols-2">
-        <div>
-          <PayoffDiagram
-            legs={legs}
-            currentPrice={spot}
-            breakevens={analysis.breakevens}
-            theoFn={dte > 0 ? theoFn : null}
-            currency={currency}
-          />
-          {dte > 0 && (
-            <div className="mt-2">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="inline-flex items-center gap-1.5 text-[var(--muted)]">
-                  <span className="inline-block w-4 border-t-2 border-dashed border-[var(--brass)]" />
-                  Value {dNow <= 0 ? "now" : dNow >= dte ? "at expiry" : `in ${dNow}d`}
-                </span>
-                <span className="text-[var(--faint)]">solid = expiry</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={dte}
-                value={dNow}
-                onChange={(e) => setDaysFromNow(Number(e.target.value))}
-                aria-label="Days from now"
-                className="mt-1.5 w-full accent-[var(--brass)]"
-              />
-            </div>
-          )}
-          <p className="mt-3 eyebrow">P&amp;L distribution at expiry</p>
-          {dist && dist.bins.length ? (
-            <ResponsiveContainer width="100%" height={170}>
-              <BarChart data={dist.bins} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
-                <CartesianGrid stroke={ct.grid} strokeDasharray="2 4" vertical={false} />
-                <XAxis
-                  dataKey="pnl"
-                  type="number"
-                  domain={["dataMin", "dataMax"]}
-                  tick={ct.tick}
-                  tickFormatter={(v) => compact(v, currency)}
-                  tickLine={false}
-                  axisLine={{ stroke: ct.grid }}
-                />
-                <YAxis tick={ct.tick} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} tickLine={false} axisLine={false} width={38} />
-                <Tooltip
-                  contentStyle={ct.tooltipStyle}
-                  labelStyle={ct.labelStyle}
-                  itemStyle={{ color: ct.paper }}
-                  cursor={{ fill: "color-mix(in srgb, var(--paper) 8%, transparent)" }}
-                  formatter={(value) => [`${(Number(value) * 100).toFixed(1)}%`, "Probability"]}
-                  labelFormatter={(l) => `P&L ${compact(Number(l), currency)}`}
-                />
-                <ReferenceLine x={0} stroke={ct.gridStrong} />
-                <Bar dataKey="prob" isAnimationActive={false}>
-                  {dist.bins.map((b, i) => (
-                    <Cell key={i} fill={b.pnl >= 0 ? ct.jade : ct.coral} fillOpacity={0.85} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="py-8 text-center text-sm text-[var(--muted)]">Not enough vol to model a distribution.</p>
-          )}
-        </div>
-
-        <div className="space-y-1 text-sm">
-          <SafetyRow label="Probability of profit" tone="jade">
-            {pop != null ? `${(pop * 100).toFixed(0)}%` : "—"}
-          </SafetyRow>
-          <SafetyRow label="Expected value" tone={dist && dist.ev >= 0 ? "jade" : "coral"}>
-            {dist ? `${dist.ev >= 0 ? "+" : "−"}${formatCurrency(Math.abs(dist.ev), currency)}` : "—"}
-          </SafetyRow>
-          <SafetyRow label="Chance of losing" tone="coral">
-            {pMaxLoss != null ? `${(pMaxLoss * 100).toFixed(0)}%` : "—"}
-          </SafetyRow>
-          <SafetyRow label="Max loss">
-            {analysis.maxLossUnbounded ? "Unlimited" : analysis.maxLoss != null ? `−${formatCurrency(analysis.maxLoss, currency)}` : "—"}
-          </SafetyRow>
-          <SafetyRow label="Capital at risk">{formatCurrency(capital, currency)}</SafetyRow>
-          <SafetyRow label={netDebit >= 0 ? "Net debit" : "Net credit"}>
-            {formatCurrency(Math.abs(netDebit), currency)}
-          </SafetyRow>
-          <SafetyRow label="Breakeven cushion">
-            {cushion != null ? `${(cushion * 100).toFixed(1)}% from spot` : "—"}
-          </SafetyRow>
-          <div className="!mt-3 grid grid-cols-4 gap-2 border-t border-line/60 pt-3">
-            <GreekStat label="Net Δ" value={greeks.delta} digits={0} />
-            <GreekStat label="Γ" value={greeks.gamma} digits={1} />
-            <GreekStat label="Θ / day" value={greeks.theta} digits={0} money currency={currency} />
-            <GreekStat label="Vega" value={greeks.vega} digits={0} money currency={currency} />
-          </div>
-        </div>
-      </div>
-
-      {/* P/L heatmap — price × date, the OptionStrat matrix. Tucked behind a
-          toggle so the panel stays compact; a selector switches $ ↔ %. */}
-      {dte > 0 && matrix.maxAbs > 0 && (
-        <div className="border-t border-line px-6 pb-6 pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => setMatrixOpen((o) => !o)}
-              aria-expanded={matrixOpen}
-              className="eyebrow inline-flex items-center gap-2 transition-colors hover:text-[var(--paper)]"
-            >
-              <ChevronDown size={13} className={`transition-transform ${matrixOpen ? "" : "-rotate-90"}`} />
-              P&amp;L over time · price × date
-            </button>
-            {matrixOpen && (
-              <div className="flex items-center gap-3">
-                <span className="hidden items-center gap-3 text-[10px] text-[var(--muted)] sm:inline-flex">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--jade) 55%, transparent)" }} /> profit
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--coral) 55%, transparent)" }} /> loss
-                  </span>
-                </span>
-                <select
-                  value={matrixMode}
-                  onChange={(e) => setMatrixMode(e.target.value as MatrixMode)}
-                  aria-label="Heatmap data"
-                  className="rounded-lg border border-line bg-[var(--panel)] px-2 py-1 text-xs text-[var(--paper)] outline-none focus:border-[var(--brass-dim)]"
-                >
-                  <option value="pnl">P/L ($)</option>
-                  <option value="pct">P/L (%)</option>
-                </select>
-              </div>
-            )}
-          </div>
-          {matrixOpen && (
-            <div className="mt-3">
-              <PnlMatrix
-                matrix={matrix}
-                dte={dte}
-                spot={spot}
-                breakevens={analysis.breakevens}
-                currency={currency}
-                mode={matrixMode}
-                capital={capital}
-              />
-            </div>
-          )}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-// ── Manual builder ───────────────────────────────────────────────────────────
-
-type ManualLeg = { id: number; right: "call" | "put"; strike: number; contracts: number };
-
-function ManualBuilder({
-  expiryContracts,
-  spot,
-  sigma,
-  T,
-  ticker,
-  expiry,
-  currency,
-}: {
-  expiryContracts: OptionQuote[];
-  spot: number;
-  sigma: number;
-  T: number;
-  ticker: string;
-  expiry: string;
-  currency: string;
-}) {
-  const strikes = useMemo(
-    () => Array.from(new Set(expiryContracts.map((c) => c.strike))).sort((a, b) => a - b),
-    [expiryContracts],
-  );
-  const atmStrike = useMemo(
-    () => strikes.reduce((b, s) => (Math.abs(s - spot) < Math.abs(b - spot) ? s : b), strikes[0] ?? spot),
-    [strikes, spot],
-  );
-
-  const [legs, setLegs] = useState<ManualLeg[]>([]);
-  const [nextId, setNextId] = useState(1);
-
-  function addLeg() {
-    setLegs((l) => [...l, { id: nextId, right: "call", strike: atmStrike, contracts: 1 }]);
-    setNextId((n) => n + 1);
-  }
-  // Drop in a named strategy (bull-call, iron condor, …), replacing the legs with
-  // strikes chosen off the live grid relative to spot.
-  function applyTemplate(key: TemplateKey) {
-    const specs = buildTemplate(key, strikes, spot);
-    if (!specs) return;
-    let id = nextId;
-    setLegs(specs.map((s) => ({ id: id++, right: s.right, strike: s.strike, contracts: s.contracts })));
-    setNextId(id);
-  }
-  function update(id: number, patch: Partial<ManualLeg>) {
-    setLegs((l) => l.map((leg) => (leg.id === id ? { ...leg, ...patch } : leg)));
-  }
-  function remove(id: number) {
-    setLegs((l) => l.filter((leg) => leg.id !== id));
-  }
-
-  const at = useMemo(() => {
-    const m = new Map<number, { call: OptionQuote | null; put: OptionQuote | null }>();
-    for (const c of expiryContracts) {
-      const e = m.get(c.strike) ?? { call: null, put: null };
-      if (c.right === "call") e.call = c;
-      else e.put = c;
-      m.set(c.strike, e);
-    }
-    return m;
-  }, [expiryContracts]);
-
-  const built = useMemo(() => {
-    const payoffLegs: PayoffLeg[] = [];
-    for (const leg of legs) {
-      const q = leg.right === "call" ? at.get(leg.strike)?.call : at.get(leg.strike)?.put;
-      if (!q || leg.contracts === 0) continue;
-      const mid = midQuote(q, spot, T);
-      if (mid == null) continue;
-      const quantity = leg.contracts * CONTRACT_SIZE;
-      payoffLegs.push({
-        parsed: { occ: `${ticker}${expiry}${leg.right}${leg.strike}`, underlying: ticker, expiry, right: leg.right, strike: leg.strike },
-        quantity,
-        costBasis: mid * quantity,
-      });
-    }
-    if (!payoffLegs.length) return null;
-    const analysis = analyzePayoff(payoffLegs);
-    const density = marketImpliedDensity(expiryContracts, spot, sigma, T);
-    const pop = probabilityOfProfit(payoffLegs, analysis, spot, sigma, T, density);
-    const capital = analysis.maxLoss ?? Math.abs(analysis.netDebit);
-    return { payoffLegs, analysis, pop, capital };
-  }, [legs, at, spot, sigma, T, ticker, expiry, expiryContracts]);
-
-  return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow inline-flex items-center gap-2">
-          <Sparkles size={13} className="text-[var(--brass)]" />
-          Build your own
-        </span>
-        <button
-          type="button"
-          onClick={addLeg}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-        >
-          <Plus size={13} />
-          Add leg
-        </button>
-      </div>
-
-      {/* One-click strategy templates — build a structure off the live grid */}
-      <div className="border-b border-line px-4 py-3 sm:px-6">
-        <p className="eyebrow mb-2">Start from a strategy</p>
-        <div className="flex flex-wrap gap-1.5">
-          {STRATEGY_TEMPLATES.map((t) => {
-            const buildable = buildTemplate(t.key, strikes, spot) != null;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                disabled={!buildable}
-                onClick={() => applyTemplate(t.key)}
-                title={t.note}
-                className="rounded-full border border-line bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--paper)] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="space-y-2 p-4 sm:p-6">
-        {legs.length === 0 ? (
-          <p className="py-4 text-center text-sm text-[var(--muted)]">
-            Add legs from the {formatOptionExpiry(expiry)} chain to sketch any position and see its payoff + safety.
-          </p>
-        ) : (
-          legs.map((leg) => (
-            <div key={leg.id} className="flex flex-wrap items-center gap-2">
-              <Segmented
-                value={leg.contracts >= 0 ? "long" : "short"}
-                onChange={(v) => update(leg.id, { contracts: (v === "long" ? 1 : -1) * Math.abs(leg.contracts || 1) })}
-                options={[
-                  { key: "long", label: "Long" },
-                  { key: "short", label: "Short" },
-                ]}
-              />
-              <input
-                type="number"
-                min={1}
-                value={Math.abs(leg.contracts)}
-                onChange={(e) =>
-                  update(leg.id, { contracts: Math.sign(leg.contracts || 1) * Math.max(1, Number(e.target.value)) })
-                }
-                className="w-14 rounded-lg border border-line bg-[var(--panel)] px-2 py-1.5 text-sm text-[var(--paper)] outline-none"
-              />
-              <select
-                value={leg.right}
-                onChange={(e) => update(leg.id, { right: e.target.value as "call" | "put" })}
-                className="rounded-lg border border-line bg-[var(--panel)] px-2 py-1.5 text-sm text-[var(--paper)] outline-none"
-              >
-                <option value="call">Call</option>
-                <option value="put">Put</option>
-              </select>
-              <select
-                value={leg.strike}
-                onChange={(e) => update(leg.id, { strike: Number(e.target.value) })}
-                className="rounded-lg border border-line bg-[var(--panel)] px-2 py-1.5 text-sm text-[var(--paper)] outline-none"
-              >
-                {strikes.map((s) => (
-                  <option key={s} value={s}>
-                    {formatStrike(s)}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => remove(leg.id)}
-                className="rounded-lg p-1.5 text-[var(--faint)] transition-colors hover:text-[var(--coral)]"
-                aria-label="Remove leg"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-
-      {built && (
-        <SafetyPanel
-          title="Custom position · safety"
-          legs={built.payoffLegs}
-          analysis={built.analysis}
-          pop={built.pop}
-          capital={built.capital}
-          netDebit={built.analysis.netDebit}
-          expiryContracts={expiryContracts}
-          spot={spot}
-          sigma={sigma}
-          T={T}
-          currency={currency}
-        />
-      )}
-    </Card>
+      <p className="text-xs text-[var(--muted)]">Estimates · market-implied (lognormal).</p>
+    </div>
   );
 }
 
@@ -838,82 +892,47 @@ function netGreeks(legs: PayoffLeg[], expiryContracts: OptionQuote[], spot: numb
   return { delta, gamma, theta, vega };
 }
 
-function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { key: T; label: string; hint?: string }[];
-}) {
-  return (
-    <div className="inline-flex rounded-lg border border-line p-0.5">
-      {options.map((o) => {
-        const active = value === o.key;
-        return (
-          <button
-            key={o.key}
-            type="button"
-            onClick={() => onChange(o.key)}
-            title={o.hint}
-            className={`rounded-md px-3 py-1 text-xs transition-colors ${
-              active ? "bg-[var(--panel-2)] text-[var(--paper)]" : "text-[var(--muted)] hover:text-[var(--paper)]"
-            }`}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function NumberField({
   label,
   value,
   onChange,
-  currency,
+  currency = "USD",
+  step,
+  nullable,
 }: {
   label: string;
-  value: number;
-  onChange: (v: number) => void;
-  currency: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  currency?: string;
+  step?: number;
+  /** An emptied field reports null (re-anchor to the default) instead of 0. */
+  nullable?: boolean;
 }) {
   return (
-    <label className="block">
-      <span className="eyebrow mb-2 block">{label}</span>
-      <div className="flex items-center rounded-lg border border-line bg-[var(--panel)] px-3 py-1.5">
-        <span className="mono text-sm text-[var(--muted)]">{currency === "USD" ? "$" : ""}</span>
+    <label className="flex min-w-[7rem] flex-1 flex-col gap-1 text-xs text-[var(--muted)]">
+      {label}
+      <span className="flex items-center rounded-lg border border-line bg-[var(--panel)] px-3 py-1.5">
+        <span className="mono text-sm">{currency === "USD" ? "$" : ""}</span>
         <input
           type="number"
           min={0}
-          value={value}
-          onChange={(e) => onChange(Math.max(0, Number(e.target.value)))}
-          className="w-24 bg-transparent px-1 text-sm text-[var(--paper)] outline-none"
+          step={step}
+          value={value ?? ""}
+          onChange={(e) =>
+            onChange(
+              e.target.value === ""
+                ? nullable
+                  ? null
+                  : 0
+                : nullable
+                  ? Number(e.target.value)
+                  : Math.max(0, Number(e.target.value)),
+            )
+          }
+          className="mono w-full min-w-0 bg-transparent px-1 text-sm text-[var(--paper)] outline-none"
         />
-      </div>
+      </span>
     </label>
-  );
-}
-
-function Mini({ label, tone, children }: { label: string; tone?: "jade" | "coral"; children: React.ReactNode }) {
-  const color = tone === "jade" ? "text-[var(--jade)]" : tone === "coral" ? "text-[var(--coral)]" : "text-[var(--paper)]";
-  return (
-    <div>
-      <p className="text-[9px] uppercase tracking-wide text-[var(--faint)]">{label}</p>
-      <p className={`mono mt-0.5 text-xs ${color}`}>{children}</p>
-    </div>
-  );
-}
-
-function SafetyRow({ label, tone, children }: { label: string; tone?: "jade" | "coral"; children: React.ReactNode }) {
-  const color = tone === "jade" ? "text-[var(--jade)]" : tone === "coral" ? "text-[var(--coral)]" : "text-[var(--paper)]";
-  return (
-    <div className="flex items-center justify-between border-b border-line/40 py-1.5 last:border-0">
-      <span className="text-[var(--muted)]">{label}</span>
-      <span className={`mono ${color}`}>{children}</span>
-    </div>
   );
 }
 
@@ -931,12 +950,12 @@ function GreekStat({
   currency?: string;
 }) {
   return (
-    <div className="rounded-lg border border-line/60 bg-[var(--panel)]/40 px-2 py-2 text-center">
-      <p className="text-[9px] uppercase tracking-wide text-[var(--faint)]">{label}</p>
-      <p className="mono mt-0.5 text-sm text-[var(--paper)]">
-        {money && currency ? `${value >= 0 ? "" : "−"}${formatCurrency(Math.abs(value), currency)}` : value.toFixed(digits)}
-      </p>
-    </div>
+    <span className="flex-1 whitespace-nowrap">
+      <span className="text-[var(--muted)]">{label} </span>
+      {money && currency
+        ? `${value >= 0 ? "" : "−"}${formatCurrency(Math.abs(value), currency)}`
+        : value.toFixed(digits)}
+    </span>
   );
 }
 

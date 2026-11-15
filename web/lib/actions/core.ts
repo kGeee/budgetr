@@ -701,6 +701,16 @@ export async function setBudgetRollover(categoryId: string, enabled: boolean) {
 }
 
 /**
+ * Mark a category's budget as a fixed cost (rent, a loan payment). Fixed
+ * budgets are read as paid/unpaid and left out of the spending pace. No-op if
+ * the category has no budget row yet, like the rollover toggle.
+ */
+export async function setBudgetFixed(categoryId: string, fixed: boolean) {
+  db.update(budgets).set({ fixed }).where(eq(budgets.categoryId, categoryId)).run();
+  revalidateAll();
+}
+
+/**
  * Seed each rollover-enabled category's carry-in for `month` ('YYYY-MM') from
  * the prior month's leftover (budget + priorCarryIn − priorSpent), so an
  * envelope's balance rolls forward. Idempotent: re-running recomputes and

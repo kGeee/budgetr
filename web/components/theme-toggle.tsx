@@ -53,7 +53,7 @@ export function ThemeSegmented({ initialTheme }: { initialTheme: Theme }) {
   const [theme, setTheme] = useState<Theme>(initialTheme);
 
   return (
-    <div className="inline-flex rounded-lg border border-line p-0.5">
+    <div role="group" aria-label="Theme" className="inline-flex rounded-full border border-line p-[3px]">
       {THEMES.map((t) => {
         const active = t === theme;
         const { label, Icon } = META[t];
@@ -66,7 +66,7 @@ export function ThemeSegmented({ initialTheme }: { initialTheme: Theme }) {
               applyTheme(t);
             }}
             aria-pressed={active}
-            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${
+            className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4 text-sm transition-colors ${
               active
                 ? "bg-[var(--panel-2)] text-[var(--paper)]"
                 : "text-[var(--muted)] hover:text-[var(--paper)]"

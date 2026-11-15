@@ -1,5 +1,4 @@
 import { PageHead } from "@/components/page-head";
-import { InvestmentsTabs } from "@/components/investments-tabs";
 import { requireTradingDesk } from "@/lib/trading-desk";
 import { MarketsView } from "@/components/markets/markets-view";
 import { sourceFor } from "@/lib/markets-prefs";
@@ -43,7 +42,6 @@ export default async function MarketsPage() {
 
   return (
     <div className="space-y-6">
-      <InvestmentsTabs tradingDesk />
       <PageHead
         title="Markets"
         action={

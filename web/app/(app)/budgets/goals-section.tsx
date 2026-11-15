@@ -1,4 +1,4 @@
-import { SavingsGoals } from "@/components/budget/savings-goals";
+import { AddGoalButton, SavingsGoals } from "@/components/budget/savings-goals";
 import { Mark, SectionHead, Stat, StatStrip, Verdict } from "@/components/ui/statement";
 import { goalsVerdict } from "@/lib/progress-verdict";
 import { getSavingsGoals } from "@/lib/queries";
@@ -19,7 +19,12 @@ export function GoalsSection() {
 
   return (
     <section id="goals" aria-labelledby="goals-heading" className="scroll-mt-6 space-y-5">
-      <SectionHead id="goals-heading" title="Goals" count={active.length} />
+      <SectionHead
+        id="goals-heading"
+        title="Goals"
+        count={active.length}
+        action={<AddGoalButton />}
+      />
       {/* Budgets already has the page's one hero figure above, so the goals
           summary is a sentence and a ruled strip rather than a second hero. */}
       <Verdict className={verdict ? undefined : "text-[var(--muted)]"}>
@@ -34,7 +39,7 @@ export function GoalsSection() {
       </Verdict>
       {totalTarget > 0 && (
         <div
-          className="h-2 overflow-hidden rounded-full bg-[var(--panel-2)]"
+          className="h-1 max-w-[520px] overflow-hidden rounded-full bg-[var(--panel-2)]"
           role="img"
           aria-label={`${Math.round(pct)}% of goal targets earmarked`}
         >

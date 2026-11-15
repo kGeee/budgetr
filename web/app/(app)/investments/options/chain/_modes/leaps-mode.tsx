@@ -1,4 +1,4 @@
-import { Card } from "@/components/ui/card";
+import { DeskNote } from "@/components/options/desk-ui";
 import { LeapsView } from "@/components/options/leaps-view";
 import { getCboeOptionChain } from "@/lib/cboe";
 import { getOptionChain } from "@/lib/yahoo";
@@ -52,35 +52,24 @@ export async function LeapsMode({ ticker, margin }: { ticker: string; margin?: s
 
   if (spot == null) {
     return (
-      <Card>
-        <p className="text-sm text-[var(--muted)]">
-          No live price for {ticker}, so there&rsquo;s nothing to compare the calls against.
-          Check the symbol, or try again when the market data provider is reachable.
-        </p>
-      </Card>
+      <DeskNote>
+        No live price for {ticker}, so there&rsquo;s nothing to compare the calls against. Check
+        the symbol, or try again when the market data provider is reachable.
+      </DeskNote>
     );
   }
 
+  // Spot, the LEAPS cutoff and the two benchmark rates used to sit in a line
+  // above the view; the view now prints them beside its expiry pills.
   return (
-    <>
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-[var(--muted)]">
-        <span>
-          <span className="text-[var(--paper)]">{ticker}</span> at{" "}
-          <span className="tabular text-[var(--paper)]">${spot.toFixed(2)}</span>
-        </span>
-        <span>· calls {LEAPS_MIN_DTE}+ days out</span>
-        <span>· cash at {(RISK_FREE_RATE * 100).toFixed(1)}%</span>
-        <span>· margin benchmark {(marginRate * 100).toFixed(1)}%</span>
-      </div>
-
-      <LeapsView
-        ticker={ticker}
-        spot={spot}
-        candidates={candidates}
-        dividendYield={dividendYield}
-        rate={RISK_FREE_RATE}
-        marginRate={marginRate}
-      />
-    </>
+    <LeapsView
+      ticker={ticker}
+      spot={spot}
+      candidates={candidates}
+      dividendYield={dividendYield}
+      rate={RISK_FREE_RATE}
+      marginRate={marginRate}
+      minDte={LEAPS_MIN_DTE}
+    />
   );
 }

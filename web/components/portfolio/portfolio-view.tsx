@@ -4,9 +4,9 @@ import { createContext, Fragment, useContext, useEffect, useId, useMemo, useRef,
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag } from "lucide-react";
-import { Card } from "@/components/ui/card";
 import { Dialog, DialogBody, DialogHeader } from "@/components/ui/dialog";
-import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
+import { Hero, Mark, SectionHead, Stat, StatStrip, Verdict } from "@/components/ui/statement";
+import { Bar, HeroLine, pill, ruled, RuledFooter, Segmented, SideFigure } from "@/components/portfolio/ruled";
 import { PayoffDiagram } from "@/components/options/payoff-diagram";
 import { Sparkline, TickerPriceChart } from "@/components/charts";
 import { ValueHistory } from "@/components/portfolio/value-history";
@@ -33,7 +33,7 @@ import type { InvestmentTxnRow } from "@/lib/queries";
 import type { PricePoint as YahooPricePoint } from "@/lib/yahoo";
 import type { BenchmarkKey, ComparisonRow } from "@/lib/benchmark";
 import { classifyHolding, isCashLike, KIND_LABEL, KIND_ORDER, type HoldingKind } from "@/lib/portfolio/classify";
-import { computeStanding, standingDetail, standingHeadline, WINDOW_LABEL } from "@/lib/portfolio/standing";
+import { computeStanding, standingHeadline, WINDOW_LABEL } from "@/lib/portfolio/standing";
 import {
   effectiveValue,
   liveSymbols,
@@ -731,68 +731,48 @@ function PortfolioInner({
 
   return (
     <div className="space-y-7">
-      <div id="value" className="scroll-mt-28 space-y-4">
-        {/* One figure, one sentence, one rule. The figure is what the book is
-            worth; the sentence is whether it is working — the time-weighted
-            return against the index, in points, because market value alone rises
-            whenever you deposit and cannot answer that. */}
-        <Hero
-          eyebrow={`Market value · ${holdings.length} ${holdings.length === 1 ? "position" : "positions"}`}
-          figure={formatCurrency(total)}
-          verdict={
-            standing.state === "unknown" ? (
-              <span className="text-[var(--muted)]">{standing.reason}</span>
-            ) : (
-              <>
-                <Mark tone={standing.state === "behind" ? "coral" : "jade"}>
-                  {standingHeadline(standing)}.
-                </Mark>{" "}
-                <span className="text-[var(--muted)]">{standingDetail(standing)}</span>
-              </>
-            )
-          }
-        />
-
-        <StatStrip>
-          {standing.state !== "unknown" && (
-            <Stat
-              label={`Return · ${standing.windowLabel.toLowerCase()}`}
-              tone={standing.state === "behind" ? "coral" : "jade"}
-              value={`${standing.returnPct! >= 0 ? "+" : "−"}${Math.abs(standing.returnPct!).toFixed(1)}%`}
-              sub="time-weighted"
-            />
-          )}
-          {/* Never render a computed zero as a measurement. Before quotes land,
-              every holding's day change is null, which summed to a confident
-              "+$0.00 · 0% of value has a live quote" — indistinguishable from a
-              genuinely flat market. Say we're still pricing instead. */}
-          {dayPriced.length === 0 ? (
-            <Stat
-              label="Day change"
-              tone="muted"
-              value="—"
-              sub={`pricing ${holdings.length} positions…`}
-            />
-          ) : (
-            <Stat
-              label="Day change"
-              tone={dayChange >= 0 ? "jade" : "coral"}
-              value={`${signedCurrency(dayChange)} · ${signedPct(dayChangePctTotal)}`}
-              sub={
-                <span
-                  className="cursor-help"
-                  title={
-                    "Day change is computed only from holdings with a live intraday quote " +
-                    "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
-                    "funds, and untracked symbols are excluded, so this share is below 100%."
-                  }
-                >
-                  {Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote
-                </span>
+      <div id="value" className="scroll-mt-28 space-y-6">
+        {/* One line: the figure and what it did today on the left, the figures
+            that qualify it on the right. Whether the book is *working* — the
+            time-weighted return against the index — is the Return figure here
+            and the sentence over the benchmark table below. */}
+        <HeroLine
+          hero={
+            <Hero
+              eyebrow={`Market value · ${holdings.length} ${holdings.length === 1 ? "position" : "positions"}`}
+              figure={formatCurrency(total)}
+              verdict={
+                /* Never render a computed zero as a measurement. Before quotes
+                   land every holding's day change is null, which would sum to a
+                   confident "+$0.00" — indistinguishable from a flat market. */
+                dayPriced.length === 0 ? (
+                  <span className="text-[var(--muted)]">
+                    Pricing {holdings.length} {holdings.length === 1 ? "position" : "positions"}…
+                  </span>
+                ) : (
+                  <>
+                    {dayChange >= 0 ? "Up" : "Down"}{" "}
+                    <Mark tone={dayChange >= 0 ? "jade" : "coral"}>
+                      {formatCurrency(Math.abs(dayChange))}
+                    </Mark>{" "}
+                    today, {Math.abs(dayChangePctTotal).toFixed(2)}%.{" "}
+                    <span
+                      className="cursor-help text-[var(--muted)]"
+                      title={
+                        "Day change is computed only from holdings with a live intraday quote " +
+                        "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
+                        "funds, and untracked symbols are excluded, so this share is below 100%."
+                      }
+                    >
+                      {Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote.
+                    </span>
+                  </>
+                )
               }
             />
-          )}
-          <Stat
+          }
+        >
+          <SideFigure
             label="Unrealized gain"
             tone={gain >= 0 ? "jade" : "coral"}
             value={`${signedCurrency(gain)} · ${signedPct(gainPct)}`}
@@ -806,7 +786,7 @@ function PortfolioInner({
               </button>
             }
           />
-          <Stat
+          <SideFigure
             label="Cost basis"
             value={formatCurrency(totalCost)}
             sub={
@@ -815,22 +795,40 @@ function PortfolioInner({
                 : "All positions costed"
             }
           />
-          <Stat
+          {standing.state === "unknown" ? (
+            <SideFigure label="Return" tone="muted" value="—" sub={standing.reason} />
+          ) : (
+            <SideFigure
+              label={`Return · ${standing.windowLabel.toLowerCase()}`}
+              tone={standing.state === "behind" ? "coral" : "jade"}
+              value={`${standing.returnPct! >= 0 ? "+" : "−"}${Math.abs(standing.returnPct!).toFixed(1)}% time-weighted`}
+              sub={standingHeadline(standing)}
+            />
+          )}
+          <SideFigure
             label="Cash"
             value={formatCurrency(cashValue)}
             sub={cashValue > 0.005 ? "of market value" : "all of it invested"}
           />
-        </StatStrip>
+        </HeroLine>
 
         {/* The no-basis caveat silently qualifies two headline numbers, so it
-            gets said out loud rather than living in tile fine print. */}
+            gets said out loud rather than living in fine print. */}
         {uncostedValue > 0.005 && (
-          <p className="rounded-[var(--radius)] border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_9%,transparent)] px-4 py-2.5 text-xs text-[var(--brass)]">
+          <p className="border-l-2 border-[var(--brass-dim)] pl-3 text-xs text-[var(--brass)]">
             {formatCurrency(uncostedValue)} of value has no cost basis. Unrealized gain and
             yield-on-cost are computed over the remaining {formatCurrency(costedValue)} — not the
             whole portfolio.
           </p>
         )}
+
+        <ValueHistory
+          data={portfolioSeries}
+          portfolioReturnSeries={portfolioReturnSeries}
+          kind="portfolio"
+          benchmarks={benchmarks}
+          caption="Portfolio value, reconstructed from your trades"
+        />
       </div>
 
       {showBreakdown && (
@@ -844,78 +842,54 @@ function PortfolioInner({
         />
       )}
 
-      <section className="space-y-4">
-        <SectionHead
-          title="Portfolio value"
-          action={
-            <span className="text-xs text-[var(--muted)]">reconstructed from your trades</span>
-          }
-        />
-        <ValueHistory
-          data={portfolioSeries}
-          portfolioReturnSeries={portfolioReturnSeries}
-          kind="portfolio"
-          benchmarks={benchmarks}
-        />
-      </section>
-
-      <BenchmarkComparison comparison={comparison} standing={standing} />
-
-      <Card id="holdings" className="scroll-mt-28 overflow-hidden p-0">
-        <div className="border-b border-line px-4 py-4 sm:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-            <div className="flex items-center gap-3">
-              <span className="eyebrow">Holdings</span>
-              <StatusBadge status={status} />
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              {/* The sheet has no column headers to click, so its sort is explicit. */}
-              {view === "sheet" && (
-                <SheetSort sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-              )}
-              <ViewToggle view={view} onChange={setView} />
-              {/* Column controls drive the table only; the sheet ignores them. */}
-              {view === "table" && (
-                <span className="hidden md:inline-flex">
-                  <ColumnsMenu
-                    visible={visibleCols}
-                    onToggle={toggleColumn}
-                    onReset={resetColumns}
-                  />
-                </span>
-              )}
-              <AddManualHoldingButton />
-            </div>
-          </div>
+      <section id="holdings" aria-label="Holdings" className="scroll-mt-28 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
           {/* What the rows themselves can't tell you: the shape of the book. */}
-          {concentration.count > 0 && (
-            <p className="mt-2.5 text-xs text-[var(--muted)]">
-              {concentration.count > 6 ? (
-                <>
-                  Top {concentration.n} of {concentration.count} positions hold{" "}
-                  <span className="mono text-[var(--paper)]">
-                    {concentration.share.toFixed(0)}%
-                  </span>{" "}
-                  of the book.
-                </>
-              ) : (
-                <>
-                  {concentration.count} {concentration.count === 1 ? "position" : "positions"}.
-                </>
-              )}
-              {topMover && (
-                <>
-                  {" "}
-                  <span className="mono text-[var(--paper)]">{topMover.name}</span> moved it most
-                  today,{" "}
-                  <span className={`mono ${signedColor(topMover.change)}`}>
-                    {fmtSigned(topMover.change, topMover.currency)}
-                  </span>
-                  .
-                </>
-              )}
-            </p>
-          )}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
+            <StatusBadge status={status} />
+            {concentration.count > 0 && (
+              <p>
+                {concentration.count > 6 ? (
+                  <>
+                    Top {concentration.n} of {concentration.count} positions hold{" "}
+                    <span className="mono text-[var(--paper)]">
+                      {concentration.share.toFixed(0)}%
+                    </span>{" "}
+                    of the book.
+                  </>
+                ) : (
+                  <>
+                    {concentration.count} {concentration.count === 1 ? "position" : "positions"}.
+                  </>
+                )}
+                {topMover && (
+                  <>
+                    {" "}
+                    <span className="mono text-[var(--paper)]">{topMover.name}</span> moved it most
+                    today,{" "}
+                    <span className={`mono ${signedColor(topMover.change)}`}>
+                      {fmtSigned(topMover.change, topMover.currency)}
+                    </span>
+                    .
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* Value, weight and today sort from the column heads; the sheet's
+                other sorts (P&L, name) have no column, so they stay explicit. */}
+            {view === "sheet" && (
+              <SheetSort sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+            )}
+            <ViewToggle view={view} onChange={setView} />
+            {/* Column controls drive the table only; the sheet ignores them. */}
+            {view === "table" && (
+              <span className="hidden md:inline-flex">
+                <ColumnsMenu visible={visibleCols} onToggle={toggleColumn} onReset={resetColumns} />
+              </span>
+            )}
+          </div>
         </div>
         {view === "sheet" ? (
           <HoldingsSheet
@@ -926,6 +900,13 @@ function PortfolioInner({
             showAll={showAll}
             onShowAll={setShowAll}
             currency={holdings[0]?.currency ?? "USD"}
+            count={items.length}
+            total={total}
+            dayChange={dayPriced.length > 0 ? dayChange : null}
+            dayPct={dayPriced.length > 0 ? dayChangePctTotal : null}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={toggleSort}
             ctx={{
               maxWeight,
               histories,
@@ -944,6 +925,7 @@ function PortfolioInner({
           />
         ) : (
           <>
+          <SectionHead title="Holdings" count={items.length} />
           {/* Mobile: a compact card per position (the wide table can't fit a phone). */}
           <ul className="divide-y divide-line/60 md:hidden">
             {items.map((it) =>
@@ -1030,11 +1012,11 @@ function PortfolioInner({
                       onClick={() => setShowAll(true)}
                       className="flex w-full items-center gap-3 text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
                     >
-                      <ChevronDown size={13} className="text-[var(--faint)]" />
+                      <ChevronDown size={13} className="text-[var(--muted)]" />
                       <span>
                         {groups.tail.length} positions under {TAIL_WEIGHT_PCT}% each
                       </span>
-                      <span className="mono ml-auto text-[var(--faint)]">
+                      <span className="mono ml-auto text-[var(--muted)]">
                         {formatMoney(groups.tailValue, holdings[0]?.currency ?? "USD")} ·{" "}
                         {groups.tailWeight.toFixed(1)}%
                       </span>
@@ -1070,7 +1052,18 @@ function PortfolioInner({
           </div>
           </>
         )}
-      </Card>
+        <RuledFooter
+          className={view === "sheet" ? "border-t-0" : undefined}
+          note={view === "sheet" ? "Weight bars are scaled to the largest holding." : null}
+        >
+          <Link href="/investments/import" className={pill}>
+            Import trades
+          </Link>
+          <AddManualHoldingButton />
+        </RuledFooter>
+      </section>
+
+      <BenchmarkComparison comparison={comparison} standing={standing} />
 
       {/* With the desk off the legs are just holdings — they're already in the
           table above, and there's no desk for a summary to point at. */}
@@ -1124,65 +1117,56 @@ function OptionsSummaryCard({
   const urgent = soonest != null && soonest <= 7;
 
   return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Options</span>
-        <span className="text-xs text-[var(--faint)]">
-          {structures.size} {structures.size === 1 ? "structure" : "structures"} · {legs.length}{" "}
-          {legs.length === 1 ? "leg" : "legs"}
-        </span>
-      </div>
+    <section className="space-y-4">
+      <SectionHead
+        title="Options"
+        action={
+          <span className="text-xs text-[var(--muted)]">
+            {structures.size} {structures.size === 1 ? "structure" : "structures"} · {legs.length}{" "}
+            {legs.length === 1 ? "leg" : "legs"}
+          </span>
+        }
+      />
 
-      <div className="px-6 py-5">
-        {urgent && (
-          <p className="mb-4 font-display text-lg leading-snug">
-            <span className="text-[var(--coral)]">
-              {expiringSoon} {expiringSoon === 1 ? "leg expires" : "legs expire"} in{" "}
-              {soonest === 0 ? "under a day" : `${soonest} ${soonest === 1 ? "day" : "days"}`}.
-            </span>{" "}
-            <span className="text-[var(--muted)]">Check them before the close.</span>
-          </p>
-        )}
+      {urgent && (
+        <Verdict>
+          <span className="text-[var(--coral)]">
+            {expiringSoon} {expiringSoon === 1 ? "leg expires" : "legs expire"} in{" "}
+            {soonest === 0 ? "under a day" : `${soonest} ${soonest === 1 ? "day" : "days"}`}.
+          </span>{" "}
+          <span className="text-[var(--muted)]">Check them before the close.</span>
+        </Verdict>
+      )}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div>
-            <p className="eyebrow">Net value</p>
-            <p className="mono mt-1.5 text-lg">{formatMoney(value, currency)}</p>
-            {value < 0 && <p className="mt-0.5 text-xs text-[var(--coral)]">net short — a liability</p>}
-          </div>
-          <div>
-            <p className="eyebrow">Open P&amp;L</p>
-            <p
-              className={`mono mt-1.5 text-lg ${
-                pnl == null
-                  ? "text-[var(--faint)]"
-                  : pnl >= 0
-                    ? "text-[var(--jade)]"
-                    : "text-[var(--coral)]"
-              }`}
-            >
-              {pnl == null
-                ? "—"
-                : `${pnl >= 0 ? "+" : "−"}${formatMoney(Math.abs(pnl), currency)}`}
-            </p>
-          </div>
-          <div>
-            <p className="eyebrow">Next expiry</p>
-            <p className={`mono mt-1.5 text-lg ${urgent ? "text-[var(--coral)]" : ""}`}>
-              {soonest == null ? "—" : soonest < 0 ? "expired" : `${soonest}d`}
-            </p>
-          </div>
-        </div>
+      <StatStrip className="border-t-0 pt-0">
+        <Stat
+          label="Net value"
+          value={formatMoney(value, currency)}
+          sub={
+            value < 0 ? (
+              <span className="text-[var(--coral)]">net short — a liability</span>
+            ) : undefined
+          }
+        />
+        <Stat
+          label="Open P&L"
+          tone={pnl == null ? "muted" : pnl >= 0 ? "jade" : "coral"}
+          value={
+            pnl == null ? "—" : `${pnl >= 0 ? "+" : "−"}${formatMoney(Math.abs(pnl), currency)}`
+          }
+        />
+        <Stat
+          label="Next expiry"
+          tone={urgent ? "coral" : "default"}
+          value={soonest == null ? "—" : soonest < 0 ? "expired" : `${soonest}d`}
+        />
+      </StatStrip>
 
-        <Link
-          href="/investments/options"
-          className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-xs text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-        >
-          Open the options desk
-          <ArrowUpRight size={12} />
-        </Link>
-      </div>
-    </Card>
+      <Link href="/investments/options" className={pill}>
+        Open the options desk
+        <ArrowUpRight size={14} />
+      </Link>
+    </section>
   );
 }
 
@@ -1216,7 +1200,7 @@ function GroupHeaderRow({
       <td colSpan={span} className="px-3 py-2">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="eyebrow">{section.label}</span>
-          <span className="text-[11px] text-[var(--faint)]">
+          <span className="text-[11px] text-[var(--muted)]">
             {n} {section.kind === "option" ? (n === 1 ? "structure" : "structures") : n === 1 ? "position" : "positions"}
           </span>
           <span className="mono ml-auto text-xs text-[var(--muted)]">
@@ -1231,7 +1215,7 @@ function GroupHeaderRow({
             {/* Cash is in the total but it isn't a bet — say so once, here,
                 rather than letting it pad the "invested" figure silently. */}
             {section.kind === "cash" && (
-              <span className="text-[var(--faint)]"> · not invested</span>
+              <span className="text-[var(--muted)]"> · not invested</span>
             )}
           </span>
         </div>
@@ -1275,7 +1259,7 @@ function HoldingRowView({
               onClick={() => setExpanded((v) => !v)}
               aria-expanded={expanded}
               aria-label={expanded ? `Collapse ${h.ticker}` : `Expand ${h.ticker}`}
-              className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
+              className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] transition hover:text-[var(--paper)]"
             >
               <ChevronDown
                 size={14}
@@ -1297,7 +1281,7 @@ function HoldingRowView({
               {/* Quiet row actions — revealed on hover so 45 rows don't shout. */}
               <HoldingDeskLinks h={h} />
               {h.manual && (
-                <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+                <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
                   {h.securityType ?? "manual"}
                 </span>
               )}
@@ -1369,7 +1353,7 @@ function DeskLinks({
           key={l.label}
           href={l.href}
           title={l.title}
-          className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
+          className="inline-flex items-center gap-0.5 text-[11px] text-[var(--muted)] transition-colors hover:text-[var(--brass)]"
         >
           {l.label}
           <ArrowUpRight size={10} />
@@ -1456,7 +1440,7 @@ function OptionsChip({ ticker }: { ticker: string }) {
 }
 
 const signedColor = (n: number | null) =>
-  n == null ? "text-[var(--faint)]" : n >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]";
+  n == null ? "text-[var(--muted)]" : n >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]";
 const fmtPct = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
 const fmtSigned = (n: number | null, currency: string) =>
   n == null ? "—" : `${n >= 0 ? "+" : "−"}${formatMoney(Math.abs(n), currency)}`;
@@ -1680,7 +1664,7 @@ function OptionGroupRow({
         onClick={() => setExpanded((v) => !v)}
       >
         <td className="w-8 pl-2">
-          <span className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition group-hover:text-[var(--paper)]">
+          <span className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] transition group-hover:text-[var(--paper)]">
             <ChevronDown size={14} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
           </span>
         </td>
@@ -1712,7 +1696,7 @@ function OptionGroupRow({
                     ? "bg-[var(--coral)]/15 text-[var(--coral)]"
                     : groupRisk === "medium"
                       ? "bg-[var(--brass)]/15 text-[var(--brass)]"
-                      : "text-[var(--faint)]"
+                      : "text-[var(--muted)]"
                 }`}
                 title={`${soonestDte} days to soonest expiry`}
               >
@@ -1896,69 +1880,74 @@ function bandWidth(weight: number, maxWeight: number): number {
   return Math.max(1.5, Math.min(100, (Math.abs(weight) / maxWeight) * 100));
 }
 
-/** One position: a proportional band, an identity, today, and what it's worth. */
+/**
+ * The sheet's column template. Phones get identity + value; from md up it is the
+ * full ruled table — identity, weight bar, weight, value, today $, today %.
+ */
+const SHEET_GRID =
+  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-3 md:grid-cols-[1.25rem_minmax(220px,1.5fr)_minmax(110px,1.3fr)_3.25rem_8.5rem_7rem_4.75rem] md:gap-x-5";
+
+/** One position: identity, a bar scaled to the largest holding, worth, and today. */
 function SheetRow({
   bar,
+  weight,
   expanded,
   onToggle,
   toggleLabel,
   identity,
   meta,
-  day,
-  value,
+  m,
   panel,
 }: {
   bar: number;
+  weight: number;
   expanded: boolean;
   onToggle?: () => void;
   toggleLabel: string;
   identity: React.ReactNode;
   meta: React.ReactNode;
-  day: React.ReactNode;
-  value: React.ReactNode;
+  m: RowMetrics;
   panel?: React.ReactNode;
 }) {
   return (
-    <li className="border-b border-line/60 last:border-0">
-      {/* The band measures the row, not the row plus whatever it expands into,
-          so it lives on its own wrapper rather than the list item. */}
-      <div className="group relative transition-colors hover:bg-[var(--panel-2)]/40">
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-y-0 left-0"
-          style={{
-            width: `${bar}%`,
-            background:
-              "linear-gradient(90deg, color-mix(in srgb, var(--brass) 15%, transparent) 0%, color-mix(in srgb, var(--brass) 5%, transparent) 62%, transparent 100%)",
-          }}
-        />
-        <div className="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-3 sm:grid-cols-[1.25rem_minmax(0,1fr)_6rem_9.5rem] sm:gap-x-5 sm:px-4">
-          <div>
-            {onToggle && (
-              <button
-                onClick={onToggle}
-                aria-expanded={expanded}
-                aria-label={toggleLabel}
-                className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
-              >
-                <ChevronDown
-                  size={14}
-                  className={`transition-transform ${expanded ? "rotate-180" : ""}`}
-                />
-              </button>
-            )}
-          </div>
-
-          <div className="flex min-w-0 flex-col gap-1">
-            {identity}
-            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-[var(--faint)]">
-              {meta}
-            </div>
-          </div>
-
-          <div className="hidden text-right sm:block">{day}</div>
-          <div className="text-right">{value}</div>
+    <li className="border-b border-line">
+      <div className={`group min-h-[58px] py-2.5 ${SHEET_GRID}`}>
+        <div>
+          {onToggle && (
+            <button
+              onClick={onToggle}
+              aria-expanded={expanded}
+              aria-label={toggleLabel}
+              className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] transition hover:text-[var(--paper)]"
+            >
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+              />
+            </button>
+          )}
         </div>
+
+        <div className="flex min-w-0 flex-col gap-1">
+          {identity}
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-[var(--muted)]">
+            {meta}
+          </div>
+        </div>
+
+        <Bar pct={bar} className="hidden md:block" />
+        <span className="mono hidden text-xs text-[var(--muted)] md:block">
+          {weight.toFixed(1)}%
+        </span>
+        <div className="text-right">
+          <SheetValue m={m} />
+        </div>
+        <span className={`mono hidden text-right md:block ${signedColor(m.dayValue)}`}>
+          {fmtSigned(m.dayValue, m.currency)}
+        </span>
+        <span className={`mono hidden text-right md:block ${signedColor(m.day)}`}>
+          {fmtPct(m.day)}
+        </span>
       </div>
 
       {expanded && panel}
@@ -1966,28 +1955,11 @@ function SheetRow({
   );
 }
 
-/** Today's move for one row — the sheet's only coloured figures, besides P&L. */
-function SheetDay({ m }: { m: RowMetrics }) {
-  if (m.day == null && m.dayValue == null) {
-    return <span className="mono text-[13px] text-[var(--faint)]">—</span>;
-  }
-  return (
-    <>
-      <p className={`mono text-[13px] ${signedColor(m.day)}`}>{fmtPct(m.day)}</p>
-      {m.dayValue != null && (
-        <p className={`mono text-[11px] opacity-75 ${signedColor(m.dayValue)}`}>
-          {fmtSigned(m.dayValue, m.currency)}
-        </p>
-      )}
-    </>
-  );
-}
-
 /** What a position is worth, and what it has made — the row's terminal figure. */
 function SheetValue({ m }: { m: RowMetrics }) {
   return (
     <>
-      <p className="mono text-[15px] tabular text-[var(--paper)]">
+      <p className="mono tabular text-[var(--paper)]">
         {formatMoney(m.value, m.currency)}
       </p>
       {m.pnl != null ? (
@@ -2000,7 +1972,7 @@ function SheetValue({ m }: { m: RowMetrics }) {
           )}
         </p>
       ) : (
-        <p className="text-[11px] text-[var(--faint)]">no cost basis</p>
+        <p className="text-[11px] text-[var(--muted)]">no cost basis</p>
       )}
     </>
   );
@@ -2010,7 +1982,7 @@ function SheetValue({ m }: { m: RowMetrics }) {
 function SheetDayInline({ m }: { m: RowMetrics }) {
   if (m.day == null) return null;
   return (
-    <span className={`mono sm:hidden ${signedColor(m.day)}`}>{fmtPct(m.day)} today</span>
+    <span className={`mono md:hidden ${signedColor(m.day)}`}>{fmtPct(m.day)} today</span>
   );
 }
 
@@ -2032,12 +2004,14 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
   return (
     <SheetRow
       bar={bandWidth(m.weight, ctx.maxWeight)}
+      weight={m.weight}
+      m={m}
       expanded={expanded}
       onToggle={canExpand ? () => setExpanded((v) => !v) : undefined}
       toggleLabel={expanded ? `Collapse ${h.ticker}` : `Expand ${h.ticker}`}
       identity={
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="mono shrink-0 text-[15px] font-semibold tracking-tight text-[var(--brass)]">
+          <span className="mono min-w-12 shrink-0 font-medium text-[var(--paper)]">
             {h.ticker ?? "—"}
           </span>
           <span
@@ -2047,7 +2021,7 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
             {cleanSecurityName(h.securityName)}
           </span>
           {h.manual && (
-            <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+            <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
               {h.securityType ?? "manual"}
             </span>
           )}
@@ -2061,7 +2035,7 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
       }
       meta={
         <>
-          <span className="mono text-[var(--brass-dim)]">{m.weight.toFixed(1)}%</span>
+          <span className="mono md:hidden">{m.weight.toFixed(1)}%</span>
           {m.qty != null && (
             <span className="mono">
               {m.qty.toLocaleString()}
@@ -2078,8 +2052,6 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
           />
         </>
       }
-      day={<SheetDay m={m} />}
-      value={<SheetValue m={m} />}
       panel={
         canExpand && (
           <div className="relative border-t border-line/60 bg-[var(--panel-2)]/40 px-4 py-5 sm:px-6">
@@ -2145,12 +2117,14 @@ function SheetOptionRow({
   return (
     <SheetRow
       bar={bandWidth(m.weight, ctx.maxWeight)}
+      weight={m.weight}
+      m={m}
       expanded={expanded}
       onToggle={() => setExpanded((v) => !v)}
       toggleLabel={expanded ? `Collapse ${underlying} options` : `Expand ${underlying} options`}
       identity={
         <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-          <span className="mono shrink-0 text-[15px] font-semibold tracking-tight text-[var(--brass)]">
+          <span className="mono min-w-12 shrink-0 font-medium text-[var(--paper)]">
             {underlying}
           </span>
           <span className="truncate text-[13px] text-[var(--muted)]">{summary}</span>
@@ -2180,7 +2154,7 @@ function SheetOptionRow({
       }
       meta={
         <>
-          <span className="mono text-[var(--brass-dim)]">{m.weight.toFixed(1)}%</span>
+          <span className="mono md:hidden">{m.weight.toFixed(1)}%</span>
           {Number.isFinite(soonestDte) && (
             <span
               className={`mono ${
@@ -2201,8 +2175,6 @@ function SheetOptionRow({
           {m.account && <span className="truncate">{m.account}</span>}
         </>
       }
-      day={<SheetDay m={m} />}
-      value={<SheetValue m={m} />}
       panel={
         <div className="relative border-t border-line/60 bg-[var(--panel-2)]/40 px-4 py-5 sm:px-6">
           <OptionStructuresPanel legs={legs} quotes={ctx.quotes} currency={m.currency} />
@@ -2232,9 +2204,9 @@ function SheetSection({
   const n = section.rows.length;
   return (
     <section>
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-line/60 bg-[var(--panel-2)]/50 px-4 py-2.5">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-line pb-2 pt-5">
         <span className="eyebrow">{section.label}</span>
-        <span className="text-[11px] text-[var(--faint)]">
+        <span className="text-[11px] text-[var(--muted)]">
           {n}{" "}
           {section.kind === "option"
             ? n === 1
@@ -2255,7 +2227,7 @@ function SheetSection({
           )}
           {/* Cash is in the total but it isn't a bet — say so once, here,
               rather than letting it pad the "invested" figure silently. */}
-          {section.kind === "cash" && <span className="text-[var(--faint)]"> · not invested</span>}
+          {section.kind === "cash" && <span className="text-[var(--muted)]"> · not invested</span>}
         </span>
       </div>
       <ul>
@@ -2286,22 +2258,15 @@ function ViewToggle({
   onChange: (v: HoldingsView) => void;
 }) {
   return (
-    <div className="flex items-center rounded-lg border border-line p-0.5 text-xs">
-      {(["sheet", "table"] as const).map((v) => (
-        <button
-          key={v}
-          onClick={() => onChange(v)}
-          aria-pressed={view === v}
-          className={`rounded-md px-2.5 py-1 transition ${
-            view === v
-              ? "bg-[var(--panel-2)] text-[var(--paper)]"
-              : "text-[var(--faint)] hover:text-[var(--muted)]"
-          }`}
-        >
-          {v === "sheet" ? "Sheet" : "Table"}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      label="Holdings view"
+      value={view}
+      onChange={onChange}
+      options={[
+        { value: "sheet", label: "Sheet" },
+        { value: "table", label: "Table" },
+      ]}
+    />
   );
 }
 
@@ -2340,7 +2305,7 @@ function SheetSort({
         onClick={() => onSort(sortKey)}
         aria-label={sortDir === "desc" ? "Sort ascending" : "Sort descending"}
         title={sortDir === "desc" ? "Largest first" : "Smallest first"}
-        className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
+        className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] transition hover:text-[var(--paper)]"
       >
         <ChevronDown size={13} className={sortDir === "asc" ? "rotate-180" : ""} />
       </button>
@@ -2361,6 +2326,13 @@ function HoldingsSheet({
   showAll,
   onShowAll,
   currency,
+  count,
+  total,
+  dayChange,
+  dayPct,
+  sortKey,
+  sortDir,
+  onSort,
   ctx,
   empty,
 }: {
@@ -2378,43 +2350,100 @@ function HoldingsSheet({
   showAll: boolean;
   onShowAll: (v: boolean) => void;
   currency: string;
+  /** Rows in the book (option legs count once per underlying). */
+  count: number;
+  total: number;
+  /** Null until at least one position has a live quote. */
+  dayChange: number | null;
+  dayPct: number | null;
+  sortKey: SortKey;
+  sortDir: "desc" | "asc";
+  onSort: (key: SortKey) => void;
   ctx: SheetCtx;
   empty: string | null;
 }) {
-  if (empty) {
-    return <p className="px-6 py-10 text-center text-sm text-[var(--muted)]">{empty}</p>;
-  }
-  return (
-    <div>
-      {sections.map((section) => (
-        <SheetSection key={section.kind} section={section} currency={currency} ctx={ctx} />
-      ))}
+  const head = (key: SortKey, label: string, cls: string) => (
+    <button
+      type="button"
+      onClick={() => onSort(key)}
+      aria-label={`Sort by ${label === "%" ? "today's percent change" : label.toLowerCase()}`}
+      className={`${cls} transition-colors hover:text-[var(--paper)] ${
+        sortKey === key ? "text-[var(--paper)]" : ""
+      }`}
+    >
+      {label}
+      {sortKey === key && <span aria-hidden> {sortDir === "desc" ? "↓" : "↑"}</span>}
+    </button>
+  );
 
-      {/* The long tail, folded. The money is counted in the line — only the
-          rows are hidden, and one click brings them back. */}
-      {tail.length > 0 && (
-        <button
-          onClick={() => onShowAll(true)}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left text-xs text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)]/40 hover:text-[var(--paper)]"
+  return (
+    <div className="overflow-x-auto">
+      <div className="md:min-w-[780px]">
+        <div
+          className={`${SHEET_GRID} !items-end border-b border-[var(--line-strong)] pb-2.5 text-xs text-[var(--muted)]`}
         >
-          <ChevronDown size={13} className="text-[var(--faint)]" />
-          <span>
-            {tail.length} positions under {TAIL_WEIGHT_PCT}% each
-          </span>
-          <span className="mono ml-auto text-[var(--faint)]">
-            {formatMoney(tailValue, currency)} · {tailWeight.toFixed(1)}%
-          </span>
-          <span className="text-[var(--brass)]">Show</span>
-        </button>
-      )}
-      {showAll && (
-        <button
-          onClick={() => onShowAll(false)}
-          className="w-full px-4 py-3 text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
-        >
-          Fold small positions again
-        </button>
-      )}
+          <h2 className="col-span-2 font-display text-lg tracking-tight text-[var(--paper)]">
+            Holdings
+            <span className="mono ml-2 text-xs font-normal text-[var(--muted)]">{count}</span>
+          </h2>
+          {head("weight", "Weight", "hidden text-left md:block")}
+          <span className="hidden md:block" />
+          {head("value", "Value", "text-right")}
+          {head("dayValue", "Today", "hidden text-right md:block")}
+          {head("day", "%", "hidden text-right md:block")}
+        </div>
+
+        {empty ? (
+          <p className="border-b border-line py-10 text-center text-sm text-[var(--muted)]">
+            {empty}
+          </p>
+        ) : (
+          <>
+            {sections.map((section) => (
+              <SheetSection key={section.kind} section={section} currency={currency} ctx={ctx} />
+            ))}
+
+            {/* The long tail, folded. The money is counted in the line — only the
+                rows are hidden, and one click brings them back. */}
+            {tail.length > 0 && (
+              <button
+                onClick={() => onShowAll(true)}
+                className="flex min-h-[52px] w-full items-center gap-3 border-b border-line text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+              >
+                <ChevronDown size={13} />
+                <span>
+                  {tail.length} positions under {TAIL_WEIGHT_PCT}% each
+                </span>
+                <span className="mono ml-auto">
+                  {formatMoney(tailValue, currency)} · {tailWeight.toFixed(1)}%
+                </span>
+                <span className="text-[var(--brass)]">Show</span>
+              </button>
+            )}
+            {showAll && (
+              <button
+                onClick={() => onShowAll(false)}
+                className="min-h-11 w-full border-b border-line text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+              >
+                Fold small positions again
+              </button>
+            )}
+
+            <div className={`${SHEET_GRID} mono min-h-14`}>
+              <span className="col-span-2 font-sans text-[var(--muted)]">Total</span>
+              <span className="hidden md:block" />
+              <span className="hidden md:block" />
+              <span className="text-right">{formatMoney(total, currency)}</span>
+              <span className={`hidden text-right md:block ${signedColor(dayChange)}`}>
+                {fmtSigned(dayChange, currency)}
+              </span>
+              <span className={`hidden text-right md:block ${signedColor(dayPct)}`}>
+                {fmtPct(dayPct)}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -2525,12 +2554,12 @@ function GainBreakdownModal({
                   <td className="mono px-5 py-2.5 text-right text-[var(--muted)]">
                     {cost != null ? formatMoney(cost, h.currency) : "—"}
                   </td>
-                  <td className={`mono px-5 py-2.5 text-right ${pnl != null ? color : "text-[var(--faint)]"}`}>
+                  <td className={`mono px-5 py-2.5 text-right ${pnl != null ? color : "text-[var(--muted)]"}`}>
                     {pnl != null
                       ? `${pos ? "+" : "−"}${formatMoney(Math.abs(pnl), h.currency)}`
                       : "—"}
                   </td>
-                  <td className={`mono px-5 py-2.5 text-right ${pct != null ? color : "text-[var(--faint)]"}`}>
+                  <td className={`mono px-5 py-2.5 text-right ${pct != null ? color : "text-[var(--muted)]"}`}>
                     {pct != null ? `${pos ? "+" : "−"}${Math.abs(pct).toFixed(1)}%` : "—"}
                   </td>
                 </tr>
@@ -2654,7 +2683,7 @@ function SectorEditor({
         setVal("");
         setOpen(true);
       }}
-      className="inline-flex w-fit items-center gap-1 rounded-full border border-dashed border-line px-2 py-0.5 text-[11px] text-[var(--faint)] transition hover:text-[var(--muted)]"
+      className="inline-flex w-fit items-center gap-1 rounded-full border border-dashed border-line px-2 py-0.5 text-[11px] text-[var(--muted)] transition hover:text-[var(--muted)]"
     >
       <Tag size={9} /> sector
     </button>
@@ -2692,16 +2721,16 @@ function BenchmarkComparison({
   const gapFor = (r: ComparisonRow) => (benchmark === "SPY" ? r.deltaVsSpy : r.deltaVsQqq);
 
   return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Return vs benchmarks</span>
-        <span className="text-xs text-[var(--faint)]">deposits excluded</span>
-      </div>
+    <section className="space-y-4">
+      <SectionHead
+        title="Return vs benchmarks"
+        action={<span className="text-xs text-[var(--muted)]">deposits excluded</span>}
+      />
 
       {/* The table already contained this sentence; it just never said it. */}
       {standing.state !== "unknown" && (
-        <div className="border-b border-line px-6 py-4">
-          <p className="font-display text-lg leading-snug">
+        <div>
+          <Verdict>
             <span
               className={
                 standing.state === "behind" ? "text-[var(--coral)]" : "text-[var(--jade)]"
@@ -2716,7 +2745,7 @@ function BenchmarkComparison({
                 ? `The gap widens the further back you look — a year out it is ${Math.abs(standing.gapPoints!).toFixed(1)} points.`
                 : "Measured against the index over the same days."}
             </span>
-          </p>
+          </Verdict>
           <p className="mt-1.5 text-xs text-[var(--muted)]">
             Your deposits are removed before comparing, so this measures the picks, not the
             paycheque.
@@ -2724,15 +2753,12 @@ function BenchmarkComparison({
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
+      <div className={ruled.scroll}>
+        <table className={`${ruled.table} min-w-[520px]`}>
           <thead>
-            <tr className="border-b border-line text-left">
+            <tr className={ruled.headRow}>
               {["Window", "You", "SPY", "QQQ", `Gap vs ${benchmark}`].map((h, i) => (
-                <th
-                  key={h}
-                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
-                >
+                <th key={h} className={`${ruled.th} ${i >= 1 ? "text-right" : ""}`}>
                   {h}
                 </th>
               ))}
@@ -2742,7 +2768,7 @@ function BenchmarkComparison({
             {comparison.map((r) => {
               const pColor =
                 r.portfolioPct == null
-                  ? "text-[var(--faint)]"
+                  ? "text-[var(--muted)]"
                   : r.portfolioPct >= 0
                     ? "text-[var(--jade)]"
                     : "text-[var(--coral)]";
@@ -2751,20 +2777,20 @@ function BenchmarkComparison({
               // table visibly agree rather than making you find the row.
               const lead = r.window === standing.window;
               return (
-                <tr
-                  key={r.window}
-                  className={`border-b border-line/60 last:border-0 ${
-                    lead ? "bg-[var(--panel-2)]/50" : ""
-                  }`}
-                >
-                  <td className="px-6 py-2.5 text-[var(--muted)]">{WINDOW_LABEL[r.window]}</td>
-                  <td className={`mono px-6 py-2.5 text-right ${pColor}`}>{pct(r.portfolioPct)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--faint)]">{pct(r.spyPct)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--faint)]">{pct(r.qqqPct)}</td>
+                <tr key={r.window} className={`${ruled.row} last:border-0`}>
                   <td
-                    className={`mono px-6 py-2.5 text-right ${
+                    className={`${ruled.td} ${lead ? "text-[var(--paper)]" : "text-[var(--muted)]"}`}
+                  >
+                    {WINDOW_LABEL[r.window]}
+                    {lead && <span className="ml-2 text-xs text-[var(--brass)]">headline</span>}
+                  </td>
+                  <td className={`${ruled.td} ${ruled.num} ${pColor}`}>{pct(r.portfolioPct)}</td>
+                  <td className={`${ruled.td} ${ruled.num} text-[var(--muted)]`}>{pct(r.spyPct)}</td>
+                  <td className={`${ruled.td} ${ruled.num} text-[var(--muted)]`}>{pct(r.qqqPct)}</td>
+                  <td
+                    className={`${ruled.td} ${ruled.num} ${
                       gap == null
-                        ? "text-[var(--faint)]"
+                        ? "text-[var(--muted)]"
                         : gap >= 0
                           ? "text-[var(--jade)]"
                           : "text-[var(--coral)]"
@@ -2778,7 +2804,7 @@ function BenchmarkComparison({
           </tbody>
         </table>
       </div>
-    </Card>
+    </section>
   );
 }
 
@@ -2811,7 +2837,7 @@ function HeaderCell({
         } ${align === "right" ? "flex-row-reverse" : ""}`}
       >
         {label}
-        <span className={active ? "text-[var(--brass)]" : "text-[var(--faint)]"}>
+        <span className={active ? "text-[var(--brass)]" : "text-[var(--muted)]"}>
           {active ? (dir === "desc" ? "↓" : "↑") : "↕"}
         </span>
       </button>
@@ -2835,7 +2861,7 @@ function MetricCells({
 }) {
   const numRight = "mono px-3 py-3.5 text-right";
   const dash = (key: string) => (
-    <td key={key} className={`${numRight} text-[var(--faint)]`}>
+    <td key={key} className={`${numRight} text-[var(--muted)]`}>
       —
     </td>
   );
@@ -2855,7 +2881,7 @@ function MetricCells({
                 {history && history.length > 1 ? (
                   <Sparkline data={history} />
                 ) : (
-                  <span className="text-[var(--faint)]">—</span>
+                  <span className="text-[var(--muted)]">—</span>
                 )}
               </td>
             );
@@ -2906,7 +2932,7 @@ function MetricCells({
 /** Signed currency cell (green/red), or a dash when there's no value. */
 function SignedCurrencyCell({ amount, currency }: { amount: number | null; currency: string }) {
   if (amount == null) {
-    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
+    return <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">—</td>;
   }
   const positive = amount >= 0;
   const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";
@@ -2982,7 +3008,7 @@ function ColumnsMenu({
             <span className="eyebrow">Columns</span>
             <button
               onClick={onReset}
-              className="text-[10px] uppercase tracking-wide text-[var(--faint)] transition hover:text-[var(--brass)]"
+              className="text-[10px] uppercase tracking-wide text-[var(--muted)] transition hover:text-[var(--brass)]"
             >
               Reset
             </button>
@@ -3030,7 +3056,7 @@ function PnlCell({
   currency: string;
 }) {
   if (pnl == null) {
-    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
+    return <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">—</td>;
   }
   const positive = pnl >= 0;
   const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";
@@ -3053,7 +3079,7 @@ function PnlCell({
 /** Day-change cell: green/red signed percent, or a dash when we have no quote. */
 function DayCell({ pct }: { pct: number | null }) {
   if (pct == null) {
-    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
+    return <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">—</td>;
   }
   const positive = pct >= 0;
   const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";

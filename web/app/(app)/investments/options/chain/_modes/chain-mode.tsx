@@ -1,4 +1,4 @@
-import { Card } from "@/components/ui/card";
+import { DeskNote } from "@/components/options/desk-ui";
 import { OptionsChainView } from "@/components/options/options-chain-view";
 import { LivePricesProvider } from "@/components/portfolio/live-prices";
 import type { HoldingRow } from "@/components/portfolio/valuation";
@@ -44,11 +44,11 @@ export async function ChainMode({ ticker }: { ticker: string }) {
   return (
     <>
       {!chain && (
-        <Card className="p-6 text-sm text-[var(--muted)]">
+        <DeskNote>
           No listed chain came back for <span className="mono text-[var(--paper)]">{ticker}</span>.
           Check the symbol, or try again shortly — chains are cached for 30 minutes and both
           sources can rate-limit.
-        </Card>
+        </DeskNote>
       )}
       <LivePricesProvider symbols={[ticker]}>
         <OptionsChainView

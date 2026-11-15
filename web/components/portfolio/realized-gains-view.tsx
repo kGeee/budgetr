@@ -3,9 +3,9 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Pin, Plus, Receipt, Trash2 } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Mark, Stat, StatStrip, Verdict } from "@/components/ui/statement";
-import { realizedVerdict } from "@/lib/investments-verdict";
+import { Hero, Mark, SectionHead } from "@/components/ui/statement";
+import { pill, ruled, Segmented } from "@/components/portfolio/ruled";
+import { realizedSplitVerdict, splitBarShares } from "@/lib/realized-split";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -97,7 +97,6 @@ export function RealizedGainsView({
     [lots, year],
   );
   const totals = useMemo(() => totalsFor(shown), [shown]);
-  const verdict = realizedVerdict({ total: totals.total, count: totals.count });
 
   // Spec-ID applies to owned lots: a sale-to-close matched to a buy-to-open.
   const sells = useMemo(
@@ -148,59 +147,44 @@ export function RealizedGainsView({
   }
 
   const empty = lots.length === 0;
+  const split = realizedSplitVerdict({
+    longTerm: totals.longTerm,
+    shortTerm: totals.shortTerm,
+    washLots: shown
+      .filter((l) => l.washSale && l.gain < 0)
+      .map((l) => ({ ticker: l.ticker, loss: -l.gain })),
+  });
+  const bar = splitBarShares(totals.longTerm, totals.shortTerm);
+  const methodLabel = METHODS.find((m) => m.value === globalMethod)?.label ?? globalMethod;
+  const yearOptions = [
+    { value: "all", label: "All years" },
+    ...years.map((y) => ({ value: String(y), label: String(y) })),
+  ];
 
   return (
-    <div className={`space-y-7 ${pending ? "opacity-70" : ""}`}>
-      {/* Controls: year filter · method toggle · CSV export */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            onClick={() => setYear(null)}
-            className={`rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-              year == null
-                ? "bg-[var(--panel-2)] text-[var(--paper)] shadow-[var(--elev-1)]"
-                : "text-[var(--muted)] hover:text-[var(--paper)]"
-            }`}
-          >
-            All years
-          </button>
-          {years.map((y) => (
-            <button
-              key={y}
-              onClick={() => setYear(y)}
-              className={`mono rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-                year === y
-                  ? "bg-[var(--panel-2)] text-[var(--paper)] shadow-[var(--elev-1)]"
-                  : "text-[var(--muted)] hover:text-[var(--paper)]"
-              }`}
-            >
-              {y}
-            </button>
-          ))}
+    <div className={`space-y-9 ${pending ? "opacity-70" : ""}`}>
+      {/* Controls: year filter · method toggle on the left, the two exits right. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Segmented
+            label="Tax year"
+            className="flex-wrap"
+            value={year == null ? "all" : String(year)}
+            options={yearOptions}
+            onChange={(v) => setYear(v === "all" ? null : Number(v))}
+          />
+          <Segmented
+            label="Cost-basis method"
+            value={globalMethod}
+            options={METHODS}
+            onChange={chooseMethod}
+          />
         </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 rounded-full border border-line bg-[var(--panel)] p-1">
-            {METHODS.map((m) => (
-              <button
-                key={m.value}
-                onClick={() => chooseMethod(m.value)}
-                aria-pressed={globalMethod === m.value}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  globalMethod === m.value
-                    ? "bg-[var(--brass)] text-[var(--on-brass)]"
-                    : "text-[var(--muted)] hover:text-[var(--paper)]"
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-
-          <a
-            href={csvHref}
-            className="inline-flex items-center gap-2 rounded-full border border-[var(--brass-dim)] px-4 py-2 text-sm font-medium text-[var(--brass)] transition-colors hover:bg-[color-mix(in_srgb,var(--brass)_12%,transparent)]"
-          >
+        <div className="flex flex-wrap gap-2">
+          <a href="#import" className={pill}>
+            Import trades
+          </a>
+          <a href={csvHref} className={pill}>
             <Download size={15} />
             Download CSV
           </a>
@@ -208,139 +192,183 @@ export function RealizedGainsView({
       </div>
 
       {empty ? (
-        <Card className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-          <Receipt size={28} className="text-[var(--muted)]" />
-          <p className="text-[var(--paper)]">No realized gains yet</p>
-          <p className="max-w-sm text-sm text-[var(--muted)]">
+        <div className="border-t border-[var(--line-strong)] pt-5">
+          <p className="flex items-center gap-2.5 font-display text-lg">
+            <Receipt size={20} className="text-[var(--muted)]" />
+            No realized gains yet
+          </p>
+          <p className="mt-1.5 max-w-xl text-sm text-[var(--muted)]">
             Sell transactions in your investment ledger are matched against buy
             lots to compute capital gains. Once you have a completed sale it will
             show up here.
           </p>
-        </Card>
+        </div>
       ) : (
         <>
-          {/* Capital-gains summary cards */}
-          <div className="space-y-4">
-            {verdict && (
-              <Verdict>
-                {verdict.lead}
-                {verdict.amount != null && (
+          {/* The year's net result, the sentence that splits it, and the split
+              itself as one bar. */}
+          <section
+            aria-label="Total realized"
+            className="flex flex-wrap items-end justify-between gap-x-10 gap-y-5"
+          >
+            <Hero
+              className="flex-1 basis-[380px]"
+              eyebrow={`Total realized · ${year ?? "all years"}`}
+              figure={`${totals.total > 0 ? "+" : ""}${formatCurrency(totals.total)}`}
+              tone={gainTone(totals.total) === "muted" ? "default" : gainTone(totals.total)}
+              verdict={
+                totals.count === 0 ? (
+                  <span className="text-[var(--muted)]">No lots closed in {year}.</span>
+                ) : (
                   <>
-                    {" "}
-                    <Mark tone={verdict.tone}>{formatCurrency(verdict.amount)}</Mark>
+                    {split.split}
+                    {split.wash && (
+                      <>
+                        {" "}
+                        {split.wash.lead}{" "}
+                        <Mark tone="coral">{formatCurrency(split.wash.amount)}</Mark>{" "}
+                        {split.wash.tail}
+                      </>
+                    )}
                   </>
-                )}{" "}
-                {verdict.tail}
-              </Verdict>
-            )}
-            <StatStrip>
-              <Stat label="Total realized" value={formatCurrency(totals.total)} tone={gainTone(totals.total)} />
-              <Stat label="Short-term" value={formatCurrency(totals.shortTerm)} tone={gainTone(totals.shortTerm)} />
-              <Stat label="Long-term" value={formatCurrency(totals.longTerm)} tone={gainTone(totals.longTerm)} />
-              <Stat
-                label="Wash-sale disallowed"
-                value={formatCurrency(totals.disallowedWash)}
-                tone="coral"
-                sub={`${totals.count} lot${totals.count === 1 ? "" : "s"} · proceeds ${formatCurrency(totals.proceeds)}`}
-              />
-            </StatStrip>
-          </div>
+                )
+              }
+            />
+            <div className="flex min-w-0 flex-1 basis-[360px] flex-col gap-2.5">
+              <div
+                role="img"
+                aria-label={`Long-term ${formatCurrency(totals.longTerm)}, short-term ${formatCurrency(totals.shortTerm)}`}
+                className="flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-[var(--panel-2)]"
+              >
+                <span className="bg-[var(--jade)]" style={{ width: `${bar.long}%` }} />
+                <span className="bg-[var(--brass)]" style={{ width: `${bar.short}%` }} />
+              </div>
+              <dl className="flex flex-wrap gap-y-2">
+                <SplitFigure label="Long-term" swatch="bg-[var(--jade)]" value={totals.longTerm} />
+                <SplitFigure label="Short-term" swatch="bg-[var(--brass)]" value={totals.shortTerm} />
+                <div className="flex flex-col gap-0.5 border-l border-line pl-6 pt-1.5">
+                  <dt className="text-[13px] text-[var(--muted)]">Wash-sale disallowed</dt>
+                  <dd
+                    className={`mono text-sm ${
+                      totals.disallowedWash > 0.005 ? "text-[var(--coral)]" : ""
+                    }`}
+                  >
+                    {formatCurrency(totals.disallowedWash)}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </section>
 
           {/* Lot detail table */}
-          <div className="overflow-x-auto rounded-[var(--radius)] border border-line bg-[var(--panel)]">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs text-[var(--muted)]">
-                  <th className="px-4 py-3 font-medium">Ticker</th>
-                  <th className="px-4 py-3 font-medium">Opened</th>
-                  <th className="px-4 py-3 font-medium">Closed</th>
-                  <th className="px-4 py-3 text-right font-medium">Qty</th>
-                  <th className="px-4 py-3 text-right font-medium">Proceeds</th>
-                  <th className="px-4 py-3 text-right font-medium">Basis</th>
-                  <th className="px-4 py-3 text-right font-medium">Gain / loss</th>
-                  <th className="px-4 py-3 font-medium">Term</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((l, i) => (
-                  <tr
-                    key={`${l.sellTxnId}:${l.buyTxnId}:${i}`}
-                    className="border-b border-line/50 last:border-0"
-                  >
-                    <td className="px-4 py-3 font-medium">
-                      <span>{l.ticker}</span>
-                      {l.position === "short" && (
-                        <span className="ml-2 rounded border border-line px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-[var(--muted)]">
-                          written
+          <section aria-label="Closed lots" className="space-y-2">
+            <div className={ruled.scroll}>
+              <table className={`${ruled.table} min-w-[860px]`}>
+                <thead>
+                  <tr className={`${ruled.headRow} align-bottom`}>
+                    <th className="pb-2.5 pr-5 text-left font-normal">
+                      <h2 className="font-display text-lg font-semibold tracking-tight text-[var(--paper)]">
+                        Closed lots
+                        <span className="mono ml-2 text-xs font-normal text-[var(--muted)]">
+                          {totals.count}
                         </span>
-                      )}
-                    </td>
-                    <td className="mono px-4 py-3 text-xs text-[var(--muted)]">{l.openDate}</td>
-                    <td className="mono px-4 py-3 text-xs text-[var(--muted)]">{l.closeDate}</td>
-                    <td className="tabular mono px-4 py-3 text-right text-[var(--muted)]">
-                      {l.quantity}
-                    </td>
-                    <td className="tabular mono px-4 py-3 text-right">{formatCurrency(l.proceeds)}</td>
-                    <td className="tabular mono px-4 py-3 text-right">{formatCurrency(l.basis)}</td>
-                    <td className={`tabular mono px-4 py-3 text-right ${gainClass(l.gain)}`}>
-                      {formatCurrency(l.gain)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-[11px] ${
-                            l.section1256
-                              ? "border-[var(--brass-dim)] text-[var(--brass)]"
-                              : l.term === "long"
-                              ? "border-[var(--jade)]/40 text-[var(--jade)]"
-                              : "border-line text-[var(--muted)]"
-                          }`}
-                        >
-                          {l.section1256 ? "1256 · 60/40" : l.term === "long" ? "Long" : "Short"}
-                        </span>
-                        {l.washSale && (
-                          <span
-                            title="Wash sale — loss disallowed"
-                            className="rounded-full border border-[var(--coral)]/40 px-2 py-0.5 text-[11px] text-[var(--coral)]"
-                          >
-                            Wash
+                      </h2>
+                    </th>
+                    <th className={ruled.th}>Opened</th>
+                    <th className={ruled.th}>Closed</th>
+                    <th className={`${ruled.th} text-right`}>Qty</th>
+                    <th className={`${ruled.th} text-right`}>Proceeds</th>
+                    <th className={`${ruled.th} text-right`}>Basis</th>
+                    <th className={`${ruled.th} text-right`}>Gain / loss</th>
+                    <th className={ruled.th}>Term</th>
+                  </tr>
+                </thead>
+                <tbody className="mono text-[13px]">
+                  {shown.map((l, i) => (
+                    <tr key={`${l.sellTxnId}:${l.buyTxnId}:${i}`} className={ruled.row}>
+                      <td className={`${ruled.td} font-medium`}>
+                        <span>{l.ticker}</span>
+                        {l.position === "short" && (
+                          <span className="ml-2 rounded border border-line px-1.5 py-0.5 font-sans text-[10px] font-normal uppercase tracking-wide text-[var(--muted)]">
+                            written
                           </span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {shown.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                      No realized lots in {year}.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {shown.some((l) => l.section1256) && (
-            <p className="rounded-xl border border-[var(--brass-dim)]/60 bg-[color-mix(in_srgb,var(--brass)_7%,transparent)] px-4 py-3 text-xs leading-relaxed text-[var(--muted)]">
-              SPX/SPXW broad-based index options are shown with Section 1256 character: 60% long-term
-              and 40% short-term, regardless of holding period. The worksheet reconstructs closed
-              ledger activity; confirm year-end mark-to-market amounts against Form 1099-B and Form 6781.
+                      </td>
+                      <td className={`${ruled.td} whitespace-nowrap text-[var(--muted)]`}>{l.openDate}</td>
+                      <td className={`${ruled.td} whitespace-nowrap text-[var(--muted)]`}>{l.closeDate}</td>
+                      <td className={`${ruled.td} ${ruled.num}`}>{l.quantity}</td>
+                      <td className={`${ruled.td} ${ruled.num}`}>{formatCurrency(l.proceeds)}</td>
+                      <td className={`${ruled.td} ${ruled.num}`}>{formatCurrency(l.basis)}</td>
+                      <td className={`${ruled.td} ${ruled.num} ${gainClass(l.gain)}`}>
+                        {l.gain > 0 ? "+" : ""}
+                        {formatCurrency(l.gain)}
+                      </td>
+                      <td className={`${ruled.td} font-sans text-sm`}>
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className={l.section1256 ? "text-[var(--brass)]" : undefined}>
+                            {l.section1256 ? "1256 · 60/40" : l.term === "long" ? "Long" : "Short"}
+                          </span>
+                          {l.washSale && (
+                            <span
+                              title="Wash sale — loss disallowed"
+                              className="whitespace-nowrap rounded-full border border-[var(--coral)] px-2 py-px text-[11px] text-[var(--coral)]"
+                            >
+                              Wash sale
+                            </span>
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {shown.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 font-sans text-sm text-[var(--muted)]">
+                        No realized lots in {year}.
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr className={ruled.totalRow}>
+                      <td className={`${ruled.td} ${ruled.totalLabel}`}>Total</td>
+                      <td colSpan={3} />
+                      <td className={`${ruled.td} ${ruled.num}`}>{formatCurrency(totals.proceeds)}</td>
+                      <td className={`${ruled.td} ${ruled.num}`}>{formatCurrency(totals.basis)}</td>
+                      <td className={`${ruled.td} ${ruled.num} ${gainClass(totals.total)}`}>
+                        {totals.total > 0 ? "+" : ""}
+                        {formatCurrency(totals.total)}
+                      </td>
+                      <td />
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <p className="border-t border-line pt-3 text-xs text-[var(--muted)]">
+              {globalMethod === "specid"
+                ? "Lots are matched Spec-ID: pinned units go to the purchase lot you chose below; unpinned units fall back to FIFO."
+                : `Lots are matched ${methodLabel}. Switch to Spec-ID to pin units of a sale to a specific purchase lot; unpinned units fall back to FIFO.`}
             </p>
-          )}
+            {shown.some((l) => l.section1256) && (
+              <p className="text-xs leading-relaxed text-[var(--muted)]">
+                <span className="text-[var(--brass)]">Section 1256.</span> SPX/SPXW broad-based
+                index options are shown with Section 1256 character: 60% long-term and 40%
+                short-term, regardless of holding period. The worksheet reconstructs closed ledger
+                activity; confirm year-end mark-to-market amounts against Form 1099-B and Form 6781.
+              </p>
+            )}
+          </section>
 
           {/* Spec-ID override controls — only relevant under spec-ID matching */}
           {globalMethod === "specid" && (
-            <Card className="space-y-4">
-              <div>
-                <p className="eyebrow flex items-center gap-1.5">
-                  <Pin size={13} /> Spec-ID lot assignments
-                </p>
-                <p className="mt-1 text-xs text-[var(--muted)]">
-                  Pin units of a long-position sale to a specific purchase lot. Unpinned units
-                  fall back to FIFO.
-                </p>
-              </div>
+            <section aria-label="Spec-ID lot assignments" className="space-y-4">
+              <SectionHead
+                title="Spec-ID lot assignments"
+                count={overrides.length || undefined}
+                action={
+                  <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+                    <Pin size={13} /> Pin units of a long-position sale to a specific purchase lot
+                  </span>
+                }
+              />
 
               <div className="flex flex-wrap items-end gap-3">
                 <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
@@ -396,21 +424,20 @@ export function RealizedGainsView({
               </div>
 
               {overrides.length > 0 && (
-                <ul className="divide-y divide-line/60 border-t border-line/60">
+                <ul className="border-t border-line">
                   {overrides.map((o) => {
                     const sell = txnById.get(o.sellTxnId);
                     const buy = txnById.get(o.buyTxnId);
                     return (
-                      <li key={o.id} className="flex items-center gap-3 py-2.5 text-sm">
+                      <li key={o.id} className="flex items-center gap-3 border-b border-line py-2.5 text-sm">
                         <span className="mono min-w-0 flex-1 truncate text-xs text-[var(--muted)]">
-                          {o.quantity} units · {sell ? txnLabel(sell) : o.sellTxnId}{" "}
-                          <span className="text-[var(--faint)]">←</span>{" "}
+                          {o.quantity} units · {sell ? txnLabel(sell) : o.sellTxnId} ←{" "}
                           {buy ? txnLabel(buy) : o.buyTxnId}
                         </span>
                         <button
                           onClick={() => dropOverride(o.id)}
                           aria-label="Remove pin"
-                          className="shrink-0 rounded-md p-1.5 text-[var(--faint)] transition hover:text-[var(--coral)]"
+                          className="shrink-0 rounded-md p-1.5 text-[var(--muted)] transition hover:text-[var(--coral)]"
                         >
                           <Trash2 size={15} />
                         </button>
@@ -419,10 +446,26 @@ export function RealizedGainsView({
                   })}
                 </ul>
               )}
-            </Card>
+            </section>
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** One side of the long/short split: a swatch that keys it to the bar, and the figure. */
+function SplitFigure({ label, swatch, value }: { label: string; swatch: string; value: number }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-l border-line px-6 pt-1.5 first:border-l-0 first:pl-0">
+      <dt className="flex items-center gap-2 text-[13px] text-[var(--muted)]">
+        <span aria-hidden className={`h-2 w-2 rounded-[3px] ${swatch}`} />
+        {label}
+      </dt>
+      <dd className={`mono text-sm ${value < -0.005 ? "text-[var(--coral)]" : ""}`}>
+        {value > 0 ? "+" : ""}
+        {formatCurrency(value)}
+      </dd>
     </div>
   );
 }

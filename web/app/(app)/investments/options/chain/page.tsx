@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { PageHead } from "@/components/page-head";
-import { Card } from "@/components/ui/card";
 import { OptionsToolTabs, SubTabs } from "@/components/investments-tabs";
 import { FundamentalsHandoff, TickerSwitcher } from "@/components/ticker-switcher";
 import { getHoldings } from "@/lib/queries";
@@ -123,13 +122,13 @@ function PickSymbol({ mode, blurb }: { mode: Mode; blurb: string }) {
   ].filter((t) => !held.includes(t));
 
   return (
-    <Card className="p-6">
-      <p className="text-sm text-[var(--muted)]">{blurb}</p>
+    <section className="max-w-[70ch] border-t border-line pt-5">
+      <p className="font-display text-lg leading-snug">{blurb}</p>
       {held.length > 0 && <SymbolRow label="You have legs in" symbols={held} mode={mode} />}
       {optionable.length > 0 && (
         <SymbolRow label="You hold" symbols={optionable.slice(0, 12)} mode={mode} />
       )}
-    </Card>
+    </section>
   );
 }
 
@@ -142,7 +141,7 @@ function SymbolRow({ label, symbols, mode }: { label: string; symbols: string[];
           <Link
             key={s}
             href={chainHref(s, mode)}
-            className="mono rounded-full border border-line px-3 py-1.5 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
+            className="mono inline-flex min-h-10 items-center rounded-full border border-[var(--line-strong)] px-4 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)] hover:text-[var(--brass)]"
           >
             {s}
           </Link>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { disconnectItem, type DisconnectResult } from "@/lib/actions";
 
@@ -71,10 +71,9 @@ export function DisconnectInstitution({
         type="button"
         onClick={() => setOpen(true)}
         aria-label={`Disconnect ${institution}`}
-        title={`Disconnect ${institution}`}
-        className="rounded-lg p-1.5 text-[var(--faint)] transition-colors hover:bg-[color-mix(in_srgb,var(--coral)_12%,transparent)] hover:text-[var(--coral)]"
+        className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-line px-3.5 text-[13px] text-[var(--coral)] transition-colors hover:border-[color-mix(in_srgb,var(--coral)_45%,transparent)] hover:bg-[color-mix(in_srgb,var(--coral)_10%,transparent)]"
       >
-        <Trash2 size={15} />
+        Disconnect
       </button>
 
       {/* The upstream revoke failed: the local data is gone but Plaid still holds

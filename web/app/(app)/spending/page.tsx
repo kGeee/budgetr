@@ -1,7 +1,10 @@
-import { format, subMonths } from "date-fns";
+import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays, subMonths } from "date-fns";
+import { AlertsPanel } from "@/components/alerts-panel";
 import { IncompletePeriodNotice } from "@/components/data-freshness";
 import { SpendingNav } from "@/components/spending/spending-nav";
+import { SpendChartSwitch } from "@/components/spending/spend-chart-switch";
 import {
+  CategoryFocus,
   CategoryView,
   SpendingHero,
   TrendsView,
@@ -11,6 +14,8 @@ import {
 import { VendorView } from "@/components/spending/vendor-view";
 import { ReportView } from "@/components/spending/report-view";
 import type { SpendingView } from "@/components/spending/href";
+import { detectAnomalies } from "@/lib/anomalies";
+import { getDataHealthAlerts } from "@/lib/data-health";
 import {
   getLatestTransactionDate,
   lastCompleteMonth,
@@ -25,6 +30,7 @@ import {
   getMonthlySpendForYear,
   getPeriodTotals,
   getTopMerchantsForPeriod,
+  type CategoryDetail,
   type CategorySpend,
 } from "@/lib/queries";
 import { REPORT_PERIODS, resolvePeriod, type ReportPeriod } from "@/lib/report";
@@ -79,7 +85,7 @@ export default async function SpendingPage({
 
   if (view === "vendor") {
     return (
-      <div className="space-y-7">
+      <div className="space-y-9">
         <SpendingNav view={view} period={period} explicitPeriod={explicitPeriod} />
         <VendorView v={sp.vendor ?? sp.v} />
       </div>
@@ -126,6 +132,8 @@ export default async function SpendingPage({
   const allCategories = getCategories();
 
   let body: React.ReactNode;
+  let aside: React.ReactNode = null;
+  let selected: CategoryDetail | null = null;
   if (view === "trends") {
     const prevCategories = getCategorySpendForPeriod(p.prevStart, p.prevEnd);
 
@@ -138,12 +146,20 @@ export default async function SpendingPage({
         const key = c.categoryId ?? c.category;
         seen.add(key);
         const prev = prevByKey.get(key) ?? 0;
-        return { category: c.category, icon: c.icon, current: c.total, prev, delta: c.total - prev };
+        return {
+          categoryId: c.categoryId,
+          category: c.category,
+          icon: c.icon,
+          current: c.total,
+          prev,
+          delta: c.total - prev,
+        };
       }),
       // Categories that spent last period but not this one → full drop.
       ...prevCategories
         .filter((c) => !seen.has(c.categoryId ?? c.category))
         .map((c) => ({
+          categoryId: c.categoryId,
           category: c.category,
           icon: c.icon,
           current: 0,
@@ -184,24 +200,75 @@ export default async function SpendingPage({
       return { ...c, average, delta: average > 0 ? c.total / average - 1 : null };
     });
 
+    selected = sp.category ? getCategoryById(sp.category) : null;
+
+    // The same alerts Home leads with, so a price creep or a duplicate charge
+    // is on the page where the spending is. Health first — a clear board only
+    // reassures if the data behind it is complete.
+    const alerts = [
+      ...getDataHealthAlerts().filter((a) => a.key !== "health:review-backlog"),
+      ...detectAnomalies(),
+    ];
+
+    // The chart beside the hero: the period day by day, or the trailing year
+    // (Sunday-aligned so the calendar's columns are whole weeks).
+    const heatEnd = format(now, "yyyy-MM-dd");
+    const heatStart = format(startOfWeek(subDays(now, 364), { weekStartsOn: 0 }), "yyyy-MM-dd");
+    aside = (
+      <SpendChartSwitch
+        daily={getDailySpendRange(p.start, p.end)}
+        start={p.start}
+        end={p.end}
+        label={p.label}
+        categories={allCategories}
+        heatmap={{ data: getDailySpendRange(heatStart, heatEnd), start: heatStart, end: heatEnd }}
+      />
+    );
+
     body = (
       <CategoryView
         label={p.label}
         averageLabel={isYear ? p.prevLabel : `${BASELINE_MONTHS}-month average`}
         explicitPeriod={explicitPeriod}
         rows={rows}
-        categories={categories}
         allCategories={allCategories}
-        selected={sp.category ? getCategoryById(sp.category) : null}
+        selectedId={selected?.id}
+        topVendors={topVendors}
+        biggest={getBiggestPurchases(p.start, p.end, 5)}
+        insights={<AlertsPanel alerts={alerts} limit={3} compact />}
       />
     );
   }
 
+  // How far through the period today is — only while the period is running.
+  const today = format(now, "yyyy-MM-dd");
+  const progress =
+    today >= p.start && today <= p.end
+      ? {
+          elapsed: differenceInCalendarDays(parseISO(today), parseISO(p.start)) + 1,
+          total: differenceInCalendarDays(parseISO(p.end), parseISO(p.start)) + 1,
+        }
+      : null;
+
   return (
-    <div className="space-y-7">
+    <div className="space-y-9">
       <SpendingNav view={view} period={period} explicitPeriod={explicitPeriod} />
       {banner}
-      <SpendingHero label={p.label} totals={totals} topVendor={topVendors[0]} />
+      {selected ? (
+        <CategoryFocus
+          selected={selected}
+          explicitPeriod={explicitPeriod}
+          allCategories={allCategories}
+        />
+      ) : (
+        <SpendingHero
+          label={p.label}
+          totals={totals}
+          topVendor={topVendors[0]}
+          progress={progress}
+          aside={aside}
+        />
+      )}
       {body}
     </div>
   );

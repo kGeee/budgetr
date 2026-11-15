@@ -53,7 +53,7 @@ export function BudgetBar({
               : `${formatCurrency(remaining ?? 0)} left`}
           </span>
         ) : (
-          <span className="shrink-0 text-xs text-[var(--faint)]">No budget</span>
+          <span className="shrink-0 text-xs text-[var(--muted)]">No budget</span>
         )}
       </div>
     </div>

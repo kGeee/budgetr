@@ -2,18 +2,19 @@
 
 import { useMemo, useState } from "react";
 import { CalendarClock } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
+import { Bar, ruled } from "@/components/portfolio/ruled";
 import { MonthlySpendChart } from "@/components/charts";
 import { formatCurrency } from "@/lib/utils";
 import type { DividendSummary } from "@/lib/dividends";
 import type { DividendCalendarEntry } from "@/lib/yahoo";
 
 /**
- * Dividend income section for the portfolio page. Renders three headline stats
- * (trailing-12m income, projected forward annual income, portfolio yield-on-cost),
- * a monthly income bar chart, a per-ticker table (income · yield-on-cost ·
- * projected annual), and an upcoming ex-dividend calendar sourced from Yahoo.
+ * Dividend income section of Investments › Income & gains. A ruled head with
+ * the headline figures (trailing-12m income, yield-on-cost, lifetime), then
+ * three columns: the monthly income bars, the leading payers, and the upcoming
+ * ex-dividend calendar from Yahoo. The full per-ticker table (income · share ·
+ * yield-on-cost · projected annual · last paid, plus lapsed payers) opens under
+ * the payer list.
  *
  * All figures are derived server-side (lib/dividends.ts) and passed in; this is a
  * presentational client component so it can share the page's chart wrappers.
@@ -52,6 +53,7 @@ export function DividendPanel({
   }, [summary.byTicker]);
 
   const [showLapsed, setShowLapsed] = useState(false);
+  const [showTable, setShowTable] = useState(false);
   const rows = showLapsed ? [...active, ...lapsed] : active;
 
   // Share of trailing income, for the concentration bars. SPY is 38% of this
@@ -62,190 +64,192 @@ export function DividendPanel({
 
   const currency = summary.byTicker[0]?.currency ?? "USD";
 
+  const topShare =
+    active[0] && summary.trailing12mTotal > 0
+      ? Math.round((active[0].trailing12m / summary.trailing12mTotal) * 100)
+      : null;
+  // The side list names the payers that carry the income; the full table with
+  // every column is one click below it.
+  const leaders = active.slice(0, 6);
+
   return (
-    <div className="space-y-5">
-      <Hero
-        eyebrow="Dividend income · trailing 12 months"
-        figure={formatCurrency(summary.trailing12mTotal, currency)}
-        verdict={
-          <>
-            On pace for{" "}
-            <Mark tone="jade">{formatCurrency(summary.projectedAnnualTotal, currency)}</Mark> next
-            year{" "}
-            <span className="text-[var(--muted)]">
-              — about {formatCurrency(summary.projectedAnnualTotal / 12, currency)} a month, from{" "}
-              {active.length} paying {active.length === 1 ? "position" : "positions"}.
+    <section aria-label="Dividends" className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-[var(--line-strong)] pb-2.5">
+        <h2 className="font-display text-lg tracking-tight">
+          Dividend income{" "}
+          <span className="font-sans text-xs font-normal tracking-normal text-[var(--muted)]">
+            trailing 12 months
+          </span>
+        </h2>
+        <span className="mono text-sm">
+          {formatCurrency(summary.trailing12mTotal, currency)}
+          <span className="text-[var(--muted)]">
+            {" · "}
+            <span title="Trailing income ÷ cost basis">
+              {summary.portfolioYieldOnCost != null
+                ? `${summary.portfolioYieldOnCost.toFixed(2)}% yield on cost`
+                : "no yield on cost yet"}
             </span>
-          </>
-        }
-      />
+            {" · "}
+            {formatCurrency(summary.lifetimeTotal, currency)} lifetime
+          </span>
+        </span>
+      </div>
 
-      <StatStrip>
-        <Stat
-          label="Yield on cost"
-          tone="brass"
-          value={
-            summary.portfolioYieldOnCost != null
-              ? `${summary.portfolioYieldOnCost.toFixed(2)}%`
-              : "—"
-          }
-          sub="trailing income ÷ cost basis"
-        />
-        <Stat
-          label="Top payer"
-          value={active[0]?.ticker ?? "—"}
-          sub={
-            active[0] && summary.trailing12mTotal > 0
-              ? `${formatCurrency(active[0].trailing12m, currency)} · ${Math.round((active[0].trailing12m / summary.trailing12mTotal) * 100)}% of income`
-              : "—"
-          }
-        />
-        <Stat
-          label="Lifetime"
-          tone="jade"
-          value={formatCurrency(summary.lifetimeTotal, currency)}
-          sub="since first payment"
-        />
-      </StatStrip>
+      <p className="text-sm text-[var(--muted)]">
+        On pace for{" "}
+        <span className="mono text-[var(--jade)]">
+          {formatCurrency(summary.projectedAnnualTotal, currency)}
+        </span>{" "}
+        next year — about {formatCurrency(summary.projectedAnnualTotal / 12, currency)} a month,
+        from {active.length} paying {active.length === 1 ? "position" : "positions"}.
+      </p>
 
-      <Card className="p-0">
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <span className="eyebrow">Dividend income by month</span>
-          <span className="text-xs text-[var(--faint)]">cash distributions from your ledger</span>
-        </div>
-        <div className="px-3 py-5 sm:px-5">
+      <div className="flex flex-wrap gap-x-12 gap-y-6">
+        <div className="flex min-w-0 flex-[3_1_420px] flex-col gap-2">
+          <span className="text-xs text-[var(--muted)]">
+            Dividend income by month · cash distributions from your ledger
+          </span>
           <MonthlySpendChart data={monthly} />
         </div>
-      </Card>
 
-      <Card className="overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <span className="eyebrow">Income by position</span>
-          <span className="text-xs text-[var(--muted)]">
-            {active.length} {active.length === 1 ? "payer" : "payers"}
+        <div className="flex min-w-0 flex-[1_1_240px] flex-col">
+          <span className="pb-1.5 text-xs text-[var(--muted)]">Income by position</span>
+          {leaders.map((t, i) => (
+            <div
+              key={t.ticker}
+              className="mono flex min-h-10 items-center justify-between gap-3 border-b border-line text-[13px]"
+            >
+              <span className="font-medium">
+                {t.ticker}
+                {i === 0 && (
+                  <span className="ml-2 font-sans text-xs font-normal text-[var(--brass)]">
+                    Top payer{topShare != null && ` · ${topShare}%`}
+                  </span>
+                )}
+              </span>
+              <span>{formatCurrency(t.trailing12m, t.currency)}</span>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setShowTable((v) => !v)}
+            aria-expanded={showTable}
+            className="mt-2.5 self-start text-xs text-[var(--brass)] transition-colors hover:text-[var(--paper)]"
+          >
+            {showTable
+              ? "Hide the full table"
+              : `All ${active.length} ${active.length === 1 ? "payer" : "payers"} · yield, projection, last paid`}
+          </button>
+        </div>
+
+        {/* Rendered only when Yahoo actually returned dates. An empty state that
+            appears on every single load is a permanent fixture, not an empty
+            state — it trains you to ignore the panel. */}
+        {upcoming.length > 0 && (
+          <div className="flex min-w-0 flex-[1_1_220px] flex-col">
+            <span className="flex items-center gap-1.5 pb-1.5 text-xs text-[var(--muted)]">
+              <CalendarClock size={13} className="text-[var(--brass)]" />
+              Upcoming ex-dividend dates · Yahoo Finance
+            </span>
+            {upcoming.map((c) => (
+              <div key={c.symbol} className="mono border-b border-line py-2.5 text-[13px]">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium">{c.symbol}</span>
+                  <span className="text-[var(--muted)]">{c.exDividendDate}</span>
+                </div>
+                {(c.payDate || c.rate != null || c.yield != null) && (
+                  <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+                    {[
+                      c.payDate && `pays ${c.payDate}`,
+                      c.rate != null && `${formatCurrency(c.rate, currency)}/yr`,
+                      c.yield != null && `${c.yield.toFixed(2)}%`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showTable && (
+        <div className="space-y-2 pt-2">
+          <div className="flex items-baseline justify-between gap-3 text-xs text-[var(--muted)]">
+            <span>
+              {active.length} {active.length === 1 ? "payer" : "payers"}
+            </span>
             {lapsed.length > 0 && (
               <button
                 onClick={() => setShowLapsed((v) => !v)}
-                className="ml-2 text-[var(--brass)] transition-colors hover:text-[var(--paper)]"
+                className="text-[var(--brass)] transition-colors hover:text-[var(--paper)]"
               >
-                {showLapsed ? "hide" : `${lapsed.length} lapsed`}
+                {showLapsed ? "hide lapsed" : `${lapsed.length} lapsed`}
               </button>
             )}
-          </span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
-            <thead>
-              <tr className="border-b border-line text-left">
-                {["Ticker", "Trailing 12 mo", "Share", "Yield on cost", "Projected / yr", "Last paid"].map(
-                  (h, i) => (
-                    <th
-                      key={h}
-                      className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((t) => {
-                const dormant = t.count12m === 0 && t.trailing12m === 0;
-                return (
-                <tr
-                  key={t.ticker}
-                  className={`border-b border-line/60 last:border-0 ${dormant ? "opacity-45" : ""}`}
-                >
-                  <td className="px-6 py-2.5">
-                    <span className="font-medium text-[var(--brass)]">{t.ticker}</span>
-                    {t.name && <span className="ml-2 text-[var(--muted)]">{t.name}</span>}
-                    {dormant && (
-                      <span className="ml-2 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
-                        lapsed
-                      </span>
-                    )}
-                  </td>
-                  <td className="mono px-6 py-2.5 text-right">
-                    {formatCurrency(t.trailing12m, t.currency)}
-                    <span className="ml-1.5 text-[10px] text-[var(--faint)]">
-                      ×{t.count12m}
-                    </span>
-                  </td>
-                  {/* Concentration at a glance: one payer carrying most of the
-                      income is the thing worth noticing here. */}
-                  <td className="px-6 py-2.5">
-                    <span className="ml-auto block h-1 w-full max-w-24 overflow-hidden rounded-full bg-[var(--panel-2)]">
-                      <span
-                        className="block h-full rounded-full bg-[var(--jade)]"
-                        style={{
-                          width: `${topIncome > 0 ? Math.max(2, (t.trailing12m / topIncome) * 100) : 0}%`,
-                        }}
-                      />
-                    </span>
-                  </td>
-                  <td className="mono px-6 py-2.5 text-right">
-                    {t.yieldOnCost != null ? (
-                      <span className="text-[var(--jade)]">{t.yieldOnCost.toFixed(2)}%</span>
-                    ) : (
-                      <span className="text-[var(--faint)]">—</span>
-                    )}
-                  </td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
-                    {t.projectedAnnual > 0 ? formatCurrency(t.projectedAnnual, t.currency) : "—"}
-                  </td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
-                    {t.lastPaid ?? "—"}
-                  </td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {/* Rendered only when Yahoo actually returned dates. An empty state that
-          appears on every single load is a permanent fixture, not an empty
-          state — it trains you to ignore the panel. */}
-      {upcoming.length > 0 && (
-        <Card className="p-0">
-          <div className="flex items-center justify-between border-b border-line px-6 py-4">
-            <span className="inline-flex items-center gap-2">
-              <CalendarClock size={13} className="text-[var(--brass)]" />
-              <span className="eyebrow">Upcoming ex-dividend dates</span>
-            </span>
-            <span className="text-xs text-[var(--faint)]">from Yahoo Finance</span>
           </div>
-          <ul className="divide-y divide-line/60">
-            {upcoming.map((c) => (
-              <li
-                key={c.symbol}
-                className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5"
-              >
-                <span className="inline-flex items-center gap-3">
-                  <span className="font-medium text-[var(--brass)]">{c.symbol}</span>
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--jade)]/12 px-2.5 py-0.5 text-xs text-[var(--jade)]">
-                    ex-div {c.exDividendDate}
-                  </span>
-                  {c.payDate && (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brass)]/12 px-2.5 py-0.5 text-xs text-[var(--brass)]">
-                      pays {c.payDate}
-                    </span>
+          <div className={ruled.scroll}>
+            <table className={`${ruled.table} min-w-[640px]`}>
+              <thead>
+                <tr className={ruled.headRow}>
+                  {["Ticker", "Trailing 12 mo", "Share", "Yield on cost", "Projected / yr", "Last paid"].map(
+                    (h, i) => (
+                      <th
+                        key={h}
+                        className={`${ruled.th} ${i >= 1 && i !== 2 ? "text-right" : ""}`}
+                      >
+                        {h}
+                      </th>
+                    ),
                   )}
-                </span>
-                <span className="mono text-xs text-[var(--muted)]">
-                  {c.rate != null && `${formatCurrency(c.rate, currency)}/yr`}
-                  {c.yield != null && (
-                    <span className="ml-2 text-[var(--faint)]">{c.yield.toFixed(2)}%</span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Card>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((t) => {
+                  const dormant = t.count12m === 0 && t.trailing12m === 0;
+                  return (
+                    <tr key={t.ticker} className={`${ruled.row} ${dormant ? "opacity-60" : ""}`}>
+                      <td className={ruled.td}>
+                        <span className="mono font-medium">{t.ticker}</span>
+                        {t.name && <span className="ml-2.5 text-[13px] text-[var(--muted)]">{t.name}</span>}
+                        {dormant && (
+                          <span className="ml-2 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                            lapsed
+                          </span>
+                        )}
+                      </td>
+                      <td className={`${ruled.td} ${ruled.num}`}>
+                        {formatCurrency(t.trailing12m, t.currency)}
+                        <span className="ml-1.5 text-[10px] text-[var(--muted)]">×{t.count12m}</span>
+                      </td>
+                      {/* Concentration at a glance: one payer carrying most of the
+                          income is the thing worth noticing here. */}
+                      <td className={`${ruled.td} w-32`}>
+                        <Bar pct={topIncome > 0 ? Math.max(2, (t.trailing12m / topIncome) * 100) : 0} />
+                      </td>
+                      <td className={`${ruled.td} ${ruled.num}`}>
+                        {t.yieldOnCost != null ? (
+                          <span className="text-[var(--jade)]">{t.yieldOnCost.toFixed(2)}%</span>
+                        ) : (
+                          <span className="text-[var(--muted)]">—</span>
+                        )}
+                      </td>
+                      <td className={`${ruled.td} ${ruled.num} text-[var(--muted)]`}>
+                        {t.projectedAnnual > 0 ? formatCurrency(t.projectedAnnual, t.currency) : "—"}
+                      </td>
+                      <td className={`${ruled.td} ${ruled.num} text-[var(--muted)]`}>
+                        {t.lastPaid ?? "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
-
-    </div>
+    </section>
   );
 }

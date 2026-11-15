@@ -1,8 +1,10 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { Sidebar, MobileNav } from "@/components/sidebar";
+import { Sidebar, MobileNav, type SidebarStatus } from "@/components/sidebar";
 import { SyncButton } from "@/components/sync-button";
 import { CommandPalette } from "@/components/command-palette";
+import { Topbar } from "@/components/topbar";
+import { getDataFreshness } from "@/lib/data-freshness";
 import { RegisterSW } from "@/components/register-sw";
 import { ScaleInit, ObfuscationToggle } from "@/components/obfuscation";
 import { CurrencyInit } from "@/components/currency-switcher";
@@ -80,6 +82,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const tradingDesk = isTradingDeskEnabled();
 
+  // The sidebar's foot line: whether the data behind every figure is current.
+  // Same classification the Home banner uses, said in one line on every page.
+  const status = sidebarStatus(webDemo);
+
   // Demo banner (shown while exploring the bundled sample data). Precompute the
   // Plaid config so its "set up my accounts" modal can resume at the right step.
   const demo = isDemoMode();
@@ -105,6 +111,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           reviewCount={reviewCount}
           webDemo={webDemo}
           tradingDesk={tradingDesk}
+          status={status}
         />
         <div className="flex min-w-0 flex-1 flex-col">
           {entitlement?.status === "trial" && (
@@ -113,13 +120,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {demoInitial && <DemoBanner initial={demoInitial} webDemo={webDemo} />}
           {/* pt uses the iOS safe-area inset so the notch/status bar never
               covers the controls in standalone (Add to Home Screen) mode. */}
-          <header className="material sticky top-0 z-20 flex items-center gap-2 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-4 sm:px-8">
+          <header className="material sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-x-7 sm:px-8 lg:px-10">
             <MobileNav
               accounts={accounts}
               reviewCount={reviewCount}
               webDemo={webDemo}
               tradingDesk={tradingDesk}
             />
+            <Topbar tradingDesk={tradingDesk} reviewCount={reviewCount} />
             {/* Only the controls you reach for mid-task. Display currency and
                 counting pending charges are set-once preferences — Settings. */}
             <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
@@ -136,4 +144,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
     </>
   );
+}
+
+function sidebarStatus(webDemo: boolean): SidebarStatus {
+  if (webDemo) return { tone: "ok", label: "Read-only demo" };
+  const f = getDataFreshness();
+  const days = (n: number) => (n <= 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`);
+  if (f.state === "broken") return { tone: "bad", label: "A connection needs attention" };
+  if (f.state === "stale" && Number.isFinite(f.daysSinceLatest)) {
+    return { tone: "warn", label: `No new transactions in ${f.daysSinceLatest} days` };
+  }
+  if (f.connections.total === 0) return { tone: "ok", label: "Stays on this machine" };
+  const synced = Number.isFinite(f.connections.daysSinceAnySync)
+    ? ` · synced ${days(f.connections.daysSinceAnySync)}`
+    : "";
+  return { tone: "ok", label: `All connections healthy${synced}` };
 }

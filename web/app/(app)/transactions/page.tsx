@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { PageHead } from "@/components/page-head";
-import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
+import { Hero, Mark, Stat, StatStrip, Verdict } from "@/components/ui/statement";
 import { MatchesReview } from "@/components/transactions/matches-review";
-import { ReviewInbox } from "@/components/transactions/review-inbox";
+import { ReviewAllButton, ReviewInbox } from "@/components/transactions/review-inbox";
 import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { TransactionsFilterBar } from "@/components/transactions/transactions-filter-bar";
 import {
@@ -17,6 +17,7 @@ import {
   type TxnCriteria,
 } from "@/lib/queries";
 import { suggestMatches } from "@/lib/matching";
+import { getIncludePending } from "@/lib/pending";
 import { ledgerVerdict, reviewVerdict, type StatementVerdict } from "@/lib/transactions-verdict";
 import { formatCurrency } from "@/lib/utils";
 
@@ -87,39 +88,10 @@ function parseCriteria(sp: SearchParams): TxnCriteria {
 // The inbox loads a page at a time; reviewing a batch refreshes in the next one.
 const REVIEW_PAGE = 100;
 
-/** All ⇄ Needs review. Server-rendered links: the view lives in the URL. */
-function ViewTabs({ view, reviewCount }: { view: "all" | "review"; reviewCount: number }) {
-  const tabs = [
-    { key: "all", href: "/transactions", label: "All" },
-    { key: "review", href: "/transactions?view=review", label: "Needs review" },
-  ] as const;
-  return (
-    <nav aria-label="Transactions view" className="flex gap-1.5">
-      {tabs.map((t) => {
-        const on = t.key === view;
-        return (
-          <Link
-            key={t.key}
-            href={t.href}
-            aria-current={on ? "page" : undefined}
-            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
-              on
-                ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
-                : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-            }`}
-          >
-            {t.label}
-            {t.key === "review" && reviewCount > 0 && (
-              <span className="mono rounded-full bg-[color-mix(in_srgb,var(--brass)_18%,transparent)] px-1.5 text-xs text-[var(--brass)]">
-                {reviewCount.toLocaleString()}
-              </span>
-            )}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
+// Ledger rows on screen before "Show the rest" reveals everything loaded.
+const LEDGER_PAGE = 100;
+
+const META_LINK = "text-[var(--brass)] hover:underline";
 
 export default async function TransactionsPage({
   searchParams,
@@ -131,27 +103,44 @@ export default async function TransactionsPage({
 
   if (sp.view === "review") {
     const queue = getTransactionsToReview(REVIEW_PAGE);
+    // Offsetting pairs sit beside the inbox: linking one is the same kind of
+    // decision as confirming a row, and it takes both legs out of the totals.
+    const matches = suggestMatches();
+    const pairs = matches.length;
     // The loaded rows' own amounts, as the inbox lists them: what is waiting on
     // a look, split by direction.
     const out = queue.reduce((s, t) => s + Math.max(t.amount, 0), 0);
     const inn = queue.reduce((s, t) => s + Math.max(-t.amount, 0), 0);
     return (
-      <div className="space-y-7">
-        <PageHead
-          title="Transactions"
-          action={<ViewTabs view="review" reviewCount={reviewCount} />}
-        />
-        <section className="rise space-y-5" aria-label="Review backlog">
-          <Hero
-            eyebrow={reviewCount === 0 ? "Needs review · all caught up" : "Needs review"}
-            figure={reviewCount.toLocaleString()}
-            tone={reviewCount === 0 ? "jade" : "default"}
-            verdict={
-              <VerdictLine
-                v={reviewVerdict({ total: reviewCount, loaded: queue.length, out, in: inn })}
-              />
-            }
-          />
+      <div className="space-y-9">
+        <PageHead title="Transactions" />
+        <section className="rise space-y-5" aria-label="To review">
+          <div className="flex flex-wrap items-end justify-between gap-x-10 gap-y-5">
+            <Hero
+              eyebrow={
+                reviewCount === 0 ? "Transactions to review · all caught up" : "Transactions to review"
+              }
+              figure={reviewCount.toLocaleString()}
+              tone={reviewCount === 0 ? "jade" : "default"}
+              verdict={
+                <>
+                  <VerdictLine
+                    v={reviewVerdict({ total: reviewCount, loaded: queue.length, out, in: inn })}
+                  />
+                  {pairs > 0 && (
+                    <>
+                      {" "}
+                      <Mark tone="brass">
+                        {pairs === 1 ? "One offsetting pair" : `${pairs} offsetting pairs`}
+                      </Mark>{" "}
+                      could be linked so {pairs === 1 ? "it isn’t" : "they aren’t"} counted twice.
+                    </>
+                  )}
+                </>
+              }
+            />
+            <ReviewAllButton ids={queue.map((t) => t.id)} total={reviewCount} />
+          </div>
           {reviewCount > 0 && (
             <StatStrip>
               <Stat
@@ -168,8 +157,22 @@ export default async function TransactionsPage({
             </StatStrip>
           )}
         </section>
-        {reviewCount > 0 && (
-          <ReviewInbox transactions={queue} categories={getCategories()} total={reviewCount} />
+        {(reviewCount > 0 || pairs > 0) && (
+          <div
+            className={`grid gap-x-12 gap-y-9 ${
+              reviewCount > 0 && pairs > 0 ? "lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" : ""
+            }`}
+          >
+            {reviewCount > 0 && (
+              <ReviewInbox
+                transactions={queue}
+                categories={getCategories()}
+                total={reviewCount}
+                reviewAll={false}
+              />
+            )}
+            <MatchesReview suggestions={matches} />
+          </div>
         )}
       </div>
     );
@@ -183,79 +186,105 @@ export default async function TransactionsPage({
   const tags = getTags();
   const accounts = getAccounts().map((a) => ({ id: a.id, name: a.name }));
   const savedFilters = getSavedFilters();
-  const suggestions = filtered ? [] : suggestMatches();
+  // Possible matches are worked through in Review; here they are one line that
+  // says they exist. Only counted on the unfiltered ledger, as before.
+  const pairs = filtered ? 0 : suggestMatches().length;
 
   // Over every match, not the capped slice below — "500 most recent entries"
   // read as a total when it was a ceiling, and a filtered view never told you
   // what it cost.
   const summary = summarizeTransactions(criteria);
   const capped = summary.total > txns.length;
+  const verdict = ledgerVerdict({
+    total: summary.total,
+    spent: summary.spent,
+    received: summary.received,
+    filtered,
+  });
+  const bothWays = summary.spent > 0.005 && summary.received > 0.005;
 
   return (
     <div className="space-y-7">
-      <PageHead title="Transactions" action={<ViewTabs view="all" reviewCount={reviewCount} />} />
-      {/* What the matches cost, over every match rather than the capped slice:
-          the figure, a sentence setting it against income, then the rest of the
-          summary on one rule. */}
-      <section className="rise space-y-5" aria-label="Summary of these transactions">
-        <Hero
-          eyebrow={
-            summary.firstDate && summary.lastDate
-              ? `Out · ${formatDayRange(summary.firstDate, summary.lastDate)}`
-              : "Out"
-          }
-          figure={formatCurrency(summary.spent)}
-          verdict={
-            <VerdictLine
-              v={ledgerVerdict({
-                total: summary.total,
-                spent: summary.spent,
-                received: summary.received,
-                filtered,
-              })}
-            />
-          }
-        />
-        <StatStrip>
-          <Stat
-            label="In"
-            value={formatCurrency(summary.received)}
-            tone={summary.received > 0 ? "jade" : "default"}
-          />
-          {summary.transferred > 0 && (
-            <Stat
-              label="Between your accounts"
-              value={formatCurrency(summary.transferred)}
-              sub="not counted as spending"
-            />
-          )}
-          <Stat
-            label={filtered ? "Matching entries" : "Entries"}
-            value={summary.total.toLocaleString()}
-            sub={capped ? `showing ${txns.length.toLocaleString()} most recent` : undefined}
-          />
-          {summary.unreviewed > 0 && (
-            <Stat
-              label="Never reviewed"
-              value={summary.unreviewed.toLocaleString()}
-              tone="brass"
-            />
-          )}
-        </StatStrip>
-      </section>
-
-      <TransactionsFilterBar
-        criteria={criteria}
+      <PageHead title="Transactions" />
+      <TransactionsTable
+        dock
+        transactions={txns}
         categories={categories}
-        accounts={accounts}
-        tags={tags}
-        savedFilters={savedFilters}
-        resultCount={txns.length}
+        pageSize={LEDGER_PAGE}
+        total={summary.total}
+        lead={
+          <>
+            {/* What the matches cost, over every match rather than the capped
+                slice: one sentence setting money out against money in, then
+                the counts on a quiet line. */}
+            <section className="rise space-y-2" aria-label="Summary of these transactions">
+              <Verdict className="max-w-[60ch]">
+                {summary.total === 0 ? (
+                  <VerdictLine v={verdict} />
+                ) : (
+                  <>
+                    <span className="tabular">{formatCurrency(summary.spent)}</span> out against{" "}
+                    <Mark tone={summary.received > 0 ? "jade" : "muted"}>
+                      {formatCurrency(summary.received)}
+                    </Mark>{" "}
+                    in.
+                    {bothWays && verdict.amount != null && (
+                      <>
+                        {" "}
+                        <VerdictLine v={verdict} />
+                      </>
+                    )}
+                    {summary.transferred > 0 && (
+                      <span className="text-[var(--muted)]">
+                        {" "}
+                        A further {formatCurrency(summary.transferred)} moved between your own
+                        accounts, not counted as spending.
+                      </span>
+                    )}
+                  </>
+                )}
+              </Verdict>
+              {summary.total > 0 && (
+                <p className="text-[13px] text-[var(--muted)]">
+                  {summary.total.toLocaleString()} {filtered ? "matching " : ""}
+                  {summary.total === 1 ? "entry" : "entries"}
+                  {summary.firstDate && summary.lastDate && (
+                    <> · {formatDayRange(summary.firstDate, summary.lastDate)}</>
+                  )}
+                  {capped && <> · the {txns.length.toLocaleString()} most recent loaded</>}
+                  {summary.unreviewed > 0 && (
+                    <>
+                      {" · "}
+                      <Link href="/transactions?reviewed=no" className={META_LINK}>
+                        {summary.unreviewed.toLocaleString()} not reviewed
+                      </Link>
+                    </>
+                  )}
+                  {pairs > 0 && (
+                    <>
+                      {" · "}
+                      <Link href="/transactions?view=review" className={META_LINK}>
+                        {pairs} possible {pairs === 1 ? "match" : "matches"} to link
+                      </Link>
+                    </>
+                  )}
+                </p>
+              )}
+            </section>
+
+            <TransactionsFilterBar
+              // Re-seed the controls when a link (not the bar) changes the criteria.
+              key={JSON.stringify(criteria)}
+              criteria={criteria}
+              categories={categories}
+              accounts={accounts}
+              tags={tags}
+              savedFilters={savedFilters}
+              countPending={getIncludePending()}
+            />
+          </>
+        }
       />
-
-      <MatchesReview suggestions={suggestions} />
-
-      <TransactionsTable transactions={txns} categories={categories} />
     </div>
   );
 }

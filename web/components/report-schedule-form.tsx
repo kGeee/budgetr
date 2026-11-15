@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CheckCircle2, ExternalLink, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SettingRow, SettingRows } from "@/app/(app)/settings/setting-row";
+import { Switch } from "@/app/(app)/settings/switch";
 import {
   saveReportSchedule,
   sendReportEmail,
@@ -57,6 +58,22 @@ export function ReportScheduleForm({ initial }: { initial: ReportSchedule }) {
     <div>
       <SettingRows>
         <SettingRow
+          title="Enable scheduled sending"
+          control={
+            <Switch
+              id="report-enabled"
+              on={enabled}
+              label="Enable scheduled sending"
+              onToggle={() => setEnabled((v) => !v)}
+            />
+          }
+        >
+          Totals, top vendors, category breakdown and net worth. Delivery is not wired to a mail
+          provider yet — reports are rendered and logged when an external cron hits{" "}
+          <code className="mono">/api/reports/run</code>.
+        </SettingRow>
+
+        <SettingRow
           title="Frequency"
           control={
             <div className="flex flex-wrap gap-1.5">
@@ -68,7 +85,7 @@ export function ReportScheduleForm({ initial }: { initial: ReportSchedule }) {
                     type="button"
                     onClick={() => setFrequency(f.value)}
                     aria-pressed={active}
-                    className={`rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
+                    className={`min-h-[38px] rounded-full border px-4 text-sm transition-colors ${
                       active
                         ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
                         : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
@@ -101,24 +118,10 @@ export function ReportScheduleForm({ initial }: { initial: ReportSchedule }) {
           Where the report is sent.
         </SettingRow>
 
-        <SettingRow
-          title={<label htmlFor="report-enabled">Enable scheduled sending</label>}
-          control={
-            <input
-              id="report-enabled"
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className="h-4 w-4 cursor-pointer accent-[var(--jade)]"
-            />
-          }
-        >
-          An external cron hits <code className="mono">/api/reports/run</code>.
-        </SettingRow>
       </SettingRows>
 
       {/* Actions */}
-      <div className="flex flex-wrap items-center gap-2 border-t border-line py-5">
+      <div className="flex flex-wrap items-center gap-2 pt-3.5">
         <Button variant="primary" size="sm" onClick={save} disabled={savePending}>
           {savePending ? "Saving…" : "Save schedule"}
         </Button>
@@ -140,10 +143,10 @@ export function ReportScheduleForm({ initial }: { initial: ReportSchedule }) {
         )}
       </div>
 
-      {sendMsg && <p className="pb-2 text-sm text-[var(--muted)]">{sendMsg}</p>}
+      {sendMsg && <p className="pt-3 text-sm text-[var(--muted)]">{sendMsg}</p>}
 
       {initial.lastSentAt && (
-        <p className="text-xs text-[var(--muted)]">
+        <p className="pt-2 text-xs text-[var(--muted)]">
           Last sent {new Date(initial.lastSentAt).toLocaleString()}.
         </p>
       )}

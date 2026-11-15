@@ -2,7 +2,7 @@ import Link from "next/link";
 import { FileText, Settings2 } from "lucide-react";
 import { PageHead } from "@/components/page-head";
 import { REPORT_PERIODS, REPORT_PERIOD_LABELS, type ReportPeriod } from "@/lib/report";
-import { SPENDING_VIEWS, spendingHref, type SpendingView } from "./href";
+import { spendingHref, type SpendingView } from "./href";
 
 const pill = (active: boolean) =>
   `rounded-full border px-3 py-1.5 text-sm transition-colors ${
@@ -51,18 +51,8 @@ export function SpendingNav({
         }
       />
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav className="flex flex-wrap gap-1.5" aria-label="Spending views">
-          {SPENDING_VIEWS.map((v) => (
-            <Link
-              key={v.key}
-              href={spendingHref({ view: v.key, period: explicitPeriod })}
-              aria-current={v.key === view ? "page" : undefined}
-              className={pill(v.key === view)}
-            >
-              {v.label}
-            </Link>
-          ))}
-        </nav>
+        {/* The views are tabs in the top bar now; this row keeps their side links. */}
+        <span />
         <div className="flex items-center gap-4 text-sm">
           {view === "category" && (
             <Link

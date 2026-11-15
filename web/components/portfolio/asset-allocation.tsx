@@ -3,7 +3,8 @@
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, ChevronDown, Pencil, Plus, Tag, X } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { SectionHead } from "@/components/ui/statement";
+import { ruled, Segmented } from "@/components/portfolio/ruled";
 import {
   AllocationDonut,
   PIE_COLORS,
@@ -281,18 +282,18 @@ export function AssetAllocation({
   const anyTargets = Object.keys(effTargets).length > 0;
 
   return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Allocation</span>
-        <span className="text-xs text-[var(--faint)]">vs. your target mix</span>
-      </div>
+    <section className="space-y-5">
+      <SectionHead
+        title="Allocation"
+        action={<span className="text-xs text-[var(--muted)]">vs. your target mix</span>}
+      />
 
       {concentration.length > 0 && (
-        <div className="space-y-2 border-b border-line px-6 py-4">
+        <ul>
           {concentration.map((w) => (
-            <div
+            <li
               key={w.key}
-              className="flex items-center gap-3 rounded-[var(--radius)] border border-[var(--coral)]/40 bg-[var(--coral)]/10 px-4 py-2.5 text-sm"
+              className="flex items-center gap-3 border-b border-line py-2.5 text-sm first:pt-0"
             >
               <AlertTriangle size={15} className="shrink-0 text-[var(--coral)]" />
               <span className="text-[var(--paper)]">
@@ -305,61 +306,41 @@ export function AssetAllocation({
                   {formatCurrency(w.value)}. Consider trimming to reduce single-position risk.
                 </span>
               </span>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
-      <div className="border-b border-line px-6 pt-4">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {(
-            [
-              { id: "class", label: "Asset class" },
-              { id: "sector", label: "Sector" },
-              { id: "region", label: "Region" },
-            ] as const
-          ).map((t) => {
-            const on = view === t.id;
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Segmented
+          label="Break down by"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "class", label: "Asset class" },
             // A view with nothing in it is offered but explains itself rather
             // than rendering an empty chart on every single load.
-            const empty =
-              (t.id === "sector" && sectorSlices.length === 0) ||
-              (t.id === "region" && !geoClassified);
-            return (
-              <button
-                key={t.id}
-                onClick={() => setView(t.id)}
-                aria-current={on ? "true" : undefined}
-                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                  on
-                    ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
-                    : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-                }`}
-              >
-                {t.label}
-                {empty && <span className="ml-1.5 text-[var(--faint)]">·</span>}
-              </button>
-            );
-          })}
-          {activeSector && (
-            <button
-              onClick={() => onSelectSector(null)}
-              className="ml-auto inline-flex items-center gap-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
-            >
-              <Tag size={11} /> {activeSector} <X size={11} />
-            </button>
-          )}
-        </div>
-        <div className="h-4" />
+            { value: "sector", label: sectorSlices.length === 0 ? "Sector ·" : "Sector" },
+            { value: "region", label: geoClassified ? "Region" : "Region ·" },
+          ]}
+        />
+        {activeSector && (
+          <button
+            onClick={() => onSelectSector(null)}
+            className="inline-flex items-center gap-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
+          >
+            <Tag size={11} /> {activeSector} <X size={11} />
+          </button>
+        )}
       </div>
 
       {view === "class" && (
-        <div className="grid gap-8 px-6 py-6 lg:grid-cols-2">
+        <div className="grid gap-8 lg:grid-cols-2">
           <div className="min-w-0">
             <AllocationDonut data={assetChartData} total={assetTotal} />
           </div>
           <div className="min-w-0">
-            <p className="eyebrow mb-3">Ranked by value</p>
+            <p className="mb-3 text-xs text-[var(--muted)]">Ranked by value</p>
             <ul className="space-y-1.5 text-sm">
               {assetChartData.map((d) => (
                 <li key={d.sector} className="flex items-center justify-between gap-3">
@@ -388,19 +369,19 @@ export function AssetAllocation({
             onSelect={onSelectSector}
           />
         ) : (
-          <p className="px-6 py-10 text-center text-sm text-[var(--muted)]">
-            No sectors assigned yet. Tag a holding on the table below to start.
+          <p className="py-8 text-sm text-[var(--muted)]">
+            No sectors assigned yet. Tag a holding on the Holdings tab to start.
           </p>
         ))}
 
       {view === "region" && (
-        <div className="px-6 py-6">
+        <div>
           {geoClassified ? (
             <>
               <SectorBarChart
                 data={geoChartData.filter((d) => d.sector !== UNCLASSIFIED_REGION)}
               />
-              <p className="mt-3 text-xs text-[var(--faint)]">
+              <p className="mt-3 text-xs text-[var(--muted)]">
                 {geoChartData.find((d) => d.sector === UNCLASSIFIED_REGION)
                   ? `${formatCurrency(
                       geoChartData.find((d) => d.sector === UNCLASSIFIED_REGION)!.value,
@@ -420,23 +401,26 @@ export function AssetAllocation({
       )}
 
       {/* ── Targets & drift ─────────────────────────────────────────────── */}
-      <div className="border-t border-line">
-        <div className="flex items-center justify-between px-6 py-3">
-          <span className="eyebrow">Target vs. actual</span>
-          {!anyTargets && (
-            <span className="text-xs text-[var(--faint)]">
-              Set targets to see rebalancing hints
-            </span>
-          )}
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
+      <div className="space-y-3 pt-2">
+        <SectionHead
+          title="Target vs. actual"
+          className="border-b-0 pb-0"
+          action={
+            !anyTargets && (
+              <span className="text-xs text-[var(--muted)]">
+                Set targets to see rebalancing hints
+              </span>
+            )
+          }
+        />
+        <div className={ruled.scroll}>
+          <table className={`${ruled.table} min-w-[560px]`}>
             <thead>
-              <tr className="border-b border-line text-left">
+              <tr className={ruled.headRow}>
                 {["Allocation", "Actual", "Target", "Drift", "Rebalance"].map((h, i) => (
                   <th
                     key={h}
-                    className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                    className={`${ruled.th} ${i >= 1 ? "text-right" : ""}`}
                   >
                     {h}
                   </th>
@@ -463,12 +447,13 @@ export function AssetAllocation({
       </div>
 
       {/* ── Classify positions ──────────────────────────────────────────── */}
-      <div className="border-t border-line">
+      <div>
         <button
           onClick={() => setShowClassify((v) => !v)}
-          className="flex w-full items-center justify-between px-6 py-3 text-left transition hover:bg-[var(--panel-2)]"
+          aria-expanded={showClassify}
+          className="flex w-full items-center justify-between border-b border-[var(--line-strong)] pb-2.5 text-left"
         >
-          <span className="eyebrow">Classify positions</span>
+          <span className="font-display text-lg tracking-tight">Classify positions</span>
           <span className="flex items-center gap-2 text-xs text-[var(--muted)]">
             asset class &amp; region overrides
             <ChevronDown
@@ -478,14 +463,14 @@ export function AssetAllocation({
           </span>
         </button>
         {showClassify && (
-          <div className="overflow-x-auto border-t border-line">
-            <table className="w-full min-w-[520px] text-sm">
+          <div className={`${ruled.scroll} pt-3`}>
+            <table className={`${ruled.table} min-w-[520px]`}>
               <thead>
-                <tr className="border-b border-line text-left">
+                <tr className={ruled.headRow}>
                   {["Position", "Value", "Asset class", "Region"].map((h, i) => (
                     <th
                       key={h}
-                      className={`px-6 py-2.5 eyebrow font-medium ${i === 1 ? "text-right" : ""}`}
+                      className={`${ruled.th} ${i === 1 ? "text-right" : ""}`}
                     >
                       {h}
                     </th>
@@ -505,25 +490,25 @@ export function AssetAllocation({
                   return (
                     <tr
                       key={r.sectorKey}
-                      className="border-b border-line/60 last:border-0"
+                      className="border-b border-line"
                     >
-                      <td className="px-6 py-2.5">
+                      <td className="py-3 pr-5 last:pr-0">
                         <span className="font-medium text-[var(--brass)]">
                           {tickerKey(r) ?? "—"}
                         </span>
                         <span className="ml-2 text-[var(--muted)]">{r.securityName}</span>
                       </td>
-                      <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
+                      <td className="mono py-3 pr-5 last:pr-0 text-right text-[var(--muted)]">
                         {formatCurrency(r.value)}
                       </td>
-                      <td className="px-6 py-2.5">
+                      <td className="py-3 pr-5 last:pr-0">
                         <ClassEditor
                           value={classOf(r)}
                           isOverridden={Boolean(override)}
                           onSave={(cls) => saveClass(r.sectorKey, cls)}
                         />
                       </td>
-                      <td className="px-6 py-2.5">
+                      <td className="py-3 pr-5 last:pr-0">
                         <RegionEditor
                           region={region?.trim() || null}
                           options={regionOptions}
@@ -538,7 +523,7 @@ export function AssetAllocation({
           </div>
         )}
       </div>
-    </Card>
+    </section>
   );
 }
 
@@ -566,27 +551,27 @@ function DriftTableRow({
   const overweight = (driftPct ?? 0) > 0;
   const inBand = driftPct != null && Math.abs(driftPct) < 1;
   return (
-    <tr className="border-b border-line/60 last:border-0">
-      <td className="px-6 py-2.5">
+    <tr className="border-b border-line">
+      <td className="py-3 pr-5 last:pr-0">
         <span className="inline-flex items-center gap-2">
           <span className="text-[var(--paper)]">{label}</span>
           {dimension !== "class" && (
-            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
               {dimension}
             </span>
           )}
         </span>
       </td>
-      <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
+      <td className="mono py-3 pr-5 last:pr-0 text-right text-[var(--muted)]">
         {currentPct.toFixed(1)}%
       </td>
-      <td className="px-6 py-2.5 text-right">
+      <td className="py-3 pr-5 last:pr-0 text-right">
         <PercentEditor value={targetPct} onSave={onSetTarget} onClear={onClear} />
       </td>
       <td
-        className={`mono px-6 py-2.5 text-right ${
+        className={`mono py-3 pr-5 last:pr-0 text-right ${
           driftPct == null
-            ? "text-[var(--faint)]"
+            ? "text-[var(--muted)]"
             : inBand
               ? "text-[var(--muted)]"
               : overweight
@@ -599,9 +584,9 @@ function DriftTableRow({
           : `${driftPct >= 0 ? "+" : "−"}${Math.abs(driftPct).toFixed(1)} pts`}
       </td>
       <td
-        className={`mono px-6 py-2.5 text-right ${
+        className={`mono py-3 pr-5 last:pr-0 text-right ${
           deltaValue == null || inBand
-            ? "text-[var(--faint)]"
+            ? "text-[var(--muted)]"
             : deltaValue >= 0
               ? "text-[var(--jade)]"
               : "text-[var(--coral)]"
@@ -672,7 +657,7 @@ function PercentEditor({
           placeholder="—"
           className="w-16 rounded-md border border-line bg-[var(--panel-2)] px-2 py-0.5 text-right text-xs text-[var(--paper)] outline-none focus:border-[var(--brass-dim)]"
         />
-        <span className="text-xs text-[var(--faint)]">%</span>
+        <span className="text-xs text-[var(--muted)]">%</span>
       </span>
     );
   }
@@ -687,7 +672,7 @@ function PercentEditor({
       className={`group/pct mono inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition ${
         value != null
           ? "border-line text-[var(--paper)] hover:border-[var(--brass-dim)]"
-          : "border-dashed border-line text-[var(--faint)] hover:text-[var(--muted)]"
+          : "border-dashed border-line text-[var(--muted)] hover:text-[var(--muted)]"
       }`}
     >
       {value != null ? `${value}%` : "set"}
@@ -775,7 +760,7 @@ function ClassEditor({
         style={{ background: ASSET_CLASS_COLORS[value] }}
       />
       {ASSET_CLASS_LABELS[value]}
-      {!isOverridden && <span className="text-[10px] text-[var(--faint)]">auto</span>}
+      {!isOverridden && <span className="text-[10px] text-[var(--muted)]">auto</span>}
       <Pencil size={9} className="opacity-0 transition group-hover/cls:opacity-60" />
     </button>
   );
@@ -862,7 +847,7 @@ function RegionEditor({
         setVal("");
         setOpen(true);
       }}
-      className="inline-flex items-center gap-1 rounded-full border border-dashed border-line px-2 py-0.5 text-[11px] text-[var(--faint)] transition hover:text-[var(--muted)]"
+      className="inline-flex items-center gap-1 rounded-full border border-dashed border-line px-2 py-0.5 text-[11px] text-[var(--muted)] transition hover:text-[var(--muted)]"
     >
       <Tag size={9} /> region
     </button>
@@ -897,7 +882,7 @@ function AddTargetRow({
 
   if (!open) {
     return (
-      <div className="border-t border-line px-6 py-3">
+      <div className="pt-3">
         <button
           onClick={() => setOpen(true)}
           className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
@@ -911,7 +896,7 @@ function AddTargetRow({
   const options = dimension === "sector" ? sectorOptions : tickerOptions;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-line px-6 py-3">
+    <div className="flex flex-wrap items-center gap-2 pt-3">
       <div className="inline-flex overflow-hidden rounded-md border border-line text-xs">
         {(["sector", "ticker"] as const).map((d) => (
           <button
@@ -951,7 +936,7 @@ function AddTargetRow({
           placeholder="%"
           className="w-16 rounded-md border border-line bg-[var(--panel-2)] px-2 py-1 text-right text-xs text-[var(--paper)] outline-none focus:border-[var(--brass-dim)]"
         />
-        <span className="text-xs text-[var(--faint)]">%</span>
+        <span className="text-xs text-[var(--muted)]">%</span>
       </span>
       <button
         onClick={submit}
@@ -962,7 +947,7 @@ function AddTargetRow({
       <button
         onClick={() => setOpen(false)}
         aria-label="Cancel"
-        className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--paper)]"
+        className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--paper)]"
       >
         <X size={14} />
       </button>
@@ -990,7 +975,7 @@ function SectorView({
   const total = slices.reduce((s, d) => s + d.value, 0);
   return (
     <>
-      <div className="grid gap-8 px-6 py-6 lg:grid-cols-2">
+      <div className="grid gap-8 lg:grid-cols-2">
         <AllocationDonut
           data={slices}
           total={total}
@@ -998,18 +983,18 @@ function SectorView({
           onSelect={onSelect}
         />
         <div className="min-w-0">
-          <p className="eyebrow mb-3">Ranked by value</p>
+          <p className="mb-3 text-xs text-[var(--muted)]">Ranked by value</p>
           <SectorBarChart data={slices} activeSector={activeSector} onSelect={onSelect} />
         </div>
       </div>
-      <div className="overflow-x-auto border-t border-line">
-        <table className="w-full text-sm">
+      <div className={`${ruled.scroll} pt-5`}>
+        <table className={`${ruled.table} min-w-[480px]`}>
           <thead>
-            <tr className="border-b border-line text-left">
+            <tr className={ruled.headRow}>
               {["Sector", "Value", "% of portfolio", "Holdings"].map((h, i) => (
                 <th
                   key={h}
-                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                  className={`${ruled.th} ${i >= 1 ? "text-right" : ""}`}
                 >
                   {h}
                 </th>
@@ -1024,11 +1009,11 @@ function SectorView({
                 <tr
                   key={d.sector}
                   onClick={() => onSelect(active ? null : d.sector)}
-                  className={`cursor-pointer border-b border-line/60 last:border-0 transition-colors hover:bg-[var(--panel-2)] ${
+                  className={`cursor-pointer border-b border-line transition-colors hover:bg-[var(--panel-2)] ${
                     active ? "bg-[var(--panel-2)]" : ""
                   }`}
                 >
-                  <td className="px-6 py-2.5">
+                  <td className="py-3 pr-5 last:pr-0">
                     <span className="inline-flex items-center gap-2.5">
                       <span
                         className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
@@ -1039,11 +1024,11 @@ function SectorView({
                       </span>
                     </span>
                   </td>
-                  <td className="mono px-6 py-2.5 text-right">{formatCurrency(d.value)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">
+                  <td className="mono py-3 pr-5 last:pr-0 text-right">{formatCurrency(d.value)}</td>
+                  <td className="mono py-3 pr-5 last:pr-0 text-right text-[var(--muted)]">
                     {pct.toFixed(1)}%
                   </td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--muted)]">{d.count}</td>
+                  <td className="mono py-3 pr-5 last:pr-0 text-right text-[var(--muted)]">{d.count}</td>
                 </tr>
               );
             })}

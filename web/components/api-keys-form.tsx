@@ -88,7 +88,7 @@ export function ApiKeysForm({
   const Field = rows ? RowField : StackField;
 
   return (
-    <div className={rows ? "divide-y divide-[var(--line)]" : "space-y-4"}>
+    <div className={rows ? undefined : "space-y-4"}>
       <Field label="Plaid client ID" hint="Identifies your Plaid application.">
         <input
           type="text"
@@ -169,15 +169,33 @@ export function ApiKeysForm({
         </p>
       )}
 
-      <div className={`flex flex-wrap items-center gap-3 ${rows ? "py-5" : "pt-1"}`}>
-        <Button variant="primary" onClick={save} disabled={pending}>
-          {pending ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
-          {saveLabel}
-        </Button>
-        <Button variant="outline" onClick={test} disabled={pending}>
-          Test connection
-        </Button>
-      </div>
+      {rows ? (
+        // Settings: the reassurance on the left, the two actions on the right.
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3.5">
+          <span className="text-[13px] text-[var(--muted)]">
+            Keys are encrypted on this device and never shown again in full.
+          </span>
+          <span className="flex flex-wrap gap-2">
+            <Button variant="secondary" className="h-11" onClick={test} disabled={pending}>
+              Test connection
+            </Button>
+            <Button variant="primary" className="h-11" onClick={save} disabled={pending}>
+              {pending ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
+              {saveLabel}
+            </Button>
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <Button variant="primary" onClick={save} disabled={pending}>
+            {pending ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
+            {saveLabel}
+          </Button>
+          <Button variant="outline" onClick={test} disabled={pending}>
+            Test connection
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

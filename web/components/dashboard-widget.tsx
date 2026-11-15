@@ -2,8 +2,6 @@
 
 import {
   Activity,
-  ArrowDownRight,
-  ArrowUpRight,
   BarChart3,
   CalendarClock,
   CalendarDays,
@@ -19,10 +17,15 @@ import Link from "next/link";
 import { CashflowChart, CategoryChart, NetWorthChart } from "@/components/charts";
 import { SpendHeatmap } from "@/components/budget/spend-heatmap";
 import { ReviewInbox } from "@/components/transactions/review-inbox";
+import {
+  Amount,
+  CategoryDot,
+  categoryColors,
+  shortDate,
+} from "@/components/transactions/ledger-bits";
 import { UpcomingBills } from "@/components/budget/upcoming-bills";
-import { CategoryIcon } from "@/components/budget/category-pill";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
+import { Figure, Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
+import type { MonthPace } from "@/lib/home-layout";
 import {
   WidgetControls,
   type ControlOption,
@@ -30,6 +33,8 @@ import {
 } from "@/components/widget-controls";
 import { formatCurrency } from "@/lib/utils";
 import type {
+  BudgetRow,
+  BudgetSummary,
   CategoryRow,
   WidgetConfig,
   NetWorth,
@@ -43,8 +48,8 @@ import type {
 /**
  * Static metadata for every widget kind — the label, one-line blurb, icon, and
  * the default config a freshly-added widget starts with. Shared by the picker
- * (what you can add) and the renderer (the card header). Column span lets wide
- * charts (net-worth, cashflow) claim the full grid width.
+ * (what you can add) and the renderer (the section title). Where a widget sits
+ * on the page is WIDGET_SLOT in lib/home-layout.
  */
 /** Reusable option sets, so every range pill in the app reads the same. */
 const DAY_RANGES: ControlOption[] = [
@@ -105,7 +110,6 @@ export const WIDGET_META: Record<
     label: string;
     blurb: string;
     icon: LucideIcon;
-    wide: boolean;
     defaultConfig: Record<string, number>;
     /** Range/order pills shown in this widget's header. */
     controls?: WidgetControlSpec[];
@@ -115,14 +119,12 @@ export const WIDGET_META: Record<
     label: "Net worth",
     blurb: "Assets minus liabilities over time",
     icon: Activity,
-    wide: true,
     defaultConfig: {},
   },
   cashflow: {
     label: "Cashflow",
     blurb: "Income vs spending, by month",
     icon: BarChart3,
-    wide: true,
     defaultConfig: { months: 6 },
     controls: [months(6)],
   },
@@ -130,7 +132,6 @@ export const WIDGET_META: Record<
     label: "Spend by category",
     blurb: "Where the money went",
     icon: PieChart,
-    wide: false,
     defaultConfig: { days: 30 },
     controls: [range(DAY_RANGES, 30), order(false)],
   },
@@ -138,7 +139,6 @@ export const WIDGET_META: Record<
     label: "Top vendors",
     blurb: "Your biggest merchants",
     icon: Store,
-    wide: false,
     defaultConfig: { days: 90, limit: 8 },
     controls: [range(DAY_RANGES, 90), order(true), rows(8)],
   },
@@ -146,49 +146,42 @@ export const WIDGET_META: Record<
     label: "Daily spend",
     blurb: "A year of spending, day by day",
     icon: CalendarDays,
-    wide: true,
     defaultConfig: {},
   },
   "budget-summary": {
     label: "Budget summary",
     blurb: "This month against plan",
     icon: Target,
-    wide: false,
     defaultConfig: {},
   },
   "net-worth-summary": {
     label: "Net worth",
     blurb: "Headline number, assets vs liabilities, trend",
     icon: Wallet,
-    wide: true,
     defaultConfig: {},
   },
   "spending-review": {
     label: "Spending review",
     blurb: "This month vs last, and what moved",
     icon: Receipt,
-    wide: true,
     defaultConfig: {},
   },
   "review-queue": {
     label: "Review queue",
     blurb: "Transactions that need a category",
     icon: ListChecks,
-    wide: true,
     defaultConfig: { limit: 6 },
   },
   "recent-activity": {
     label: "Recent activity",
     blurb: "Your latest transactions",
     icon: Activity,
-    wide: false,
     defaultConfig: { limit: 6 },
   },
   "upcoming-bills": {
     label: "Upcoming bills",
     blurb: "Predicted charges in the next two weeks",
     icon: CalendarClock,
-    wide: false,
     defaultConfig: { days: 14 },
   },
 };
@@ -196,20 +189,24 @@ export const WIDGET_META: Record<
 export const WIDGET_TYPES = Object.keys(WIDGET_META) as WidgetType[];
 
 /**
- * Widgets that render their own titled container (an inbox, a hero card, a bills
- * list) rather than a bare chart. They skip the standard Card + CardHeader
- * wrapper so we don't double up borders/titles.
+ * Widgets that bring their own title rule (a hero, an inbox, a list with a
+ * link beside its name). The rest are a bare chart or list and get the
+ * standard section head, with their range pills in it.
  */
-const SELF_CONTAINED = new Set<WidgetType>([
+const SELF_TITLED = new Set<WidgetType>([
   "net-worth-summary",
   "review-queue",
   "recent-activity",
   "upcoming-bills",
   "spending-review",
+  "budget-summary",
 ]);
 
-/** Renders one resolved widget, dispatching on its data `type`. Chart widgets
- *  get a standard titled Card; self-contained widgets render their own shell. */
+const HEAD_LINK = "text-[13px] text-[var(--muted)] transition-colors hover:text-[var(--paper)]";
+
+/** Renders one resolved widget, dispatching on its data `type`. Every widget is
+ *  a titled section sitting on the canvas: a rule under its name, ruled rows
+ *  beneath, no card. */
 export function DashboardWidget({
   id,
   config = {},
@@ -222,23 +219,21 @@ export function DashboardWidget({
   data: WidgetData;
   categories: CategoryRow[];
 }) {
-  if (SELF_CONTAINED.has(data.type)) {
+  if (SELF_TITLED.has(data.type)) {
     return <WidgetBody data={data} categories={categories} />;
   }
   const meta = WIDGET_META[data.type];
-  const Icon = meta.icon;
   const controls = id && meta.controls?.length ? meta.controls : null;
   return (
-    <Card className="h-full">
-      <CardHeader className={controls ? "flex flex-wrap items-center justify-between gap-2" : undefined}>
-        <CardTitle className="flex items-center gap-2">
-          <Icon size={13} className="text-[var(--brass)]" />
-          {meta.label}
-        </CardTitle>
-        {controls && <WidgetControls widgetId={id!} config={config} specs={controls} />}
-      </CardHeader>
-      <WidgetBody data={data} categories={categories} />
-    </Card>
+    <section aria-label={meta.label}>
+      <SectionHead
+        title={meta.label}
+        action={controls && <WidgetControls widgetId={id!} config={config} specs={controls} />}
+      />
+      <div className="pt-4">
+        <WidgetBody data={data} categories={categories} />
+      </div>
+    </section>
   );
 }
 
@@ -272,7 +267,7 @@ function WidgetBody({
         />
       );
     case "budget-summary":
-      return <BudgetSummaryBody summary={data.summary} />;
+      return <BudgetsBody summary={data.summary} rows={data.rows} pace={data.pace} />;
     case "net-worth-summary":
       return (
         <NetWorthSummaryBody
@@ -291,7 +286,7 @@ function WidgetBody({
         />
       );
     case "recent-activity":
-      return <RecentActivityBody transactions={data.transactions} />;
+      return <RecentActivityBody transactions={data.transactions} categories={categories} />;
     case "upcoming-bills":
       return <UpcomingBills bills={data.bills} />;
     case "spending-review":
@@ -367,17 +362,18 @@ function ReviewQueueBody({
 }) {
   if (total === 0) {
     return (
-      <Card className="flex h-full min-h-[160px] flex-col items-center justify-center text-center">
-        <span className="grid h-11 w-11 place-items-center rounded-2xl border border-line text-[var(--jade)]">
-          <ListChecks size={20} />
-        </span>
-        <p className="mt-4 font-display text-lg text-[var(--paper)]">All caught up</p>
-        <p className="mt-1 text-sm text-[var(--muted)]">Nothing waiting to be categorized.</p>
-      </Card>
+      <section aria-label="To review">
+        <SectionHead title="To review" />
+        <p className="border-b border-line py-3.5 text-sm">
+          <span className="font-medium text-[var(--jade)]">All caught up.</span>{" "}
+          <span className="text-[var(--muted)]">Nothing waiting to be categorized.</span>
+        </p>
+      </section>
     );
   }
   return (
     <ReviewInbox
+      title="To review"
       transactions={transactions}
       categories={categories}
       total={total}
@@ -386,50 +382,65 @@ function ReviewQueueBody({
   );
 }
 
-function RecentActivityBody({ transactions }: { transactions: TransactionRow[] }) {
+function RecentActivityBody({
+  transactions,
+  categories,
+}: {
+  transactions: TransactionRow[];
+  categories: CategoryRow[];
+}) {
+  const colors = categoryColors(categories);
   return (
-    <Card className="h-full">
-      <CardHeader>
-        <CardTitle>Recent activity</CardTitle>
-      </CardHeader>
-      <ul className="-mx-2">
-        {transactions.map((t) => {
-          const income = t.amount < 0;
-          return (
-            <li
-              key={t.id}
-              className="flex items-center gap-4 rounded-lg px-2 py-3 transition-colors hover:bg-[var(--panel-2)]"
-            >
-              <span
-                className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border ${
-                  income
-                    ? "border-[color-mix(in_srgb,var(--jade)_35%,transparent)] text-[var(--jade)]"
-                    : "border-line text-[var(--muted)]"
-                }`}
+    <section aria-label="Recent activity">
+      <SectionHead
+        title="Recent activity"
+        action={
+          <Link href="/transactions" className={HEAD_LINK}>
+            All transactions
+          </Link>
+        }
+      />
+      {transactions.length === 0 ? (
+        <p className="border-b border-line py-3.5 text-sm text-[var(--muted)]">
+          No transactions yet. Hit Sync to bring them in.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <ul className="min-w-[520px]">
+            {transactions.map((t) => (
+              <li
+                key={t.id}
+                className="grid min-h-[46px] grid-cols-[56px_minmax(0,1.4fr)_minmax(0,1fr)_110px] items-center gap-4 border-b border-line"
               >
-                {income ? <ArrowDownRight size={16} /> : <ArrowUpRight size={16} />}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{t.displayName}</p>
-                <p className="flex items-center gap-1.5 truncate text-xs text-[var(--muted)]">
-                  <CategoryIcon icon={t.categoryIcon} size={12} className="text-[var(--brass)]" />
-                  {t.categoryName} · {t.accountName}
-                </p>
-              </div>
-              <span
-                className={`mono w-24 shrink-0 text-right text-sm ${income ? "text-[var(--jade)]" : "text-[var(--paper)]"}`}
-              >
-                {income ? "+" : "−"}
-                {formatCurrency(Math.abs(t.amount), t.currency ?? "USD")}
-              </span>
-            </li>
-          );
-        })}
-        {transactions.length === 0 && (
-          <li className="px-2 py-6 text-sm text-[var(--muted)]">No transactions yet — hit Sync.</li>
-        )}
-      </ul>
-    </Card>
+                <span className="mono text-xs text-[var(--muted)]">{shortDate(t.date)}</span>
+                <span
+                  className={`truncate text-sm font-medium ${t.isTransfer ? "text-[var(--muted)]" : ""}`}
+                >
+                  {t.displayName}
+                </span>
+                <span className="flex min-w-0 items-center gap-2 text-[13px] text-[var(--muted)]">
+                  <CategoryDot
+                    id={t.categoryId ?? t.categoryName}
+                    color={t.categoryId ? colors.get(t.categoryId) : null}
+                  />
+                  <span className="truncate">
+                    {t.categoryName}
+                    {t.splitCount > 0 && ` · ${t.splitCount} splits`}
+                    {t.accountName && ` · ${t.accountName}`}
+                  </span>
+                </span>
+                <Amount
+                  amount={t.amount}
+                  currency={t.currency}
+                  quiet={t.isTransfer}
+                  className="text-right text-sm"
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -450,50 +461,53 @@ function SpendingReviewBody({
   const pct = prevTotals.expenses > 0 ? (delta / prevTotals.expenses) * 100 : 0;
   // For spending, up (spent more) is the "bad"/coral direction.
   const up = delta > 0;
+  const flat = Math.abs(delta) < 0.005;
   return (
-    <Card className="h-full">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Receipt size={13} className="text-[var(--brass)]" />
-          Spending review
-        </CardTitle>
-        <Link href="/spending?view=trends" className="text-xs text-[var(--brass)] hover:underline">
-          Full review →
-        </Link>
-      </CardHeader>
-      <p className="eyebrow">{label}</p>
-      <p className="mt-2 font-display text-4xl tabular">{formatCurrency(totals.expenses)}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span
-          className={`mono inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm ${
-            up
-              ? "border-[color-mix(in_srgb,var(--coral)_35%,transparent)] bg-[color-mix(in_srgb,var(--coral)_10%,transparent)] text-[var(--coral)]"
-              : "border-[color-mix(in_srgb,var(--jade)_35%,transparent)] bg-[color-mix(in_srgb,var(--jade)_10%,transparent)] text-[var(--jade)]"
-          }`}
-        >
-          {up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-          {up ? "+" : "−"}
-          {formatCurrency(Math.abs(delta))} ({Math.abs(pct).toFixed(0)}%)
-        </span>
-        <span className="text-xs text-[var(--muted)]">vs {prevLabel}</span>
+    <section aria-label="Spending review">
+      <SectionHead
+        title="Spending review"
+        action={
+          <Link href="/spending?view=trends" className={HEAD_LINK}>
+            Full review
+          </Link>
+        }
+      />
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line py-3.5">
+        <p className="min-w-0">
+          <span className="eyebrow mr-3">{label}</span>
+          <span className="font-display text-2xl tabular">
+            <Figure value={formatCurrency(totals.expenses)} />
+          </span>
+        </p>
+        <p className="text-[13px] text-[var(--muted)]">
+          {flat ? (
+            <>Level with {prevLabel}</>
+          ) : (
+            <>
+              <span className={`mono ${up ? "text-[var(--coral)]" : "text-[var(--jade)]"}`}>
+                {up ? "+" : "−"}
+                {formatCurrency(Math.abs(delta))} ({Math.abs(pct).toFixed(0)}%)
+              </span>{" "}
+              vs {prevLabel}
+            </>
+          )}
+        </p>
       </div>
 
       {shifts.length > 0 && (
-        <div className="mt-5">
-          <p className="eyebrow mb-2">Biggest movers</p>
-          <ul className="space-y-2">
+        <>
+          <p className="pb-1 pt-3.5 text-xs text-[var(--muted)]">Biggest movers</p>
+          <ul>
             {shifts.map((s) => {
               const more = s.delta > 0;
               return (
-                <li key={s.category} className="flex items-center gap-3">
-                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line text-[var(--brass)]">
-                    <CategoryIcon icon={s.icon} size={13} />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm text-[var(--paper)]">
-                    {s.category}
-                  </span>
+                <li
+                  key={s.category}
+                  className="flex min-h-[42px] items-center justify-between gap-3 border-b border-line text-sm"
+                >
+                  <span className="min-w-0 truncate">{s.category}</span>
                   <span
-                    className={`mono shrink-0 text-sm ${more ? "text-[var(--coral)]" : "text-[var(--jade)]"}`}
+                    className={`mono shrink-0 ${more ? "text-[var(--coral)]" : "text-[var(--jade)]"}`}
                   >
                     {more ? "+" : "−"}
                     {formatCurrency(Math.abs(s.delta))}
@@ -502,9 +516,9 @@ function SpendingReviewBody({
               );
             })}
           </ul>
-        </div>
+        </>
       )}
-    </Card>
+    </section>
   );
 }
 
@@ -515,71 +529,139 @@ function TopVendorsList({
 }) {
   if (merchants.length === 0)
     return (
-      <div className="flex h-[200px] flex-col items-center justify-center gap-1 text-center">
-        <p className="font-display text-base text-[var(--paper)]">No vendors yet</p>
-        <p className="text-sm text-[var(--muted)]">Nothing recorded in this window.</p>
-      </div>
+      <p className="-mt-4 border-b border-line py-3.5 text-sm text-[var(--muted)]">
+        No vendors yet. Nothing recorded in this window.
+      </p>
     );
   const max = Math.max(...merchants.map((m) => m.total));
   return (
-    <ul className="space-y-3">
+    <ul className="-mt-4">
       {merchants.map((m) => (
-        <li key={m.vendor} className="space-y-1.5">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="min-w-0 truncate text-sm text-[var(--paper)]">{m.vendor}</span>
-            <span className="mono shrink-0 text-sm text-[var(--paper)]">
-              {formatCurrency(m.total)}
+        <li key={m.vendor} className="flex flex-col gap-2 border-b border-line py-3">
+          <div className="flex items-baseline justify-between gap-3 text-sm">
+            <span className="min-w-0 truncate font-medium">{m.vendor}</span>
+            <span className="shrink-0">
+              <span className="mono text-xs text-[var(--muted)]">{m.count}× </span>
+              <span className="mono">{formatCurrency(m.total)}</span>
             </span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-[var(--panel-2)]">
+          <div className="h-1 overflow-hidden rounded-full bg-[var(--panel-2)]">
             <div
               className="h-full rounded-full bg-[var(--brass)]"
               style={{ width: `${max > 0 ? (m.total / max) * 100 : 0}%` }}
             />
           </div>
-          <p className="mono text-xs text-[var(--muted)]">{m.count} transactions</p>
         </li>
       ))}
     </ul>
   );
 }
 
-function BudgetSummaryBody({
+/** How many budget lines Home lists before sending you to the full page. */
+const BUDGET_ROWS = 5;
+
+/** A thin progress bar with a tick where today falls in the month. */
+function PaceBar({ used, elapsed, over }: { used: number; elapsed: number; over: boolean }) {
+  return (
+    <div className="relative h-1 rounded-full bg-[var(--panel-2)]">
+      <span
+        className={`absolute inset-y-0 left-0 rounded-full ${over ? "bg-[var(--coral)]" : "bg-[var(--jade)]"}`}
+        style={{ width: `${Math.min(Math.max(used, 0), 1) * 100}%` }}
+      />
+      <span
+        aria-hidden
+        className="absolute -top-[3px] h-2.5 w-px bg-[var(--paper)]"
+        style={{ left: `${Math.min(Math.max(elapsed, 0), 1) * 100}%` }}
+      />
+    </div>
+  );
+}
+
+function BudgetsBody({
   summary,
+  rows,
+  pace,
 }: {
-  summary: { totalBudget: number; totalSpent: number; left: number; month: string };
+  summary: BudgetSummary;
+  rows: BudgetRow[];
+  pace: MonthPace;
 }) {
-  if (summary.totalBudget <= 0)
-    return (
-      <div className="flex h-[200px] flex-col items-center justify-center gap-1 text-center">
-        <p className="font-display text-base text-[var(--paper)]">No budgets set</p>
-        <p className="text-sm text-[var(--muted)]">Set monthly limits to track against plan.</p>
-      </div>
-    );
-  const over = summary.left < 0;
   const monthLabel = new Date(`${summary.month}-01T00:00:00`).toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
   });
+  const none = summary.totalBudget <= 0;
   return (
-    <div>
-      <p className="eyebrow">{monthLabel}</p>
-      <p className={`mt-2 font-display text-4xl tabular ${over ? "text-[var(--coral)]" : ""}`}>
-        {formatCurrency(Math.abs(summary.left))}
-      </p>
-      <p className="mt-2 text-sm text-[var(--muted)]">
-        {over ? "over " : "left of "}
-        {formatCurrency(summary.totalBudget)} budgeted
-      </p>
-      <div className="mt-5 h-2 overflow-hidden rounded-full bg-[var(--panel-2)]">
-        <div
-          className={`h-full rounded-full ${over ? "bg-[var(--coral)]" : "bg-[var(--jade)]"}`}
-          style={{ width: `${Math.min((summary.totalSpent / summary.totalBudget) * 100, 100)}%` }}
-        />
+    <section aria-label="Budgets">
+      <SectionHead
+        title="Budgets"
+        action={
+          <Link href="/budgets" className={HEAD_LINK}>
+            {none ? "Set budgets" : `All ${rows.length}`}
+          </Link>
+        }
+      />
+      {none ? (
+        <p className="border-b border-line py-3.5 text-sm text-[var(--muted)]">
+          No budgets set. Set monthly limits to track against plan.
+        </p>
+      ) : (
+        <>
+          <BudgetLine
+            name={monthLabel}
+            budget={summary.totalBudget}
+            spent={summary.totalSpent}
+            elapsed={pace.elapsed}
+            sub={`${formatCurrency(summary.totalSpent)} spent of ${formatCurrency(summary.totalBudget)} budgeted`}
+          />
+          {rows.slice(0, BUDGET_ROWS).map((r) => (
+            <BudgetLine
+              key={r.categoryId}
+              name={r.name}
+              budget={r.budget ?? 0}
+              spent={r.spent}
+              elapsed={pace.elapsed}
+            />
+          ))}
+          <p className="mt-2.5 text-xs text-[var(--muted)]">
+            {pace.daysLeft > 0
+              ? `The tick on each bar is today, day ${pace.day} of ${pace.daysInMonth}.`
+              : `${monthLabel} is finished, so the tick sits at the end of each bar.`}
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function BudgetLine({
+  name,
+  budget,
+  spent,
+  elapsed,
+  sub,
+}: {
+  name: string;
+  budget: number;
+  spent: number;
+  elapsed: number;
+  sub?: string;
+}) {
+  const left = budget - spent;
+  const over = left < 0;
+  return (
+    <div className="flex flex-col gap-2 border-b border-line py-3">
+      <div className="flex justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate font-medium">{name}</span>
+        <span className="mono shrink-0 text-[13px]">
+          <span className={over ? "text-[var(--coral)]" : undefined}>
+            {formatCurrency(Math.abs(left))}
+          </span>
+          <span className="text-[var(--muted)]">{over ? " over" : " left"}</span>
+        </span>
       </div>
-      <p className="mono mt-2 text-xs text-[var(--muted)]">
-        {formatCurrency(summary.totalSpent)} spent
-      </p>
+      <PaceBar used={budget > 0 ? spent / budget : 0} elapsed={elapsed} over={over} />
+      {sub && <p className="mono text-xs text-[var(--muted)]">{sub}</p>}
     </div>
   );
 }
