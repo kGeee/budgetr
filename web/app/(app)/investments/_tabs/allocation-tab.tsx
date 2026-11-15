@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { AllocationView } from "@/components/portfolio/allocation-view";
 import { AnalysisView } from "@/components/analysis-view";
 import { Card } from "@/components/ui/card";
+import { SectionHead } from "@/components/ui/statement";
 import { buildAnalysisData } from "@/lib/analysis-data";
 import {
   getAllocationTargets,
@@ -30,7 +31,7 @@ export async function AllocationTab() {
       {/* The risk analysis pulls a year of bars per holding plus fundamentals,
           so it streams in under the allocation rather than holding it up. */}
       <section className="space-y-4">
-        <span className="eyebrow">Risk &amp; technicals</span>
+        <SectionHead title="Risk & technicals" />
         <Suspense
           fallback={
             <Card className="p-10 text-center text-sm text-[var(--muted)]">

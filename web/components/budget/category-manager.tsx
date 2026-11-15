@@ -40,13 +40,13 @@ export function CategoryManager({
       {grouped.map(({ group, rows }) => (
         <section key={group}>
           <p className="eyebrow mb-3">{GROUP_LABEL[group]}</p>
-          <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
+          <div className="border-y border-[var(--line-strong)]">
             <ul>
               {rows.map((c) => (
                 <Row key={c.id} category={c} categories={categories} />
               ))}
               {rows.length === 0 && (
-                <li className="px-5 py-4 text-sm text-[var(--muted)]">No categories yet.</li>
+                <li className="px-2 py-4 text-sm text-[var(--muted)]">No categories yet.</li>
               )}
             </ul>
             {group === "spending" && <AddCategory />}
@@ -62,8 +62,8 @@ export function CategoryManager({
 function ArchivedSection({ rows }: { rows: CategoryRow[] }) {
   return (
     <section>
-      <p className="eyebrow mb-3 text-[var(--faint)]">Archived</p>
-      <div className="overflow-hidden rounded-[var(--radius)] border border-dashed border-line bg-[var(--panel)]">
+      <p className="eyebrow mb-3">Archived</p>
+      <div className="border-y border-dashed border-line">
         <ul>
           {rows.map((c) => (
             <ArchivedRow key={c.id} category={c} />
@@ -87,11 +87,11 @@ function ArchivedRow({ category }: { category: CategoryRow }) {
 
   return (
     <li
-      className={`group flex items-center gap-3 border-b border-line/60 px-5 py-3.5 last:border-0 ${
+      className={`group flex items-center gap-3 border-b border-line/60 px-2 py-3.5 last:border-0 ${
         pending ? "opacity-50" : ""
       }`}
     >
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--faint)]">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--muted)]">
         <CategoryIcon icon={category.icon} size={15} />
       </span>
       <span className="min-w-0 flex-1 truncate text-sm text-[var(--muted)]">{category.name}</span>
@@ -135,7 +135,7 @@ function Row({ category, categories }: { category: CategoryRow; categories: Cate
   return (
     <li className="border-b border-line/60 last:border-0">
     <div
-      className={`group flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-[var(--panel-2)] ${
+      className={`group flex items-center gap-3 px-2 py-3.5 transition-colors hover:bg-[var(--panel-2)] ${
         pending ? "opacity-50" : ""
       }`}
     >
@@ -143,7 +143,7 @@ function Row({ category, categories }: { category: CategoryRow; categories: Cate
         onClick={() => setExpanded((v) => !v)}
         aria-label={expanded ? `Collapse ${category.name}` : `Expand ${category.name}`}
         aria-expanded={expanded}
-        className="shrink-0 rounded-md p-0.5 text-[var(--faint)] transition hover:text-[var(--paper)]"
+        className="shrink-0 rounded-md p-0.5 text-[var(--muted)] transition hover:text-[var(--paper)]"
       >
         <ChevronDown
           size={15}
@@ -178,7 +178,7 @@ function Row({ category, categories }: { category: CategoryRow; categories: Cate
           <span className="truncate">{category.name}</span>
           <Pencil
             size={12}
-            className="shrink-0 text-[var(--faint)] opacity-0 transition-opacity group-hover:opacity-100"
+            className="shrink-0 text-[var(--muted)] opacity-0 transition-opacity group-hover:opacity-100"
           />
         </button>
       )}
@@ -186,14 +186,14 @@ function Row({ category, categories }: { category: CategoryRow; categories: Cate
       {category.spend30 > 0 && (
         <span className="mono shrink-0 text-xs text-[var(--muted)]">
           {formatCurrency(category.spend30)}
-          <span className="ml-1 text-[var(--faint)]">· 30d</span>
+          <span className="ml-1 text-[var(--muted)]">· 30d</span>
         </span>
       )}
 
       <Link
         href={`/spending?category=${category.id}`}
         aria-label={`View ${category.name} transactions`}
-        className="shrink-0 rounded-md p-1.5 text-[var(--faint)] opacity-0 transition hover:text-[var(--brass)] group-hover:opacity-100"
+        className="shrink-0 rounded-md p-1.5 text-[var(--muted)] opacity-0 transition hover:text-[var(--brass)] group-hover:opacity-100"
       >
         <ArrowUpRight size={15} />
       </Link>
@@ -201,7 +201,7 @@ function Row({ category, categories }: { category: CategoryRow; categories: Cate
       <button
         onClick={archive}
         aria-label={`Archive ${category.name}`}
-        className="shrink-0 rounded-md p-1.5 text-[var(--faint)] opacity-0 transition hover:text-[var(--coral)] group-hover:opacity-100"
+        className="shrink-0 rounded-md p-1.5 text-[var(--muted)] opacity-0 transition hover:text-[var(--coral)] group-hover:opacity-100"
       >
         <Archive size={14} />
       </button>
@@ -241,7 +241,7 @@ function AddCategory() {
     return (
       <button
         onClick={() => setAdding(true)}
-        className="flex w-full items-center gap-2 px-5 py-3.5 text-sm text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
+        className="flex w-full items-center gap-2 px-2 py-3.5 text-sm text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
       >
         <Plus size={15} />
         Add category
@@ -250,7 +250,7 @@ function AddCategory() {
   }
 
   return (
-    <div className={`flex items-center gap-2 px-5 py-3 ${pending ? "opacity-50" : ""}`}>
+    <div className={`flex items-center gap-2 px-2 py-3 ${pending ? "opacity-50" : ""}`}>
       <input
         autoFocus
         value={name}
@@ -274,7 +274,7 @@ function AddCategory() {
           setAdding(false);
         }}
         aria-label="Cancel"
-        className="rounded-md p-1.5 text-[var(--faint)] hover:text-[var(--paper)]"
+        className="rounded-md p-1.5 text-[var(--muted)] hover:text-[var(--paper)]"
       >
         <X size={16} />
       </button>

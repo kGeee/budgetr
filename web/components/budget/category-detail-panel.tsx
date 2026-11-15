@@ -81,7 +81,7 @@ export function CategoryDetailPanel({
             <span className="eyebrow">
               Monthly {inflowLed ? "received" : "spent"} · 12 mo
             </span>
-            <span className="text-xs text-[var(--faint)]">Click a month to filter</span>
+            <span className="text-xs text-[var(--muted)]">Click a month to filter</span>
           </div>
           <div className="px-2 py-4 sm:px-4">
             <MonthlySpendChart

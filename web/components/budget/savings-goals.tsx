@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
 import type { SavingsGoalRow } from "@/lib/queries";
 import type { SavingsContribution } from "@/db/schema";
@@ -70,25 +71,12 @@ function isBehind(goal: SavingsGoalRow): boolean {
   return goal.targetDate < new Date().toISOString().slice(0, 10);
 }
 
-function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
       <span className="mb-1 block text-xs text-[var(--muted)]">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-[10px] text-[var(--faint)]">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] text-[var(--muted)]">{hint}</span>}
     </label>
   );
 }
@@ -112,7 +100,7 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2.5 text-sm outline-none placeholder:text-[var(--faint)] focus:border-[var(--brass-dim)] ${
+      className={`h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2.5 text-sm outline-none placeholder:text-[var(--muted)] focus:border-[var(--brass-dim)] ${
         mono ? "mono" : ""
       }`}
     />
@@ -161,10 +149,10 @@ export function SavingsGoals({ goals }: { goals: SavingsGoalRow[] }) {
       </div>
 
       {active.length === 0 ? (
-        <div className="rounded-[var(--radius)] border border-dashed border-line bg-[var(--panel)] px-6 py-16 text-center">
-          <PiggyBank size={28} className="mx-auto text-[var(--faint)]" />
+        <div className="rounded-[var(--radius)] border border-dashed border-line px-6 py-16 text-center">
+          <PiggyBank size={28} className="mx-auto text-[var(--muted)]" />
           <p className="mt-3 text-sm text-[var(--muted)]">No savings goals yet.</p>
-          <p className="mt-1 text-xs text-[var(--faint)]">
+          <p className="mt-1 text-xs text-[var(--muted)]">
             Earmark money toward a vacation, an emergency fund, or your next big purchase.
           </p>
         </div>
@@ -205,7 +193,7 @@ function GoalTile({ goal }: { goal: SavingsGoalRow }) {
 
   return (
     <div
-      className={`flex flex-col rounded-[var(--radius)] border bg-gradient-to-b from-[var(--panel-2)] to-[var(--panel)] p-5 shadow-[var(--elev-2)] ${
+      className={`flex flex-col rounded-[var(--radius)] border p-5 ${
         goal.archived ? "opacity-70" : ""
       } ${behind ? "border-[color-mix(in_srgb,var(--coral)_45%,var(--line))]" : "border-line"}`}
     >
@@ -319,27 +307,24 @@ function ContributeButton({ goal, kind }: { goal: SavingsGoalRow; kind: "deposit
       </Button>
 
       {open && (
-        <Modal onClose={close}>
-          <div className="border-b border-line px-5 py-4">
-            <p className="text-sm font-medium">
-              {isDeposit ? "Add to" : "Withdraw from"} {goal.name}
-            </p>
-            <p className="mt-0.5 text-xs text-[var(--muted)]">
-              {formatCurrency(goal.saved)} saved of {formatCurrency(goal.targetAmount)}
-            </p>
-          </div>
-          <div className="space-y-3 p-5">
+        <Dialog onClose={close} label={`${isDeposit ? "Add to" : "Withdraw from"} ${goal.name}`}>
+          <DialogHeader
+            title={`${isDeposit ? "Add to" : "Withdraw from"} ${goal.name}`}
+            description={`${formatCurrency(goal.saved)} saved of ${formatCurrency(goal.targetAmount)}`}
+            onClose={close}
+          />
+          <DialogBody className="space-y-3">
             <Field label="Amount" hint={isDeposit ? undefined : `Up to ${formatCurrency(max)} available`}>
               <Input value={amount} onChange={setAmount} placeholder="100" mono />
             </Field>
             <Field label="Note (optional)">
               <Input value={note} onChange={setNote} placeholder={isDeposit ? "Tax refund" : "Rebooked flights"} />
             </Field>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
-            <button onClick={close} className="text-xs text-[var(--muted)] hover:text-[var(--paper)]">
+          </DialogBody>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={close}>
               Cancel
-            </button>
+            </Button>
             <Button
               size="sm"
               variant={isDeposit ? "primary" : "secondary"}
@@ -348,8 +333,8 @@ function ContributeButton({ goal, kind }: { goal: SavingsGoalRow; kind: "deposit
             >
               {isDeposit ? "Add" : "Withdraw"}
             </Button>
-          </div>
-        </Modal>
+          </DialogFooter>
+        </Dialog>
       )}
     </>
   );
@@ -390,9 +375,9 @@ function LedgerHistory({ goalId }: { goalId: string }) {
       {open && (
         <div className="mt-2 space-y-1">
           {rows == null ? (
-            <p className="py-2 text-xs text-[var(--faint)]">{pending ? "Loading…" : ""}</p>
+            <p className="py-2 text-xs text-[var(--muted)]">{pending ? "Loading…" : ""}</p>
           ) : rows.length === 0 ? (
-            <p className="py-2 text-xs text-[var(--faint)]">No contributions yet.</p>
+            <p className="py-2 text-xs text-[var(--muted)]">No contributions yet.</p>
           ) : (
             rows.map((r) => {
               const deposit = r.amount >= 0;
@@ -411,7 +396,7 @@ function LedgerHistory({ goalId }: { goalId: string }) {
                       onClick={() => remove(r.id)}
                       disabled={pending}
                       aria-label="Delete entry"
-                      className="rounded p-0.5 text-[var(--faint)] opacity-0 transition hover:text-[var(--coral)] group-hover:opacity-100 disabled:opacity-40"
+                      className="rounded p-0.5 text-[var(--muted)] opacity-0 transition hover:text-[var(--coral)] group-hover:opacity-100 disabled:opacity-40"
                     >
                       <Trash2 size={12} />
                     </button>
@@ -466,14 +451,13 @@ function AddGoalButton() {
       </Button>
 
       {open && (
-        <Modal onClose={close}>
-          <div className="border-b border-line px-5 py-4">
-            <p className="text-sm font-medium">New savings goal</p>
-            <p className="mt-0.5 text-xs text-[var(--muted)]">
-              Set a target; track it with deposits and withdrawals.
-            </p>
-          </div>
-          <div className="space-y-3 p-5">
+        <Dialog onClose={close} label="New savings goal">
+          <DialogHeader
+            title="New savings goal"
+            description="Set a target; track it with deposits and withdrawals."
+            onClose={close}
+          />
+          <DialogBody className="space-y-3">
             <Field label="Name">
               <Input value={name} onChange={setName} placeholder="Japan trip" />
             </Field>
@@ -488,16 +472,16 @@ function AddGoalButton() {
                 <Input value={date} onChange={setDate} type="date" mono />
               </Field>
             </div>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
-            <button onClick={close} className="text-xs text-[var(--muted)] hover:text-[var(--paper)]">
+          </DialogBody>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={close}>
               Cancel
-            </button>
+            </Button>
             <Button size="sm" variant="primary" onClick={submit} disabled={!valid || pending}>
               Create goal
             </Button>
-          </div>
-        </Modal>
+          </DialogFooter>
+        </Dialog>
       )}
     </>
   );
@@ -534,17 +518,15 @@ function EditGoalButton({ goal }: { goal: SavingsGoalRow }) {
         onClick={() => setOpen(true)}
         aria-label={`Edit ${goal.name}`}
         title="Edit goal"
-        className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--brass)]"
+        className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--brass)]"
       >
         <Pencil size={13} />
       </button>
 
       {open && (
-        <Modal onClose={() => setOpen(false)}>
-          <div className="border-b border-line px-5 py-4">
-            <p className="text-sm font-medium">Edit {goal.name}</p>
-          </div>
-          <div className="space-y-3 p-5">
+        <Dialog onClose={() => setOpen(false)} label={`Edit ${goal.name}`}>
+          <DialogHeader title={`Edit ${goal.name}`} onClose={() => setOpen(false)} />
+          <DialogBody className="space-y-3">
             <Field label="Name">
               <Input value={name} onChange={setName} />
             </Field>
@@ -559,19 +541,16 @@ function EditGoalButton({ goal }: { goal: SavingsGoalRow }) {
                 <Input value={date} onChange={setDate} type="date" mono />
               </Field>
             </div>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
-            <button
-              onClick={() => setOpen(false)}
-              className="text-xs text-[var(--muted)] hover:text-[var(--paper)]"
-            >
+          </DialogBody>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
-            </button>
+            </Button>
             <Button size="sm" variant="primary" onClick={save} disabled={!valid || pending}>
               Save
             </Button>
-          </div>
-        </Modal>
+          </DialogFooter>
+        </Dialog>
       )}
     </>
   );
@@ -592,7 +571,7 @@ function ArchiveButton({ goal }: { goal: SavingsGoalRow }) {
       disabled={pending}
       aria-label={goal.archived ? `Restore ${goal.name}` : `Archive ${goal.name}`}
       title={goal.archived ? "Restore goal" : "Archive goal"}
-      className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--paper)] disabled:opacity-40"
+      className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--paper)] disabled:opacity-40"
     >
       {goal.archived ? <ChevronDown size={13} className="rotate-180" /> : <ShieldCheck size={13} />}
     </button>
@@ -615,7 +594,7 @@ function DeleteButton({ goal }: { goal: SavingsGoalRow }) {
       disabled={pending}
       aria-label={`Delete ${goal.name}`}
       title="Delete goal"
-      className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--coral)] disabled:opacity-40"
+      className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--coral)] disabled:opacity-40"
     >
       <Trash2 size={13} />
     </button>

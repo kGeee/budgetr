@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { ListChecks } from "lucide-react";
 import { PageHead } from "@/components/page-head";
-import { Card } from "@/components/ui/card";
+import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
 import { MatchesReview } from "@/components/transactions/matches-review";
 import { ReviewInbox } from "@/components/transactions/review-inbox";
 import { TransactionsTable } from "@/components/transactions/transactions-table";
@@ -18,7 +17,23 @@ import {
   type TxnCriteria,
 } from "@/lib/queries";
 import { suggestMatches } from "@/lib/matching";
+import { ledgerVerdict, reviewVerdict, type StatementVerdict } from "@/lib/transactions-verdict";
 import { formatCurrency } from "@/lib/utils";
+
+/** A verdict as a sentence, its amount formatted here so privacy mode holds. */
+function VerdictLine({ v }: { v: StatementVerdict }) {
+  return (
+    <>
+      {v.lead}
+      {v.amount != null && (
+        <>
+          {" "}
+          <Mark tone={v.tone}>{formatCurrency(v.amount)}</Mark> {v.tail}
+        </>
+      )}
+    </>
+  );
+}
 
 /** "Mar 26 – Aug 1", collapsing to one date when the range is a single day. */
 function formatDayRange(from: string, to: string): string {
@@ -116,23 +131,44 @@ export default async function TransactionsPage({
 
   if (sp.view === "review") {
     const queue = getTransactionsToReview(REVIEW_PAGE);
+    // The loaded rows' own amounts, as the inbox lists them: what is waiting on
+    // a look, split by direction.
+    const out = queue.reduce((s, t) => s + Math.max(t.amount, 0), 0);
+    const inn = queue.reduce((s, t) => s + Math.max(-t.amount, 0), 0);
     return (
       <div className="space-y-7">
         <PageHead
           title="Transactions"
           action={<ViewTabs view="review" reviewCount={reviewCount} />}
         />
-        {reviewCount === 0 ? (
-          <Card className="flex min-h-[220px] flex-col items-center justify-center text-center">
-            <span className="grid h-11 w-11 place-items-center rounded-2xl border border-line text-[var(--jade)]">
-              <ListChecks size={20} />
-            </span>
-            <p className="mt-4 font-display text-lg text-[var(--paper)]">All caught up</p>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Every settled transaction has been reviewed.
-            </p>
-          </Card>
-        ) : (
+        <section className="rise space-y-5" aria-label="Review backlog">
+          <Hero
+            eyebrow={reviewCount === 0 ? "Needs review · all caught up" : "Needs review"}
+            figure={reviewCount.toLocaleString()}
+            tone={reviewCount === 0 ? "jade" : "default"}
+            verdict={
+              <VerdictLine
+                v={reviewVerdict({ total: reviewCount, loaded: queue.length, out, in: inn })}
+              />
+            }
+          />
+          {reviewCount > 0 && (
+            <StatStrip>
+              <Stat
+                label="Loaded here"
+                value={queue.length.toLocaleString()}
+                sub={
+                  queue.length < reviewCount
+                    ? `of ${reviewCount.toLocaleString()} · newest first`
+                    : "the whole backlog"
+                }
+              />
+              <Stat label="Out" value={formatCurrency(out)} />
+              <Stat label="In" value={formatCurrency(inn)} tone={inn > 0 ? "jade" : "default"} />
+            </StatStrip>
+          )}
+        </section>
+        {reviewCount > 0 && (
           <ReviewInbox transactions={queue} categories={getCategories()} total={reviewCount} />
         )}
       </div>
@@ -158,41 +194,55 @@ export default async function TransactionsPage({
   return (
     <div className="space-y-7">
       <PageHead title="Transactions" action={<ViewTabs view="all" reviewCount={reviewCount} />} />
-      <div className="-mt-3 space-y-2">
-        <p className="text-sm text-[var(--muted)]">
-          {summary.total.toLocaleString()} {filtered ? "matching " : ""}
-          {summary.total === 1 ? "entry" : "entries"}
-          {summary.firstDate && summary.lastDate && (
-            <> · {formatDayRange(summary.firstDate, summary.lastDate)}</>
+      {/* What the matches cost, over every match rather than the capped slice:
+          the figure, a sentence setting it against income, then the rest of the
+          summary on one rule. */}
+      <section className="rise space-y-5" aria-label="Summary of these transactions">
+        <Hero
+          eyebrow={
+            summary.firstDate && summary.lastDate
+              ? `Out · ${formatDayRange(summary.firstDate, summary.lastDate)}`
+              : "Out"
+          }
+          figure={formatCurrency(summary.spent)}
+          verdict={
+            <VerdictLine
+              v={ledgerVerdict({
+                total: summary.total,
+                spent: summary.spent,
+                received: summary.received,
+                filtered,
+              })}
+            />
+          }
+        />
+        <StatStrip>
+          <Stat
+            label="In"
+            value={formatCurrency(summary.received)}
+            tone={summary.received > 0 ? "jade" : "default"}
+          />
+          {summary.transferred > 0 && (
+            <Stat
+              label="Between your accounts"
+              value={formatCurrency(summary.transferred)}
+              sub="not counted as spending"
+            />
           )}
-          {capped && <> · showing {txns.length.toLocaleString()} most recent</>}
-        </p>
-        {summary.total > 0 && (
-          <p className="text-sm">
-            <span className="font-medium text-[var(--paper)]">
-              {formatCurrency(summary.spent)}
-            </span>{" "}
-            <span className="text-[var(--muted)]">out against</span>{" "}
-            <span className="font-medium text-[var(--paper)]">
-              {formatCurrency(summary.received)}
-            </span>{" "}
-            <span className="text-[var(--muted)]">in.</span>
-            {summary.transferred > 0 && (
-              <span className="text-[var(--muted)]">
-                {" "}
-                A further {formatCurrency(summary.transferred)} moved between your own
-                accounts — not counted as spending.
-              </span>
-            )}
-            {summary.unreviewed > 0 && (
-              <span className="text-[var(--brass)]">
-                {" "}
-                {summary.unreviewed.toLocaleString()} never reviewed.
-              </span>
-            )}
-          </p>
-        )}
-      </div>
+          <Stat
+            label={filtered ? "Matching entries" : "Entries"}
+            value={summary.total.toLocaleString()}
+            sub={capped ? `showing ${txns.length.toLocaleString()} most recent` : undefined}
+          />
+          {summary.unreviewed > 0 && (
+            <Stat
+              label="Never reviewed"
+              value={summary.unreviewed.toLocaleString()}
+              tone="brass"
+            />
+          )}
+        </StatStrip>
+      </section>
 
       <TransactionsFilterBar
         criteria={criteria}

@@ -21,6 +21,8 @@ import {
   YAxis,
 } from "recharts";
 import { Card } from "@/components/ui/card";
+import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
+import { wheelVerdict } from "@/lib/investments-verdict";
 import { formatCurrency } from "@/lib/utils";
 import { formatOptionExpiry, formatStrike } from "@/lib/options";
 import type { WheelReport, WheelStory } from "@/lib/wheel";
@@ -28,6 +30,7 @@ import type { WheelReport, WheelStory } from "@/lib/wheel";
 const money = (n: number) => formatCurrency(n, "USD", { maximumFractionDigits: 0 });
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${money(Math.abs(n))}`;
 const signColor = (n: number) => (n >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]");
+const toneOf = (n: number) => (n >= 0 ? "jade" : "coral") as "jade" | "coral";
 
 const OUTCOME_BADGE: Record<string, { label: string; cls: string }> = {
   expired: { label: "expired · kept", cls: "bg-[var(--jade)]/12 text-[var(--jade)]" },
@@ -114,21 +117,12 @@ function StoryRow({ story }: { story: WheelStory }) {
   );
 }
 
-function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="eyebrow">{label}</p>
-      <p className={`display-2 font-display tabular mt-1.5 text-2xl sm:text-3xl ${tone ?? ""}`}>{value}</p>
-      {sub && <p className="mt-1 text-xs text-[var(--muted)]">{sub}</p>}
-    </div>
-  );
-}
-
 export function WheelView({ report }: { report: WheelReport }) {
   const [showAllCycles, setShowAllCycles] = useState(false);
   const { kpis, months, cumulative, open, cycles, rollup, stories, spreadLegsExcluded } = report;
   const chartData = months.map((m, i) => ({ ...m, cumulative: cumulative[i]!.cumulative }));
   const visibleCycles = showAllCycles ? cycles : cycles.slice(0, 25);
+  const verdict = wheelVerdict(kpis);
 
   if (months.length === 0 && open.length === 0) {
     return (
@@ -144,27 +138,45 @@ export function WheelView({ report }: { report: WheelReport }) {
 
   return (
     <div className="space-y-7">
-      {/* KPI band */}
-      <Card>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-5 lg:grid-cols-4">
-          <Kpi label="Net premium · this month" value={signed(kpis.netThisMonth)} tone={signColor(kpis.netThisMonth)} />
-          <Kpi label="Net premium · YTD" value={signed(kpis.netYtd)} tone={signColor(kpis.netYtd)} />
-          <Kpi
-            label="Net premium · all time"
+      {/* The year's premium is the figure; this month and what is still open
+          read it. Contract counts here come off the trade tape — 1 per contract,
+          not the ±100 a holding carries. */}
+      <div className="space-y-5">
+        <Hero
+          eyebrow="Net premium · year to date"
+          figure={signed(kpis.netYtd)}
+          tone={toneOf(kpis.netYtd)}
+          verdict={
+            <>
+              {verdict.lead}
+              {verdict.amount != null && (
+                <>
+                  {" "}
+                  <Mark tone={verdict.tone}>{money(verdict.amount)}</Mark>
+                </>
+              )}{" "}
+              {verdict.tail}
+            </>
+          }
+        />
+        <StatStrip>
+          <Stat label="This month" value={signed(kpis.netThisMonth)} tone={toneOf(kpis.netThisMonth)} />
+          <Stat
+            label="All time"
             value={signed(kpis.netAllTime)}
-            tone={signColor(kpis.netAllTime)}
+            tone={toneOf(kpis.netAllTime)}
             sub={`${signed(kpis.netAllOptions)} incl. spreads · ${spreadLegsExcluded} spread ${spreadLegsExcluded === 1 ? "leg" : "legs"} excluded`}
           />
-          <Kpi
+          <Stat
             label="Collateral at risk"
             value={money(kpis.collateralAtRisk)}
             sub={`${kpis.openContracts} open short ${kpis.openContracts === 1 ? "contract" : "contracts"}${
               kpis.uncoveredCalls > 0 ? ` · ${kpis.uncoveredCalls} uncovered call${kpis.uncoveredCalls > 1 ? "s" : ""}` : ""
             }`}
-            tone={kpis.uncoveredCalls > 0 ? "text-[var(--coral)]" : undefined}
+            tone={kpis.uncoveredCalls > 0 ? "coral" : "default"}
           />
-        </div>
-      </Card>
+        </StatStrip>
+      </div>
 
       {/* Income charts */}
       {months.length > 0 && (

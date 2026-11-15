@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionHead } from "@/components/ui/statement";
 import { cn, formatCurrency } from "@/lib/utils";
 import {
   confirmSettlementSuggestion,
@@ -85,17 +86,13 @@ export function SharedView({
       {suggestions.length > 0 && <SuggestionInbox suggestions={suggestions} />}
 
       <section aria-labelledby="people-heading">
-        <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-baseline gap-2.5">
-            <h2 id="people-heading" className="eyebrow">
-              People
-            </h2>
-            {visible.length > 0 && (
-              <span className="text-xs text-[var(--faint)]">{visible.length}</span>
-            )}
-          </div>
-          <AddPerson />
-        </div>
+        <SectionHead
+          id="people-heading"
+          title="People"
+          count={visible.length > 0 ? visible.length : undefined}
+          action={<AddPerson />}
+          className="mb-4"
+        />
 
         {live.length === 0 && square.length === 0 ? (
           <EmptyState

@@ -22,6 +22,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, Loader2, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { ApiKeysForm } from "@/components/api-keys-form";
 import { PlaidLink } from "@/components/onboarding/plaid-link";
 import { Stepper, Step, Walk, A } from "@/components/onboarding/onboarding-steps";
@@ -76,17 +77,9 @@ export function PlaidSetupModal({
     });
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[var(--scrim)] p-4 sm:p-6"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Connect your accounts"
-        className="my-auto w-full max-w-xl rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)]"
-      >
+    // overflow-visible: the walkthrough grows as steps open, and the scrim is
+    // what scrolls — the panel must not clip its own content.
+    <Dialog onClose={onClose} label="Connect your accounts" size="xl" align="top" className="my-auto overflow-visible">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <h3 className="font-display text-lg tracking-tight">Connect your accounts</h3>
           <button
@@ -262,8 +255,7 @@ export function PlaidSetupModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 

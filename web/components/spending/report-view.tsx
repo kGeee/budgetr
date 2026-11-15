@@ -1,16 +1,7 @@
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
-import {
-  ArrowLeft,
-  ArrowDownRight,
-  ArrowUpRight,
-  CalendarDays,
-  LineChart as LineChartIcon,
-  Receipt,
-  Sparkles,
-  Trophy,
-} from "lucide-react";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowLeft, ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import { CategoryChart, MonthlySpendChart, NetWorthChart } from "@/components/charts";
 import { CategoryIcon } from "@/components/budget/category-pill";
 import { SpendHeatmap } from "@/components/budget/spend-heatmap";
@@ -22,6 +13,7 @@ import {
   REPORT_PERIOD_LABELS,
   type ReportPeriod,
 } from "@/lib/report";
+import { spendingVerdict } from "@/lib/spending-verdict";
 import { spendingHref } from "./href";
 
 /**
@@ -45,6 +37,7 @@ export function ReportView({
   const q = (p: string) =>
     spendingHref({ report: true, period: p, currency: rawCurrency ? cur : undefined });
   const topVendor = data.topVendors[0];
+  const verdict = spendingVerdict(data.totals);
 
   return (
     <div className="report-page mx-auto max-w-[900px] space-y-7 py-2">
@@ -94,81 +87,72 @@ export function ReportView({
         </p>
       </div>
 
-      {/* Hero — headline totals. */}
-      <Card className="break-avoid overflow-hidden">
-        <div className="flex items-center gap-2 text-[var(--brass)]">
-          <Sparkles size={16} />
-          <p className="eyebrow">{data.label} summary</p>
-        </div>
+      {/* Hero — the period's one figure, the sentence that reads it, then the
+          figures it is made of on a single rule. */}
+      <section className="break-avoid space-y-5">
         {data.empty ? (
-          <p className="mt-4 text-[var(--muted)]">Nothing recorded for {data.label} yet.</p>
+          <>
+            <p className="eyebrow">{data.label} summary</p>
+            <p className="text-[var(--muted)]">Nothing recorded for {data.label} yet.</p>
+          </>
         ) : (
           <>
-            <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <p className="text-sm text-[var(--muted)]">Total spent</p>
-                <p className="display-1 mt-1.5 font-display text-5xl tabular sm:text-6xl">
-                  {money(data.totals.expenses)}
+            <Hero
+              eyebrow={`Total spent · ${data.label} summary`}
+              figure={money(data.totals.expenses)}
+              verdict={
+                verdict && (
+                  <>
+                    {verdict.lead} <Mark tone={verdict.tone}>{money(verdict.amount)}</Mark>{" "}
+                    {verdict.tail}
+                  </>
+                )
+              }
+            >
+              {topVendor && (
+                <p className="max-w-[60ch] text-sm text-[var(--muted)]">
+                  Top vendor was{" "}
+                  <span className="font-medium text-[var(--paper)]">{topVendor.vendor}</span> at{" "}
+                  <span className="mono text-[var(--paper)]">{money(topVendor.total)}</span> over{" "}
+                  {topVendor.count} visit{topVendor.count === 1 ? "" : "s"}.
                 </p>
-                <p className="mt-3 text-sm text-[var(--muted)]">
-                  across {data.totals.txCount.toLocaleString()} transaction
-                  {data.totals.txCount === 1 ? "" : "s"}
-                </p>
-              </div>
-              <div className="flex gap-8">
-                <Stat label="Income" value={money(data.totals.income)} tone="jade" />
-                <span className="w-px self-stretch bg-line" />
-                <Stat
-                  label="Net"
-                  value={`${data.totals.net >= 0 ? "+" : "−"}${money(Math.abs(data.totals.net))}`}
-                  tone={data.totals.net >= 0 ? "jade" : "coral"}
-                />
-                <span className="w-px self-stretch bg-line" />
-                <Stat label="Net worth" value={money(data.netWorthCurrent)} tone="paper" />
-              </div>
-            </div>
-            {topVendor && (
-              <p className="mt-6 border-t border-line pt-5 text-sm text-[var(--muted)]">
-                Top vendor was{" "}
-                <span className="font-medium text-[var(--paper)]">{topVendor.vendor}</span> at{" "}
-                <span className="mono text-[var(--paper)]">{money(topVendor.total)}</span> over{" "}
-                {topVendor.count} visit{topVendor.count === 1 ? "" : "s"}.
-              </p>
-            )}
+              )}
+            </Hero>
+            <StatStrip>
+              <Stat label="Income" value={money(data.totals.income)} tone="jade" />
+              <Stat
+                label="Net"
+                value={`${data.totals.net >= 0 ? "+" : "−"}${money(Math.abs(data.totals.net))}`}
+                tone={data.totals.net >= 0 ? "jade" : "coral"}
+              />
+              <Stat label="Net worth" value={money(data.netWorthCurrent)} />
+              <Stat label="Transactions" value={data.totals.txCount.toLocaleString()} />
+            </StatStrip>
           </>
         )}
-      </Card>
+      </section>
 
       {/* Net worth over time. */}
-      <Card className="break-avoid">
-        <CardHeader>
-          <CardTitle>Net worth</CardTitle>
-          <LineChartIcon size={15} className="text-[var(--brass)]" />
-        </CardHeader>
+      <section className="break-avoid space-y-4">
+        <SectionHead title="Net worth" />
         <NetWorthChart data={data.netWorth} />
-      </Card>
+      </section>
 
       {/* Daily-spend calendar — trailing year. */}
-      <Card className="break-avoid">
-        <CardHeader>
-          <CardTitle>Daily spend · trailing year</CardTitle>
-          <CalendarDays size={15} className="text-[var(--brass)]" />
-        </CardHeader>
+      <section className="break-avoid space-y-4">
+        <SectionHead title="Daily spend · trailing year" />
         <SpendHeatmap
           data={data.heatmap}
           start={data.heatmapStart}
           end={data.heatmapEnd}
           categories={data.categoryMeta}
         />
-      </Card>
+      </section>
 
       {/* Top vendors + biggest purchases. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card className="break-avoid">
-          <CardHeader>
-            <CardTitle>Top vendors</CardTitle>
-            <Trophy size={15} className="text-[var(--brass)]" />
-          </CardHeader>
+        <section className="break-avoid space-y-3">
+          <SectionHead title="Top vendors" />
           {data.topVendors.length > 0 ? (
             <ul className="space-y-1">
               {data.topVendors.map((v, i) => (
@@ -189,13 +173,10 @@ export function ReportView({
           ) : (
             <Blank>No vendor spend in this period.</Blank>
           )}
-        </Card>
+        </section>
 
-        <Card className="break-avoid">
-          <CardHeader>
-            <CardTitle>Biggest purchases</CardTitle>
-            <Receipt size={15} className="text-[var(--brass)]" />
-          </CardHeader>
+        <section className="break-avoid space-y-3">
+          <SectionHead title="Biggest purchases" />
           {data.biggest.length > 0 ? (
             <ul className="space-y-1">
               {data.biggest.map((b) => (
@@ -216,14 +197,12 @@ export function ReportView({
           ) : (
             <Blank>No purchases in this period.</Blank>
           )}
-        </Card>
+        </section>
       </div>
 
       {/* Category shifts vs prior period. */}
-      <Card className="break-avoid">
-        <CardHeader>
-          <CardTitle>Category shifts · vs {data.prevLabel}</CardTitle>
-        </CardHeader>
+      <section className="break-avoid space-y-2">
+        <SectionHead title={`Category shifts · vs ${data.prevLabel}`} />
         {data.shifts.length > 0 ? (
           <ul className="divide-y divide-line/60">
             {data.shifts.map((s) => {
@@ -259,46 +238,23 @@ export function ReportView({
         ) : (
           <Blank>No category changes to compare against {data.prevLabel}.</Blank>
         )}
-      </Card>
+      </section>
 
       {/* Month-by-month + category mix. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <Card className="break-avoid lg:col-span-3">
-          <CardHeader>
-            <CardTitle>Month by month · {data.year}</CardTitle>
-          </CardHeader>
+        <section className="break-avoid space-y-4 lg:col-span-3">
+          <SectionHead title={`Month by month · ${data.year}`} />
           <MonthlySpendChart data={data.monthlySpend} />
-        </Card>
-        <Card className="break-avoid lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Where it went</CardTitle>
-          </CardHeader>
+        </section>
+        <section className="break-avoid space-y-4 lg:col-span-2">
+          <SectionHead title="Where it went" />
           <CategoryChart data={data.categories} />
-        </Card>
+        </section>
       </div>
 
       <p className="print-only pt-4 text-center text-xs text-[var(--muted)]">
         budgetr — your data stays on your machine.
       </p>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "jade" | "coral" | "paper";
-}) {
-  const cls =
-    tone === "jade" ? "text-[var(--jade)]" : tone === "coral" ? "text-[var(--coral)]" : "";
-  return (
-    <div>
-      <p className="eyebrow">{label}</p>
-      <p className={`mt-1.5 font-display text-2xl tabular ${cls}`}>{value}</p>
     </div>
   );
 }

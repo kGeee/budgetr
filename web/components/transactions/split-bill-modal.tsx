@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Users, X } from "lucide-react";
-import { Dialog } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
 import { computeSplit, type SplitMode, type SplitParticipant } from "@/lib/split-math";
 import {
@@ -372,24 +372,20 @@ function SplitModal({
       size={mode === "items" ? "2xl" : "lg"}
       className="flex max-h-[92dvh] flex-col"
     >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line px-5 py-4">
-          <div className="min-w-0">
-            <p className="eyebrow">Split this bill</p>
-            <p className="mt-1 truncate text-sm">{transaction.displayName}</p>
-            <p className="mono mt-0.5 text-xs text-[var(--muted)]">
-              {fmt(Math.abs(total), currency)} · {transaction.date}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-lg p-1.5 text-[var(--faint)] hover:text-[var(--paper)]"
-          >
-            <X size={18} />
-          </button>
-        </div>
+        <DialogHeader
+          title="Split this bill"
+          description={
+            <>
+              <span className="block truncate text-[var(--paper)]">{transaction.displayName}</span>
+              <span className="mono mt-0.5 block text-xs">
+                {fmt(Math.abs(total), currency)} · {transaction.date}
+              </span>
+            </>
+          }
+          onClose={onClose}
+        />
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+        <DialogBody className="space-y-5">
           {clobbers && (
             <p className="rounded-lg border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_10%,transparent)] px-3 py-2 text-xs text-[var(--brass)]">
               This transaction already has category splits. Saving a bill split replaces them.
@@ -574,9 +570,9 @@ function SplitModal({
               {error ?? itemsBlocker ?? (!preview.ok ? preview.error : null)}
             </p>
           )}
-        </div>
+        </DialogBody>
 
-        <div className="flex shrink-0 items-center gap-2 border-t border-line px-5 py-4">
+        <DialogFooter className="flex-nowrap justify-start">
           <div className="min-w-0 flex-1">
             <p className="eyebrow">Owed to you</p>
             <p className="mono mt-0.5 text-sm text-[var(--jade)]">
@@ -599,7 +595,7 @@ function SplitModal({
           >
             Save split
           </button>
-        </div>
+        </DialogFooter>
     </Dialog>
   );
 }

@@ -2,21 +2,13 @@
 
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
-import {
-  ArrowDownRight,
-  ArrowUpRight,
-  CalendarDays,
-  ChevronRight,
-  Receipt,
-  Sparkles,
-  Trophy,
-  X,
-} from "lucide-react";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowDownRight, ArrowUpRight, ChevronRight, X } from "lucide-react";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import { CategoryChart, MonthlySpendChart } from "@/components/charts";
 import { CategoryIcon } from "@/components/budget/category-pill";
 import { CategoryDetailPanel } from "@/components/budget/category-detail-panel";
 import { PeriodSpendChart } from "@/components/budget/period-spend-chart";
+import { spendingVerdict } from "@/lib/spending-verdict";
 import { formatMoney } from "@/lib/utils";
 import type {
   BiggestPurchase,
@@ -60,51 +52,52 @@ export function SpendingHero({
   topVendor?: TopMerchant;
 }) {
   const empty = totals.txCount === 0;
-  return (
-    <Card className="rise overflow-hidden">
-      <div className="flex items-center gap-2 text-[var(--brass)]">
-        <Sparkles size={16} />
+  if (empty) {
+    return (
+      <section className="rise space-y-3" aria-label={`${label} spending`}>
         <p className="eyebrow">{label}</p>
-      </div>
-      {empty ? (
-        <p className="mt-4 text-[var(--muted)]">
+        <p className="text-[var(--muted)]">
           Nothing recorded for {label} yet. Sync or pick another period above.
         </p>
-      ) : (
-        <>
-          <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-sm text-[var(--muted)]">Total spent</p>
-              <p className="display-1 mt-1.5 font-display text-5xl tabular sm:text-6xl">
-                {money(totals.expenses)}
-              </p>
-              <p className="mt-3 text-sm text-[var(--muted)]">
-                across {totals.txCount.toLocaleString()} transaction
-                {totals.txCount === 1 ? "" : "s"}
-              </p>
-            </div>
-            <div className="flex gap-8">
-              <MiniStat label="Income" value={totals.income} tone="jade" />
-              <span className="w-px self-stretch bg-line" />
-              <MiniStat
-                label="Net"
-                value={totals.net}
-                tone={totals.net >= 0 ? "jade" : "coral"}
-                signed
-              />
-            </div>
-          </div>
-          {topVendor && (
-            <p className="mt-6 border-t border-line pt-5 text-sm text-[var(--muted)]">
-              Your top vendor was{" "}
-              <span className="font-medium text-[var(--paper)]">{topVendor.vendor}</span> at{" "}
-              <span className="mono text-[var(--paper)]">{money(topVendor.total)}</span> over{" "}
-              {topVendor.count} visit{topVendor.count === 1 ? "" : "s"}.
-            </p>
-          )}
-        </>
-      )}
-    </Card>
+      </section>
+    );
+  }
+
+  const verdict = spendingVerdict(totals);
+  return (
+    // One figure on the canvas, the sentence that reads it against income, then
+    // the figures it is made of on a single rule.
+    <section className="rise space-y-5" aria-label={`${label} spending`}>
+      <Hero
+        eyebrow={`Total spent · ${label}`}
+        figure={money(totals.expenses)}
+        verdict={
+          verdict && (
+            <>
+              {verdict.lead} <Mark tone={verdict.tone}>{money(verdict.amount)}</Mark> {verdict.tail}
+            </>
+          )
+        }
+      >
+        {topVendor && (
+          <p className="max-w-[60ch] text-sm text-[var(--muted)]">
+            Your top vendor was{" "}
+            <span className="font-medium text-[var(--paper)]">{topVendor.vendor}</span> at{" "}
+            <span className="mono text-[var(--paper)]">{money(topVendor.total)}</span> over{" "}
+            {topVendor.count} visit{topVendor.count === 1 ? "" : "s"}.
+          </p>
+        )}
+      </Hero>
+      <StatStrip>
+        <Stat label="Income" value={money(totals.income)} tone="jade" />
+        <Stat
+          label="Net"
+          value={`${totals.net >= 0 ? "+" : "−"}${money(Math.abs(totals.net))}`}
+          tone={totals.net >= 0 ? "jade" : "coral"}
+        />
+        <Stat label="Transactions" value={totals.txCount.toLocaleString()} />
+      </StatStrip>
+    </section>
   );
 }
 
@@ -138,8 +131,8 @@ export function CategoryView({
           inline, so a deep link (?category=) lands on it without scrolling and
           works for categories with no spend in this period. */}
       {selected && (
-        <Card className="overflow-hidden p-0">
-          <div className="flex items-center gap-3 px-5 py-4">
+        <section className="border-y border-[var(--line-strong)]">
+          <div className="flex items-center gap-3 py-4">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--brass)]">
               <CategoryIcon icon={selected.icon} size={18} />
             </span>
@@ -147,7 +140,7 @@ export function CategoryView({
               <p className="flex items-center gap-2 font-display text-2xl">
                 <span className="truncate">{selected.name}</span>
                 {selected.archived && (
-                  <span className="rounded-md border border-line px-2 py-0.5 text-xs text-[var(--faint)]">
+                  <span className="rounded-md border border-line px-2 py-0.5 text-xs text-[var(--muted)]">
                     Archived
                   </span>
                 )}
@@ -172,15 +165,15 @@ export function CategoryView({
             categories={allCategories}
             group={selected.group}
           />
-        </Card>
+        </section>
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <Card className="lg:col-span-3">
-          <CardHeader>
-            <CardTitle>By category · {label}</CardTitle>
-            <span className="text-xs text-[var(--faint)]">vs {averageLabel}</span>
-          </CardHeader>
+        <section className="space-y-3 lg:col-span-3">
+          <SectionHead
+            title={`By category · ${label}`}
+            action={<span className="text-xs text-[var(--muted)]">vs {averageLabel}</span>}
+          />
           {rows.length > 0 ? (
             <ul className="-mx-2 space-y-0.5">
               {rows.map((r) => {
@@ -191,13 +184,13 @@ export function CategoryView({
                       <span className="flex min-w-0 items-center gap-2">
                         <CategoryIcon icon={r.icon} />
                         <span className="truncate">{r.category}</span>
-                        <span className="text-xs text-[var(--faint)]">{share.toFixed(0)}%</span>
+                        <span className="text-xs text-[var(--muted)]">{share.toFixed(0)}%</span>
                       </span>
                       <span className="flex shrink-0 items-baseline gap-3">
                         <Delta value={r.delta} />
                         <span className="mono tabular">{money(r.total)}</span>
                         {r.categoryId && (
-                          <ChevronRight size={14} className="self-center text-[var(--faint)]" />
+                          <ChevronRight size={14} className="self-center text-[var(--muted)]" />
                         )}
                       </span>
                     </div>
@@ -234,13 +227,11 @@ export function CategoryView({
           ) : (
             <Blank>No category spend in {label}.</Blank>
           )}
-        </Card>
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Where it went</CardTitle>
-          </CardHeader>
+        </section>
+        <section className="space-y-4 lg:col-span-2">
+          <SectionHead title="Where it went" />
           <CategoryChart data={categories} />
-        </Card>
+        </section>
       </div>
     </>
   );
@@ -249,11 +240,11 @@ export function CategoryView({
 /** "+24%" against the category's own average, or nothing to compare to. */
 function Delta({ value }: { value: number | null }) {
   if (value === null) {
-    return <span className="text-xs text-[var(--faint)]">new</span>;
+    return <span className="text-xs text-[var(--muted)]">new</span>;
   }
   // Inside ±5% of its own average is "normal" — labelling that a change is noise.
   if (Math.abs(value) < 0.05) {
-    return <span className="text-xs text-[var(--faint)]">on avg</span>;
+    return <span className="text-xs text-[var(--muted)]">on avg</span>;
   }
   const up = value > 0;
   return (
@@ -294,19 +285,14 @@ export function TrendsView({
   return (
     <>
       {/* Month-by-month for the period's calendar year. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Month by month · {year}</CardTitle>
-        </CardHeader>
+      <section className="space-y-4">
+        <SectionHead title={`Month by month · ${year}`} />
         <MonthlySpendChart data={monthlySpend} />
-      </Card>
+      </section>
 
       {/* Daily spend — scoped to the selected period. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Daily spend · {label}</CardTitle>
-          <CalendarDays size={15} className="text-[var(--brass)]" />
-        </CardHeader>
+      <section className="space-y-4">
+        <SectionHead title={`Daily spend · ${label}`} />
         <PeriodSpendChart
           data={periodSpend}
           start={periodStart}
@@ -314,13 +300,11 @@ export function TrendsView({
           label={label}
           categories={allCategories}
         />
-      </Card>
+      </section>
 
       {/* Category shifts vs prior period */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Category shifts · vs {prevLabel}</CardTitle>
-        </CardHeader>
+      <section className="space-y-2">
+        <SectionHead title={`Category shifts · vs ${prevLabel}`} />
         {shifts.length > 0 ? (
           <ul className="divide-y divide-line/60">
             {shifts.map((s) => {
@@ -356,15 +340,12 @@ export function TrendsView({
         ) : (
           <Blank>No category changes to compare against {prevLabel}.</Blank>
         )}
-      </Card>
+      </section>
 
       {/* Top vendors + biggest purchases */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Top vendors</CardTitle>
-            <Trophy size={15} className="text-[var(--brass)]" />
-          </CardHeader>
+        <section className="space-y-3">
+          <SectionHead title="Top vendors" />
           {topVendors.length > 0 ? (
             <ul className="space-y-1">
               {topVendors.map((v, i) => (
@@ -388,13 +369,10 @@ export function TrendsView({
           ) : (
             <Blank>No vendor spend in this period.</Blank>
           )}
-        </Card>
+        </section>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Biggest purchases</CardTitle>
-            <Receipt size={15} className="text-[var(--brass)]" />
-          </CardHeader>
+        <section className="space-y-3">
+          <SectionHead title="Biggest purchases" />
           {biggest.length > 0 ? (
             <ul className="space-y-1">
               {biggest.map((b) => (
@@ -418,33 +396,9 @@ export function TrendsView({
           ) : (
             <Blank>No purchases in this period.</Blank>
           )}
-        </Card>
+        </section>
       </div>
     </>
-  );
-}
-
-function MiniStat({
-  label,
-  value,
-  tone,
-  signed = false,
-}: {
-  label: string;
-  value: number;
-  tone: "jade" | "coral" | "paper";
-  signed?: boolean;
-}) {
-  const cls =
-    tone === "jade" ? "text-[var(--jade)]" : tone === "coral" ? "text-[var(--coral)]" : "";
-  return (
-    <div>
-      <p className="eyebrow">{label}</p>
-      <p className={`mt-1.5 font-display text-2xl tabular ${cls}`}>
-        {signed ? (value >= 0 ? "+" : "−") : ""}
-        {money(Math.abs(value))}
-      </p>
-    </div>
   );
 }
 

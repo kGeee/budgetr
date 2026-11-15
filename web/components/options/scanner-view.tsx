@@ -11,6 +11,8 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, TrendingUp, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
+import { scanVerdict } from "@/lib/investments-verdict";
 import { PayoffDiagram } from "@/components/options/payoff-diagram";
 import { formatCurrency } from "@/lib/utils";
 import { formatOptionExpiry, formatStrike, parseOccSymbol } from "@/lib/options";
@@ -56,20 +58,39 @@ export function ScannerView({ result }: { result: ScanResult }) {
   }, [result.candidates, filters, sort]);
 
   const best = result.candidates[0];
+  const verdict = scanVerdict({
+    universe: result.universe.length,
+    best: best && { ...best, strike: formatStrike(best.strike) },
+  });
 
   return (
     <div className="space-y-6">
-      {/* KPI band */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-        <Kpi label="Universe" value={String(result.universe.length)} sub={`${result.scanned} with chains`} />
-        <Kpi label="Candidates" value={String(result.candidates.length)} sub="ranked" />
-        <Kpi label="Top annualized" value={best ? pct(best.annualizedPct, 0) : "—"} sub={best?.ticker} accent="jade" />
-        <Kpi label="Top score" value={best ? String(best.score) : "—"} sub={best ? `${best.ticker} ${formatStrike(best.strike)}p` : undefined} accent="brass" />
-        <Kpi
-          label="Scan window"
-          value={`${result.criteria.dteMin}–${result.criteria.dteMax}d`}
-          sub={`Δ ${result.criteria.deltaMin}–${result.criteria.deltaMax}`}
+      <div className="space-y-5">
+        <Hero
+          eyebrow="Candidates · ranked"
+          figure={String(result.candidates.length)}
+          verdict={
+            <>
+              {verdict.lead}
+              {verdict.pick && (
+                <>
+                  {" "}
+                  <Mark tone={verdict.tone}>{verdict.pick}</Mark> {verdict.tail}
+                </>
+              )}
+            </>
+          }
         />
+        <StatStrip>
+          <Stat label="Universe" value={String(result.universe.length)} sub={`${result.scanned} with chains`} />
+          <Stat label="Top annualized" value={best ? pct(best.annualizedPct, 0) : "—"} sub={best?.ticker} tone="jade" />
+          <Stat label="Top score" value={best ? String(best.score) : "—"} sub={best ? `${best.ticker} ${formatStrike(best.strike)}p` : undefined} tone="brass" />
+          <Stat
+            label="Scan window"
+            value={`${result.criteria.dteMin}–${result.criteria.dteMax}d`}
+            sub={`Δ ${result.criteria.deltaMin}–${result.criteria.deltaMax}`}
+          />
+        </StatStrip>
       </div>
 
       {/* Filters */}
@@ -238,17 +259,6 @@ function ScorePill({ score }: { score: number }) {
         ? "bg-[var(--brass)]/15 text-[var(--brass)]"
         : "bg-[var(--panel-2)] text-[var(--muted)]";
   return <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-semibold tabular-nums ${cls}`}>{score}</span>;
-}
-
-function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: "jade" | "brass" }) {
-  const color = accent === "jade" ? "text-[var(--jade)]" : accent === "brass" ? "text-[var(--brass)]" : "text-[var(--paper)]";
-  return (
-    <Card className="p-4">
-      <div className="text-[11px] uppercase tracking-wide text-[var(--muted)]">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${color}`}>{value}</div>
-      {sub && <div className="mt-0.5 truncate text-xs text-[var(--muted)]">{sub}</div>}
-    </Card>
-  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

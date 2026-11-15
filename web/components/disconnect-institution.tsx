@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { AlertTriangle, Loader2, Trash2 } from "lucide-react";
-import { Dialog } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { disconnectItem, type DisconnectResult } from "@/lib/actions";
 
 /**
@@ -105,10 +105,9 @@ export function DisconnectInstitution({
 
       {open && (
         <Dialog onClose={close} label={`Disconnect ${institution}`} size="md">
-          <div className="p-6">
-            <h2 className="font-display text-2xl tracking-tight">Disconnect {institution}?</h2>
-
-            <p className="mt-3 text-sm text-[var(--muted)]">
+          <DialogHeader title={`Disconnect ${institution}?`} onClose={close} />
+          <DialogBody>
+            <p className="text-sm text-[var(--muted)]">
               This revokes the Plaid link and permanently deletes{" "}
               <b className="text-[var(--paper)]">
                 {accountCount} account{accountCount === 1 ? "" : "s"}
@@ -134,26 +133,25 @@ export function DisconnectInstitution({
             />
 
             {error && <p className="mt-3 text-sm text-[var(--coral)]">{error}</p>}
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={close}
-                className="rounded-full border border-line px-4 py-1.5 text-sm text-[var(--muted)] transition hover:text-[var(--paper)]"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={run}
-                disabled={!confirmed || pending}
-                className="inline-flex items-center gap-2 rounded-full bg-[var(--coral)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {pending && <Loader2 size={14} className="animate-spin" />}
-                {pending ? "Disconnecting…" : "Disconnect"}
-              </button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={close}
+              className="rounded-full border border-line px-4 py-1.5 text-sm text-[var(--muted)] transition hover:text-[var(--paper)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={run}
+              disabled={!confirmed || pending}
+              className="inline-flex items-center gap-2 rounded-full bg-[var(--coral)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {pending && <Loader2 size={14} className="animate-spin" />}
+              {pending ? "Disconnecting…" : "Disconnect"}
+            </button>
+          </DialogFooter>
         </Dialog>
       )}
     </>

@@ -13,6 +13,7 @@ import { CartesianGrid, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAx
 import type { TooltipProps } from "recharts";
 import { AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Stat, StatStrip } from "@/components/ui/statement";
 import { useChartTheme } from "@/lib/chart-theme";
 import { formatCurrency } from "@/lib/utils";
 import type { AnalysisData, HoldingAnalytics } from "@/lib/analysis-data";
@@ -72,13 +73,15 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
   return (
     <div className="space-y-6">
       {/* Portfolio KPIs */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <Kpi label="Book value" value={money(data.portfolio.totalValue)} />
-        <Kpi label="Portfolio β" value={num(data.portfolio.beta, 2)} sub="vs SPY" accent={data.portfolio.beta != null && data.portfolio.beta > 1.2 ? "coral" : undefined} />
-        <Kpi label="Top position" value={pct(data.portfolio.topConcentrationPct, 0)} sub="of book" accent={data.portfolio.topConcentrationPct != null && data.portfolio.topConcentrationPct > 25 ? "coral" : undefined} />
-        <Kpi label="Top 5" value={pct(data.portfolio.top5ConcentrationPct, 0)} sub="concentration" />
-        <Kpi label="Positions" value={String(data.holdings.length)} sub={`${data.portfolio.sectors.length} sectors`} />
-      </div>
+      {/* A ruled strip, not a hero: the Allocation tab already opens with one,
+          and this panel is a section under it. */}
+      <StatStrip className="border-t-0 pt-0">
+        <Stat label="Book value" value={money(data.portfolio.totalValue)} />
+        <Stat label="Portfolio β" value={num(data.portfolio.beta, 2)} sub="vs SPY" tone={data.portfolio.beta != null && data.portfolio.beta > 1.2 ? "coral" : "default"} />
+        <Stat label="Top position" value={pct(data.portfolio.topConcentrationPct, 0)} sub="of book" tone={data.portfolio.topConcentrationPct != null && data.portfolio.topConcentrationPct > 25 ? "coral" : "default"} />
+        <Stat label="Top 5" value={pct(data.portfolio.top5ConcentrationPct, 0)} sub="concentration" />
+        <Stat label="Positions" value={String(data.holdings.length)} sub={`${data.portfolio.sectors.length} sectors`} />
+      </StatStrip>
 
       {!data.fundamentalsAvailable && (
         <p className="flex items-center gap-2 text-xs text-[var(--muted)]">
@@ -250,16 +253,6 @@ function TrendBadge({ on, label }: { on: boolean | null; label: string }) {
       {on ? "▲" : "▼"}
       {label}
     </span>
-  );
-}
-
-function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: "coral" }) {
-  return (
-    <Card className="p-4">
-      <div className="text-[11px] uppercase tracking-wide text-[var(--muted)]">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${accent === "coral" ? "text-[var(--coral)]" : "text-[var(--paper)]"}`}>{value}</div>
-      {sub && <div className="mt-0.5 truncate text-xs text-[var(--muted)]">{sub}</div>}
-    </Card>
   );
 }
 

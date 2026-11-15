@@ -11,8 +11,8 @@ export function BillsTab() {
 
   if (streams.length === 0) {
     return (
-      <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-10 text-center">
-        <CalendarClock size={28} className="mx-auto text-[var(--faint)]" />
+      <div className="rounded-[var(--radius)] border border-dashed border-line p-10 text-center">
+        <CalendarClock size={28} className="mx-auto text-[var(--muted)]" />
         <p className="mt-3 text-sm text-[var(--muted)]">
           No recurring streams yet. Hit Sync — Plaid needs some transaction history to detect them.
         </p>

@@ -2,23 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Check,
-  Flame,
-  Pencil,
-  PiggyBank,
-  Plus,
-  Sparkles,
-  Target,
-  Timer,
-  Trash2,
-  TrendingUp,
-} from "lucide-react";
+import { Check, Pencil, Plus, Target, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import { FireProjectionChart } from "@/components/charts";
 import { formatCompactCurrency, formatCurrency } from "@/lib/utils";
 import type { FireMetrics, FireProjectionPoint, MilestoneProgress } from "@/lib/fire";
+import { fireVerdict } from "@/lib/progress-verdict";
 import {
   addMilestone,
   deleteMilestone,
@@ -53,27 +44,14 @@ function formatDuration(years: number | null): string {
   return parts.join(" ") || "< 1 mo";
 }
 
-// ── Reusable primitives (mirrors savings-goals.tsx) ───────────────────────────
-
-function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
-        {children}
-      </div>
-    </div>
-  );
-}
+// ── Form primitives (mirrors savings-goals.tsx) ───────────────────────────────
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
       <span className="mb-1 block text-xs text-[var(--muted)]">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-[10px] text-[var(--faint)]">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] text-[var(--muted)]">{hint}</span>}
     </label>
   );
 }
@@ -97,39 +75,10 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2.5 text-sm outline-none placeholder:text-[var(--faint)] focus:border-[var(--brass-dim)] ${
+      className={`h-9 w-full rounded-md border border-line bg-[var(--ink)] px-2.5 text-sm outline-none placeholder:text-[var(--muted)] focus:border-[var(--brass-dim)] ${
         mono ? "mono" : ""
       }`}
     />
-  );
-}
-
-// ── Stat tiles ────────────────────────────────────────────────────────────────
-
-function Stat({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  accent = "var(--paper)",
-}: {
-  icon: typeof Flame;
-  label: string;
-  value: string;
-  sub?: string;
-  accent?: string;
-}) {
-  return (
-    <Card className="p-5">
-      <div className="flex items-center gap-2 text-[var(--muted)]">
-        <Icon size={15} />
-        <p className="eyebrow">{label}</p>
-      </div>
-      <p className="mt-3 font-display text-3xl leading-none tabular" style={{ color: accent }}>
-        {value}
-      </p>
-      {sub && <p className="mt-2 text-xs text-[var(--muted)]">{sub}</p>}
-    </Card>
   );
 }
 
@@ -165,90 +114,88 @@ export function FireDashboard({
         ? `${(runwayMonths / 12).toFixed(1)} yrs`
         : `${runwayMonths.toFixed(1)} mo`;
 
+  const verdict = fireVerdict({ netWorth, fireNumber });
+  const reached = fireProgress != null && fireProgress >= 1;
+
   return (
     <div className="space-y-7">
-      {/* Top stats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat
-          icon={PiggyBank}
-          label="Savings rate"
-          value={savingsRate == null ? "—" : pct1(savingsRate)}
-          sub="of income kept, last 6 mo"
-          accent={savingsRate != null && savingsRate >= 0.2 ? "var(--jade)" : "var(--paper)"}
-        />
-        <Stat
-          icon={Timer}
-          label="Runway"
-          value={runwayLabel}
-          sub="liquid assets ÷ expenses"
-        />
-        <Stat
-          icon={Flame}
-          label="Coast-FIRE"
-          value={formatDuration(yearsToFire)}
-          sub={coastFireDate ? `~ ${formatDate(coastFireDate)}` : "adjust your assumptions"}
-          accent="var(--brass)"
-        />
-        <Stat
-          icon={Target}
-          label="FIRE number"
-          value={fireNumber > 0 ? formatCompactCurrency(fireNumber) : "—"}
-          sub={`${settings.safeWithdrawalRate}% withdrawal · ${
-            annualExpensesDerived ? "est. " : ""
-          }${formatCompactCurrency(annualExpenses)}/yr`}
-        />
-      </div>
-
-      {/* FIRE progress bar */}
-      <Card>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="eyebrow">Progress to financial independence</p>
-            <p className="mt-2 font-display text-4xl leading-none tabular">
-              {formatCurrency(netWorth)}
-              {fireNumber > 0 && (
-                <span className="ml-1.5 text-base text-[var(--muted)]">
-                  / {formatCurrency(fireNumber)}
-                </span>
-              )}
-            </p>
-          </div>
-          {fireProgress != null && (
-            <p className="font-display text-2xl tabular text-[var(--brass)]">
-              {pct1(fireProgress)}
+      {/* The long run's one figure is net worth; the sentence reads it against
+          the FIRE number, and the rule under the bar holds the four figures
+          that used to be equal-weight tiles. */}
+      <section className="space-y-5" aria-label="Progress to financial independence">
+        <Hero
+          eyebrow="Net worth · progress to financial independence"
+          figure={formatCurrency(netWorth)}
+          verdict={
+            verdict ? (
+              <>
+                {verdict.lead} <Mark tone={verdict.tone}>{formatCurrency(verdict.amount)}</Mark>{" "}
+                {verdict.tail}
+              </>
+            ) : (
+              <span className="text-[var(--muted)]">
+                Set your annual expenses to compute a FIRE number.
+              </span>
+            )
+          }
+        >
+          {fireNumber > 0 && !reached && (
+            <p className="max-w-[60ch] text-sm text-[var(--muted)]">
+              Contributing {formatCurrency(monthlyContribution)}/mo
+              {monthlyContributionDerived ? " (est.)" : ""}, growing at {settings.expectedReturn}% —
+              about {formatDuration(yearsToFire)} to go.
             </p>
           )}
+        </Hero>
+        <div>
+          <div className="mb-2 flex items-baseline justify-between gap-3 text-xs text-[var(--muted)]">
+            <span className="mono">
+              {formatCurrency(netWorth)}
+              {fireNumber > 0 && <> / {formatCurrency(fireNumber)}</>}
+            </span>
+            {fireProgress != null && (
+              <span className="mono text-sm text-[var(--brass)]">{pct1(fireProgress)}</span>
+            )}
+          </div>
+          <div className="h-2.5 overflow-hidden rounded-full bg-[var(--panel-2)]">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-[var(--brass)] to-[var(--jade)] transition-all"
+              style={{ width: `${Math.max((fireProgress ?? 0) * 100, netWorth > 0 ? 2 : 0)}%` }}
+            />
+          </div>
         </div>
-        <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-[var(--panel-2)]">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-[var(--brass)] to-[var(--jade)] transition-all"
-            style={{ width: `${Math.max((fireProgress ?? 0) * 100, netWorth > 0 ? 2 : 0)}%` }}
+        <StatStrip>
+          <Stat
+            label="Savings rate"
+            value={savingsRate == null ? "—" : pct1(savingsRate)}
+            sub="of income kept, last 6 mo"
+            tone={savingsRate != null && savingsRate >= 0.2 ? "jade" : "default"}
           />
-        </div>
-        <p className="mt-3 text-xs text-[var(--muted)]">
-          {fireNumber <= 0
-            ? "Set your annual expenses to compute a FIRE number."
-            : fireProgress != null && fireProgress >= 1
-              ? "You've hit your FIRE number — congratulations."
-              : `Contributing ${formatCurrency(monthlyContribution)}/mo${
-                  monthlyContributionDerived ? " (est.)" : ""
-                }, growing at ${settings.expectedReturn}% — about ${formatDuration(
-                  yearsToFire,
-                )} to go.`}
-        </p>
-      </Card>
+          <Stat label="Runway" value={runwayLabel} sub="liquid assets ÷ expenses" />
+          <Stat
+            label="Coast-FIRE"
+            value={formatDuration(yearsToFire)}
+            sub={coastFireDate ? `~ ${formatDate(coastFireDate)}` : "adjust your assumptions"}
+            tone="brass"
+          />
+          <Stat
+            label="FIRE number"
+            value={fireNumber > 0 ? formatCompactCurrency(fireNumber) : "—"}
+            sub={`${settings.safeWithdrawalRate}% withdrawal · ${
+              annualExpensesDerived ? "est. " : ""
+            }${formatCompactCurrency(annualExpenses)}/yr`}
+          />
+        </StatStrip>
+      </section>
 
       {/* Projection chart */}
-      <Card>
-        <div className="mb-5 flex items-center gap-2">
-          <TrendingUp size={16} className="text-[var(--brass)]" />
-          <p className="eyebrow">Net-worth projection</p>
-        </div>
+      <section className="space-y-4">
+        <SectionHead title="Net-worth projection" />
         <FireProjectionChart data={projection} fireNumber={fireNumber} />
-      </Card>
+      </section>
 
       {/* Assumptions + milestones */}
-      <div className="grid gap-6 lg:grid-cols-5">
+      <div className="grid gap-x-10 gap-y-7 lg:grid-cols-5">
         <div className="lg:col-span-2">
           <SettingsForm settings={settings} metrics={metrics} />
         </div>
@@ -297,11 +244,8 @@ function SettingsForm({
   }
 
   return (
-    <Card className="h-full">
-      <div className="mb-5 flex items-center gap-2">
-        <Sparkles size={16} className="text-[var(--brass)]" />
-        <p className="eyebrow">Assumptions</p>
-      </div>
+    <section className="space-y-4">
+      <SectionHead title="Assumptions" />
       <div className="space-y-3">
         <Field
           label="Annual expenses"
@@ -340,7 +284,7 @@ function SettingsForm({
           {pending ? "Saving…" : "Save assumptions"}
         </Button>
       </div>
-    </Card>
+    </section>
   );
 }
 
@@ -354,20 +298,18 @@ function Milestones({
   netWorth: number;
 }) {
   return (
-    <Card className="h-full">
-      <div className="mb-5 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Target size={16} className="text-[var(--brass)]" />
-          <p className="eyebrow">Net-worth milestones</p>
-        </div>
-        <AddMilestoneButton />
-      </div>
+    <section className="space-y-5">
+      <SectionHead
+        title="Net-worth milestones"
+        count={milestones.length > 0 ? milestones.length : undefined}
+        action={<AddMilestoneButton />}
+      />
 
       {milestones.length === 0 ? (
         <div className="rounded-[var(--radius)] border border-dashed border-line px-6 py-12 text-center">
-          <Target size={26} className="mx-auto text-[var(--faint)]" />
+          <Target size={26} className="mx-auto text-[var(--muted)]" />
           <p className="mt-3 text-sm text-[var(--muted)]">No milestones yet.</p>
-          <p className="mt-1 text-xs text-[var(--faint)]">
+          <p className="mt-1 text-xs text-[var(--muted)]">
             Add targets like &ldquo;First $100k&rdquo; to track the climb.
           </p>
         </div>
@@ -378,7 +320,7 @@ function Milestones({
           ))}
         </ul>
       )}
-    </Card>
+    </section>
   );
 }
 
@@ -431,7 +373,7 @@ function MilestoneRow({
               disabled={pending}
               aria-label={m.achievedDate ? "Unmark achieved" : "Mark achieved"}
               title={m.achievedDate ? "Unmark achieved" : "Mark achieved"}
-              className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--jade)] disabled:opacity-40"
+              className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--jade)] disabled:opacity-40"
             >
               <Check size={13} />
             </button>
@@ -440,7 +382,7 @@ function MilestoneRow({
               disabled={pending}
               aria-label={`Delete ${m.label}`}
               title="Delete milestone"
-              className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--coral)] disabled:opacity-40"
+              className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--coral)] disabled:opacity-40"
             >
               <Trash2 size={13} />
             </button>
@@ -494,30 +436,29 @@ function AddMilestoneButton() {
       </Button>
 
       {open && (
-        <Modal onClose={close}>
-          <div className="border-b border-line px-5 py-4">
-            <p className="text-sm font-medium">New milestone</p>
-            <p className="mt-0.5 text-xs text-[var(--muted)]">
-              A net-worth target to celebrate along the way.
-            </p>
-          </div>
-          <div className="space-y-3 p-5">
+        <Dialog onClose={close} label="New milestone">
+          <DialogHeader
+            title="New milestone"
+            description="A net-worth target to celebrate along the way."
+            onClose={close}
+          />
+          <DialogBody className="space-y-3">
             <Field label="Label">
               <Input value={label} onChange={setLabel} placeholder="First $100k" />
             </Field>
             <Field label="Net-worth target">
               <Input value={amount} onChange={setAmount} placeholder="100000" mono />
             </Field>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
-            <button onClick={close} className="text-xs text-[var(--muted)] hover:text-[var(--paper)]">
+          </DialogBody>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={close}>
               Cancel
-            </button>
+            </Button>
             <Button size="sm" variant="primary" onClick={submit} disabled={!valid || pending}>
               Add milestone
             </Button>
-          </div>
-        </Modal>
+          </DialogFooter>
+        </Dialog>
       )}
     </>
   );
@@ -547,36 +488,31 @@ function EditMilestoneButton({ milestone: m }: { milestone: MilestoneProgress })
         onClick={() => setOpen(true)}
         aria-label={`Edit ${m.label}`}
         title="Edit milestone"
-        className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--brass)]"
+        className="rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--brass)]"
       >
         <Pencil size={13} />
       </button>
 
       {open && (
-        <Modal onClose={() => setOpen(false)}>
-          <div className="border-b border-line px-5 py-4">
-            <p className="text-sm font-medium">Edit milestone</p>
-          </div>
-          <div className="space-y-3 p-5">
+        <Dialog onClose={() => setOpen(false)} label="Edit milestone">
+          <DialogHeader title="Edit milestone" onClose={() => setOpen(false)} />
+          <DialogBody className="space-y-3">
             <Field label="Label">
               <Input value={label} onChange={setLabel} />
             </Field>
             <Field label="Net-worth target">
               <Input value={amount} onChange={setAmount} mono />
             </Field>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
-            <button
-              onClick={() => setOpen(false)}
-              className="text-xs text-[var(--muted)] hover:text-[var(--paper)]"
-            >
+          </DialogBody>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
-            </button>
+            </Button>
             <Button size="sm" variant="primary" onClick={save} disabled={!valid || pending}>
               Save
             </Button>
-          </div>
-        </Modal>
+          </DialogFooter>
+        </Dialog>
       )}
     </>
   );

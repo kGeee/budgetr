@@ -58,7 +58,7 @@ export function CategoriesSpendChart({
             </p>
             <button
               onClick={() => setSelectedDate(null)}
-              className="rounded-full p-0.5 text-[var(--faint)] transition hover:text-[var(--paper)]"
+              className="rounded-full p-0.5 text-[var(--muted)] transition hover:text-[var(--paper)]"
               aria-label="Clear date filter"
             >
               <X size={13} />

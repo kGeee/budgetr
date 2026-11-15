@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarClock, Coins, PiggyBank, TrendingUp } from "lucide-react";
+import { CalendarClock } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
 import { MonthlySpendChart } from "@/components/charts";
 import { formatCurrency } from "@/lib/utils";
 import type { DividendSummary } from "@/lib/dividends";
@@ -62,38 +63,35 @@ export function DividendPanel({
   const currency = summary.byTicker[0]?.currency ?? "USD";
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <p className="eyebrow">Dividend income · trailing 12 months</p>
-        <p className="mt-2 font-display text-4xl tabular">
-          {formatCurrency(summary.trailing12mTotal, currency)}
-        </p>
-        <p className="mt-2 max-w-xl font-display text-lg leading-snug">
-          <span className="text-[var(--jade)]">
-            On pace for {formatCurrency(summary.projectedAnnualTotal, currency)} next year
-          </span>
-          <span className="text-[var(--muted)]">
-            {" "}
-            — about {formatCurrency(summary.projectedAnnualTotal / 12, currency)} a month, from{" "}
-            {active.length} paying {active.length === 1 ? "position" : "positions"}.
-          </span>
-        </p>
-      </Card>
+    <div className="space-y-5">
+      <Hero
+        eyebrow="Dividend income · trailing 12 months"
+        figure={formatCurrency(summary.trailing12mTotal, currency)}
+        verdict={
+          <>
+            On pace for{" "}
+            <Mark tone="jade">{formatCurrency(summary.projectedAnnualTotal, currency)}</Mark> next
+            year{" "}
+            <span className="text-[var(--muted)]">
+              — about {formatCurrency(summary.projectedAnnualTotal / 12, currency)} a month, from{" "}
+              {active.length} paying {active.length === 1 ? "position" : "positions"}.
+            </span>
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <DividendStat
-          icon={<PiggyBank size={15} />}
+      <StatStrip>
+        <Stat
           label="Yield on cost"
+          tone="brass"
           value={
             summary.portfolioYieldOnCost != null
               ? `${summary.portfolioYieldOnCost.toFixed(2)}%`
               : "—"
           }
           sub="trailing income ÷ cost basis"
-          accent="brass"
         />
-        <DividendStat
-          icon={<Coins size={15} />}
+        <Stat
           label="Top payer"
           value={active[0]?.ticker ?? "—"}
           sub={
@@ -102,14 +100,13 @@ export function DividendPanel({
               : "—"
           }
         />
-        <DividendStat
-          icon={<TrendingUp size={15} />}
+        <Stat
           label="Lifetime"
+          tone="jade"
           value={formatCurrency(summary.lifetimeTotal, currency)}
           sub="since first payment"
-          accent="jade"
         />
-      </div>
+      </StatStrip>
 
       <Card className="p-0">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
@@ -250,36 +247,5 @@ export function DividendPanel({
       )}
 
     </div>
-  );
-}
-
-function DividendStat({
-  icon,
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub: string;
-  accent?: "jade" | "brass";
-}) {
-  const color =
-    accent === "jade"
-      ? "text-[var(--jade)]"
-      : accent === "brass"
-        ? "text-[var(--brass)]"
-        : "text-[var(--paper)]";
-  return (
-    <Card>
-      <div className="flex items-center gap-2 text-[var(--faint)]">
-        {icon}
-        <p className="eyebrow">{label}</p>
-      </div>
-      <p className={`mt-2 font-display text-3xl tabular ${color}`}>{value}</p>
-      <p className="mono mt-1 text-xs text-[var(--muted)]">{sub}</p>
-    </Card>
   );
 }

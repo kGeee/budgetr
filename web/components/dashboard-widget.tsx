@@ -22,6 +22,7 @@ import { ReviewInbox } from "@/components/transactions/review-inbox";
 import { UpcomingBills } from "@/components/budget/upcoming-bills";
 import { CategoryIcon } from "@/components/budget/category-pill";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
 import {
   WidgetControls,
   type ControlOption,
@@ -306,24 +307,6 @@ function WidgetBody({
   }
 }
 
-/** Shared delta pill — a signed currency change with its percentage. */
-function DeltaPill({ value, pct }: { value: number; pct: number }) {
-  const up = value >= 0;
-  return (
-    <span
-      className={`mono inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm ${
-        up
-          ? "border-[color-mix(in_srgb,var(--jade)_35%,transparent)] bg-[color-mix(in_srgb,var(--jade)_10%,transparent)] text-[var(--jade)]"
-          : "border-[color-mix(in_srgb,var(--coral)_35%,transparent)] bg-[color-mix(in_srgb,var(--coral)_10%,transparent)] text-[var(--coral)]"
-      }`}
-    >
-      {up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-      {up ? "+" : "−"}
-      {formatCurrency(Math.abs(value))} ({Math.abs(pct).toFixed(1)}%)
-    </span>
-  );
-}
-
 function NetWorthSummaryBody({
   nw,
   series,
@@ -335,31 +318,41 @@ function NetWorthSummaryBody({
   change: number;
   changePct: number;
 }) {
+  const up = change >= 0;
+  const flat = Math.abs(change) < 0.005;
   return (
-    <Card className="h-full">
-      <p className="eyebrow">Total net worth</p>
-      <p className="mt-2 font-display text-4xl tabular sm:text-5xl">{formatCurrency(nw.net)}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <DeltaPill value={change} pct={changePct} />
-        <span className="text-xs text-[var(--muted)]">since first snapshot</span>
+    // Home's one editorial number sits on the canvas with the sentence that
+    // reads it; the trend takes the room a card's padding used to.
+    <section
+      aria-label="Net worth"
+      className="grid h-full gap-x-10 gap-y-6 pb-2 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]"
+    >
+      <div className="flex min-w-0 flex-col gap-5">
+        <Hero
+          eyebrow="Net worth"
+          figure={formatCurrency(nw.net)}
+          tone={nw.net < 0 ? "coral" : "default"}
+          verdict={
+            flat ? (
+              "Unchanged since your first snapshot."
+            ) : (
+              <>
+                {up ? "Up" : "Down"}{" "}
+                <Mark tone={up ? "jade" : "coral"}>{formatCurrency(Math.abs(change))}</Mark> since
+                your first snapshot, a {up ? "gain" : "drop"} of {Math.abs(changePct).toFixed(1)}%.
+              </>
+            )
+          }
+        />
+        <StatStrip className="mt-auto">
+          <Stat label="Assets" value={formatCurrency(nw.assets)} />
+          <Stat label="Owed" value={formatCurrency(nw.liabilities)} tone="coral" />
+        </StatStrip>
       </div>
-      <div className="mt-5 flex gap-8">
-        <div>
-          <p className="eyebrow">Assets</p>
-          <p className="mt-1 font-display text-xl tabular">{formatCurrency(nw.assets)}</p>
-        </div>
-        <span className="w-px self-stretch bg-line" />
-        <div>
-          <p className="eyebrow">Liabilities</p>
-          <p className="mt-1 font-display text-xl tabular text-[var(--coral)]">
-            {formatCurrency(nw.liabilities)}
-          </p>
-        </div>
-      </div>
-      <div className="mt-6">
+      <div className="min-w-0 self-end">
         <NetWorthChart data={series} />
       </div>
-    </Card>
+    </section>
   );
 }
 

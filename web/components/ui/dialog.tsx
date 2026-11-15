@@ -110,6 +110,9 @@ export function Dialog({
         aria-modal="true"
         aria-label={label}
         tabIndex={-1}
+        // Inline, because the global :focus-visible ring is unlayered and beats
+        // any utility — and a ring around the whole panel is noise.
+        style={{ outline: "none" }}
         className={cn(
           "w-full overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)] outline-none",
           SIZES[size],

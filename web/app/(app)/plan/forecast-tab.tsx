@@ -4,8 +4,9 @@ import { AlertTriangle } from "lucide-react";
 import { ForecastChart } from "@/components/charts";
 import { DataFreshnessBanner } from "@/components/data-freshness";
 import { getDataFreshness } from "@/lib/data-freshness";
-import { Card } from "@/components/ui/card";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import { getCashflowForecast, getForecastSeries, getRemainingRecurring } from "@/lib/forecast";
+import { forecastVerdict } from "@/lib/forecast-verdict";
 import { streamLabel } from "@/lib/recurring";
 import { formatCurrency } from "@/lib/utils";
 
@@ -63,6 +64,11 @@ export function ForecastTab() {
   );
   const willOverdraft = !!lowest && lowest.amount < 0;
   const showLowNote = !!lowest && lowest.amount < projectedEndBalance - 1;
+  const verdict = forecastVerdict({
+    currentCash,
+    projectedEndBalance,
+    daysRemaining: forecast.daysRemaining,
+  });
 
   return (
     <div className="space-y-7">
@@ -73,30 +79,22 @@ export function ForecastTab() {
 
       <DataFreshnessBanner freshness={freshness} />
 
-      {/* Hero: projected end-of-month balance + supporting stats. */}
-      <div className="flex flex-col gap-6 rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="eyebrow">Projected end of {format(parseISO(`${month}-01`), "MMMM")}</p>
-            <p
-              className={`display-1 mt-2 font-display text-5xl tabular ${
-                negative ? "text-[var(--coral)]" : ""
-              }`}
-            >
-              {formatCurrency(projectedEndBalance)}
-            </p>
-            <p className="mt-3 text-sm text-[var(--muted)]">
-              {forecast.daysRemaining > 0
-                ? `${forecast.daysRemaining} day${
-                    forecast.daysRemaining === 1 ? "" : "s"
-                  } left · ${formatCurrency(currentCash)} in cash`
-                : `Month closed · ${formatCurrency(currentCash)} in cash`}
-              {asOfLabel && balanceStale ? ` as of ${asOfLabel}` : " today"}
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
+      {/* The month's one figure is where cash lands; the sentence says how far
+          that is from today, and the rule under it holds the four figures the
+          projection is made of. */}
+      <section className="space-y-5" aria-label={`${monthLabel} cash forecast`}>
+        <Hero
+          eyebrow={`Projected end of ${format(parseISO(`${month}-01`), "MMMM")}`}
+          figure={formatCurrency(projectedEndBalance)}
+          tone={negative ? "coral" : "default"}
+          verdict={
+            <>
+              {verdict.lead} <Mark tone={verdict.tone}>{formatCurrency(verdict.amount)}</Mark>{" "}
+              {verdict.tail}
+            </>
+          }
+        />
+        <StatStrip>
           <Stat
             label={asOfLabel && balanceStale ? `Cash · as of ${asOfLabel}` : "Cash today"}
             value={formatCurrency(currentCash)}
@@ -108,15 +106,15 @@ export function ForecastTab() {
             value={formatCurrency(paceSpend)}
             tone="coral"
           />
-        </div>
-      </div>
+        </StatStrip>
+      </section>
 
       {(willOverdraft || showLowNote) && lowest && (
         <div
-          className={`flex items-start gap-3 rounded-[var(--radius)] border px-5 py-4 text-sm ${
+          className={`flex items-start gap-3 border-l-2 py-1 pl-4 text-sm ${
             willOverdraft
-              ? "border-[var(--coral)] bg-[var(--panel)] text-[var(--coral)]"
-              : "border-line bg-[var(--panel)] text-[var(--muted)]"
+              ? "border-[var(--coral)] text-[var(--coral)]"
+              : "border-[var(--line-strong)] text-[var(--muted)]"
           }`}
         >
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
@@ -142,46 +140,35 @@ export function ForecastTab() {
       )}
 
       {/* Actual-vs-projected balance chart. */}
-      <Card className="p-0">
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <span className="eyebrow">Balance forecast · {monthLabel}</span>
-          <span className="flex items-center gap-3 text-xs text-[var(--muted)]">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full" style={{ background: "var(--jade)" }} />
-              Actual
+      <section className="space-y-4">
+        <SectionHead
+          title={`Balance forecast · ${monthLabel}`}
+          action={
+            <span className="flex items-center gap-3 text-xs text-[var(--muted)]">
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full" style={{ background: "var(--jade)" }} />
+                Actual
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-px w-3 border-t border-dashed border-[var(--brass)]" />
+                Projected
+              </span>
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-px w-3 border-t border-dashed border-[var(--brass)]" />
-              Projected
-            </span>
-          </span>
-        </div>
-        <div className="px-3 py-5 sm:px-5">
-          <ForecastChart data={series} today={today} />
-        </div>
-        <div className="border-t border-line px-6 py-3 text-xs text-[var(--muted)]">
+          }
+        />
+        <ForecastChart data={series} today={today} />
+        <p className="mono border-t border-line pt-3 text-xs text-[var(--muted)]">
           {formatCurrency(currentCash)} today − {formatCurrency(remainingBills)} bills −{" "}
           {formatCurrency(paceSpend)} pace spend + {formatCurrency(remainingIncome)} income ={" "}
           <span className={negative ? "text-[var(--coral)]" : "text-[var(--paper)]"}>
             {formatCurrency(projectedEndBalance)}
           </span>{" "}
           projected over {daysInMonth} days
-        </div>
-      </Card>
+        </p>
+      </section>
 
       {/* A glance at what clears next; the full list lives one tab over. */}
       <NextBills bills={bills} />
-    </div>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "coral" | "jade" }) {
-  const color =
-    tone === "coral" ? "text-[var(--coral)]" : tone === "jade" ? "text-[var(--jade)]" : "";
-  return (
-    <div className="bg-[var(--panel)] px-4 py-3.5">
-      <p className="eyebrow">{label}</p>
-      <p className={`mt-1.5 font-display text-lg leading-none tabular ${color}`}>{value}</p>
     </div>
   );
 }
@@ -192,7 +179,7 @@ function NextBills({ bills }: { bills: ReturnType<typeof getRemainingRecurring>[
     .sort((a, b) => (a.predictedNextDate! < b.predictedNextDate! ? -1 : 1))
     .slice(0, 3);
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[var(--radius)] border border-line bg-[var(--panel)] px-5 py-3.5 text-sm">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-line py-3.5 text-sm">
       <span className="eyebrow">Next bills</span>
       {next.length === 0 ? (
         <span className="text-[var(--muted)]">None predicted for the rest of the month.</span>

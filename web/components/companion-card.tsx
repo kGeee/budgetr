@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { SettingRow } from "@/app/(app)/settings/setting-row";
 import { pairPhone, syncPhoneNow, unpairPhone } from "@/lib/actions-companion";
 
 type Status = {
@@ -47,48 +48,57 @@ export function CompanionCard({ initial }: { initial: Status }) {
     startTransition(async () => {
       await unpairPhone();
       setQrSvg(null);
-      setStatus({ paired: false, channelId: null, lastSyncAt: null, lastError: null });
+      setStatus({
+        paired: false,
+        channelId: null,
+        lastSyncAt: null,
+        lastError: null,
+      });
     });
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <p className="max-w-md text-sm text-[var(--muted)]">
-          {status.paired ? (
-            <>
-              Paired — your phone shows an encrypted snapshot this Mac publishes.{" "}
-              <span className="text-[var(--paper)]">Last sync: {lastSyncLabel(status.lastSyncAt)}.</span>{" "}
-              {status.lastError ? (
-                <span className="text-[var(--coral)]">Sync error: {status.lastError}</span>
-              ) : null}
-            </>
-          ) : (
-            <>
-              Pair the budgetr companion app to see a glanceable, end-to-end encrypted summary on
-              your phone. Nothing readable ever leaves this Mac.
-            </>
-          )}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {status.paired ? (
-            <>
-              <Button variant="secondary" size="sm" onClick={sync} disabled={pending}>
-                Sync now
+    <div>
+      <SettingRow
+        title={status.paired ? "Phone paired" : "Pair your phone"}
+        control={
+          <div className="flex flex-wrap gap-2">
+            {status.paired ? (
+              <>
+                <Button variant="secondary" size="sm" onClick={sync} disabled={pending}>
+                  Sync now
+                </Button>
+                <Button variant="outline" size="sm" onClick={pair} disabled={pending}>
+                  Re-pair (rotate keys)
+                </Button>
+                <Button variant="ghost" size="sm" onClick={unpair} disabled={pending}>
+                  Unpair
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" onClick={pair} disabled={pending}>
+                Pair phone
               </Button>
-              <Button variant="outline" size="sm" onClick={pair} disabled={pending}>
-                Re-pair (rotate keys)
-              </Button>
-              <Button variant="ghost" size="sm" onClick={unpair} disabled={pending}>
-                Unpair
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" onClick={pair} disabled={pending}>
-              Pair phone
-            </Button>
-          )}
-        </div>
-      </div>
+            )}
+          </div>
+        }
+      >
+        {status.paired ? (
+          <>
+            Paired — your phone shows an encrypted snapshot this Mac publishes.{" "}
+            <span className="text-[var(--paper)]">
+              Last sync: {lastSyncLabel(status.lastSyncAt)}.
+            </span>{" "}
+            {status.lastError ? (
+              <span className="text-[var(--coral)]">Sync error: {status.lastError}</span>
+            ) : null}
+          </>
+        ) : (
+          <>
+            Pair the budgetr companion app to see a glanceable, end-to-end encrypted summary on your
+            phone. Nothing readable ever leaves this Mac.
+          </>
+        )}
+      </SettingRow>
 
       {qrSvg ? (
         <div className="flex flex-wrap items-center gap-5 rounded-lg border border-line bg-[var(--panel)] p-4">

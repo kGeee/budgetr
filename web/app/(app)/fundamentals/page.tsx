@@ -4,6 +4,8 @@ import { PageHead } from "@/components/page-head";
 import { InvestmentsTabs } from "@/components/investments-tabs";
 import { requireTradingDesk } from "@/lib/trading-desk";
 import { Card } from "@/components/ui/card";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
+import { marginVerdict } from "@/lib/investments-verdict";
 import { IncomeSankey } from "@/components/fundamentals/income-sankey";
 import { getIncomeStatement } from "@/lib/sec";
 import { toSankey } from "@/lib/fundamentals/income-statement";
@@ -30,6 +32,12 @@ export default async function FundamentalsPage({
   const period = periodParam === "quarterly" ? "quarterly" : "annual";
   const is = sym ? await getIncomeStatement(sym, period) : null;
   const sankey = is ? toSankey(is) : null;
+  const verdict = is ? marginVerdict({ revenue: is.revenue, netIncome: is.netIncome }) : null;
+  const periodLabel = is
+    ? is.period === "quarterly"
+      ? `${is.fiscalPeriod ?? "Q"} FY${is.fiscalYear ?? "—"}`
+      : `FY${is.fiscalYear ?? "—"}`
+    : "";
 
   return (
     <div className="space-y-6">
@@ -93,44 +101,40 @@ export default async function FundamentalsPage({
 
       {is && sankey && (
         <>
-          <div className="flex flex-wrap items-end justify-between gap-4 rounded-[var(--radius)] border border-line bg-[var(--panel)] p-5">
-            <div>
-              <p className="eyebrow">{is.entityName ?? sym}</p>
-              <p className="mt-1 font-display text-2xl">
-                {sym} ·{" "}
-                {is.period === "quarterly" ? `${is.fiscalPeriod ?? "Q"} FY${is.fiscalYear ?? "—"}` : `FY${is.fiscalYear ?? "—"}`}
-              </p>
-            </div>
-            <p className="text-xs text-[var(--muted)]">
-              {is.period === "quarterly" ? "Quarter" : "Fiscal year"} ended {is.periodEnd}
-            </p>
-          </div>
+          {/* The statement boils down to one ratio — what was left of each
+              dollar sold — so that is the figure; the two margins above it on
+              the income statement sit on the rule beneath. */}
+          <section className="space-y-5">
+            <Hero
+              eyebrow={`Net margin · ${is.entityName ?? sym} · ${sym} · ${periodLabel}`}
+              figure={pct(is.netIncome, is.revenue)}
+              tone={verdict?.tone === "coral" ? "coral" : "default"}
+              verdict={
+                verdict && (
+                  <>
+                    {sym} {verdict.lead} <Mark tone={verdict.tone}>{verdict.margin}</Mark>{" "}
+                    {verdict.tail}
+                  </>
+                )
+              }
+            />
+            <StatStrip>
+              <Stat label="Gross margin" value={pct(is.grossProfit, is.revenue)} />
+              <Stat label="Operating margin" value={pct(is.operatingIncome, is.revenue)} />
+              <Stat label="Net margin" value={pct(is.netIncome, is.revenue)} />
+              <Stat
+                label={is.period === "quarterly" ? "Quarter ended" : "Fiscal year ended"}
+                value={is.periodEnd}
+              />
+            </StatStrip>
+          </section>
 
-          <Card className="p-0">
-            <div className="border-b border-line px-5 py-3.5">
-              <span className="eyebrow">Income statement · annual</span>
-            </div>
-            <div className="p-4">
-              <IncomeSankey data={sankey} />
-            </div>
-          </Card>
-
-          <div className="grid grid-cols-3 gap-3">
-            <Stat label="Gross margin" value={pct(is.grossProfit, is.revenue)} />
-            <Stat label="Operating margin" value={pct(is.operatingIncome, is.revenue)} />
-            <Stat label="Net margin" value={pct(is.netIncome, is.revenue)} />
-          </div>
+          <section className="space-y-4">
+            <SectionHead title="Income statement · annual" />
+            <IncomeSankey data={sankey} />
+          </section>
         </>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-4">
-      <p className="eyebrow">{label}</p>
-      <p className="mt-1.5 font-display text-2xl tabular">{value}</p>
     </div>
   );
 }

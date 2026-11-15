@@ -3,8 +3,10 @@
 import { createContext, Fragment, useContext, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogBody, DialogHeader } from "@/components/ui/dialog";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import { PayoffDiagram } from "@/components/options/payoff-diagram";
 import { Sparkline, TickerPriceChart } from "@/components/charts";
 import { ValueHistory } from "@/components/portfolio/value-history";
@@ -730,61 +732,95 @@ function PortfolioInner({
   return (
     <div className="space-y-7">
       <div id="value" className="scroll-mt-28 space-y-4">
-        <StandingHeader
-          standing={standing}
-          total={total}
-          cashValue={cashValue}
-          positions={holdings.length}
+        {/* One figure, one sentence, one rule. The figure is what the book is
+            worth; the sentence is whether it is working — the time-weighted
+            return against the index, in points, because market value alone rises
+            whenever you deposit and cannot answer that. */}
+        <Hero
+          eyebrow={`Market value · ${holdings.length} ${holdings.length === 1 ? "position" : "positions"}`}
+          figure={formatCurrency(total)}
+          verdict={
+            standing.state === "unknown" ? (
+              <span className="text-[var(--muted)]">{standing.reason}</span>
+            ) : (
+              <>
+                <Mark tone={standing.state === "behind" ? "coral" : "jade"}>
+                  {standingHeadline(standing)}.
+                </Mark>{" "}
+                <span className="text-[var(--muted)]">{standingDetail(standing)}</span>
+              </>
+            )
+          }
         />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat
-            label="Market value"
-            value={total}
-            detail={
-              cashValue > 0.005
-                ? `${formatCurrency(cashValue)} of it cash`
-                : "all of it invested"
-            }
-          />
+        <StatStrip>
+          {standing.state !== "unknown" && (
+            <Stat
+              label={`Return · ${standing.windowLabel.toLowerCase()}`}
+              tone={standing.state === "behind" ? "coral" : "jade"}
+              value={`${standing.returnPct! >= 0 ? "+" : "−"}${Math.abs(standing.returnPct!).toFixed(1)}%`}
+              sub="time-weighted"
+            />
+          )}
           {/* Never render a computed zero as a measurement. Before quotes land,
               every holding's day change is null, which summed to a confident
               "+$0.00 · 0% of value has a live quote" — indistinguishable from a
               genuinely flat market. Say we're still pricing instead. */}
           {dayPriced.length === 0 ? (
-            <PendingStat label="Day change" note={`pricing ${holdings.length} positions…`} />
+            <Stat
+              label="Day change"
+              tone="muted"
+              value="—"
+              sub={`pricing ${holdings.length} positions…`}
+            />
           ) : (
             <Stat
               label="Day change"
-              value={dayChange}
-              signed
-              pct={dayChangePctTotal}
-              detail={`${Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote`}
-              detailTitle={
-                "Day change is computed only from holdings with a live intraday quote " +
-                "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
-                "funds, and untracked symbols are excluded, so this share is below 100%."
+              tone={dayChange >= 0 ? "jade" : "coral"}
+              value={`${signedCurrency(dayChange)} · ${signedPct(dayChangePctTotal)}`}
+              sub={
+                <span
+                  className="cursor-help"
+                  title={
+                    "Day change is computed only from holdings with a live intraday quote " +
+                    "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
+                    "funds, and untracked symbols are excluded, so this share is below 100%."
+                  }
+                >
+                  {Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote
+                </span>
               }
             />
           )}
           <Stat
             label="Unrealized gain"
-            value={gain}
-            signed
-            pct={gainPct}
-            hint="View breakdown"
-            onClick={() => setShowBreakdown(true)}
+            tone={gain >= 0 ? "jade" : "coral"}
+            value={`${signedCurrency(gain)} · ${signedPct(gainPct)}`}
+            sub={
+              <button
+                type="button"
+                onClick={() => setShowBreakdown(true)}
+                className="text-[var(--brass)] underline-offset-2 transition-colors hover:text-[var(--paper)] hover:underline"
+              >
+                View breakdown →
+              </button>
+            }
           />
           <Stat
             label="Cost basis"
-            value={totalCost}
-            detail={
+            value={formatCurrency(totalCost)}
+            sub={
               uncostedValue > 0.005
                 ? `${formatCurrency(uncostedValue)} has no basis`
                 : "All positions costed"
             }
           />
-        </div>
+          <Stat
+            label="Cash"
+            value={formatCurrency(cashValue)}
+            sub={cashValue > 0.005 ? "of market value" : "all of it invested"}
+          />
+        </StatStrip>
 
         {/* The no-basis caveat silently qualifies two headline numbers, so it
             gets said out loud rather than living in tile fine print. */}
@@ -808,20 +844,20 @@ function PortfolioInner({
         />
       )}
 
-      <Card className="p-0">
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <span className="eyebrow">Portfolio value</span>
-          <span className="text-xs text-[var(--faint)]">reconstructed from your trades</span>
-        </div>
-        <div className="px-3 py-5 sm:px-5">
-          <ValueHistory
-            data={portfolioSeries}
-            portfolioReturnSeries={portfolioReturnSeries}
-            kind="portfolio"
-            benchmarks={benchmarks}
-          />
-        </div>
-      </Card>
+      <section className="space-y-4">
+        <SectionHead
+          title="Portfolio value"
+          action={
+            <span className="text-xs text-[var(--muted)]">reconstructed from your trades</span>
+          }
+        />
+        <ValueHistory
+          data={portfolioSeries}
+          portfolioReturnSeries={portfolioReturnSeries}
+          kind="portfolio"
+          benchmarks={benchmarks}
+        />
+      </section>
 
       <BenchmarkComparison comparison={comparison} standing={standing} />
 
@@ -2446,95 +2482,85 @@ function GainBreakdownModal({
   const gainPositive = gain >= 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+    <Dialog
+      onClose={onClose}
+      label="Unrealized gain breakdown"
+      size="2xl"
+      className="flex max-h-[85vh] flex-col"
     >
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div>
-            <p className="text-sm font-medium">Unrealized gain breakdown</p>
-            <p className="mt-0.5 text-xs text-[var(--muted)]">
-              Per-holding P&amp;L (current value − cost basis)
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--paper)]"
-          >
-            <X size={16} />
-          </button>
-        </div>
+      <DialogHeader
+        title="Unrealized gain breakdown"
+        description={<>Per-holding P&amp;L (current value − cost basis)</>}
+        onClose={onClose}
+      />
 
-        <div className="overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-[var(--panel)]">
-              <tr className="border-b border-line text-left">
-                {["Holding", "Value", "Cost basis", "P&L", "%"].map((h, i) => (
-                  <th
-                    key={h}
-                    className={`px-5 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ h, value, cost, pnl }) => {
-                const pct = pnl != null && cost ? (pnl / cost) * 100 : null;
-                const pos = (pnl ?? 0) >= 0;
-                const color = pos ? "text-[var(--jade)]" : "text-[var(--coral)]";
-                return (
-                  <tr key={h.id} className="border-b border-line/60 last:border-0">
-                    <td className="px-5 py-2.5">
-                      <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-                      <span className="ml-2 text-[var(--muted)]">{cleanSecurityName(h.securityName)}</span>
-                    </td>
-                    <td className="mono px-5 py-2.5 text-right">
-                      {formatMoney(value, h.currency)}
-                    </td>
-                    <td className="mono px-5 py-2.5 text-right text-[var(--muted)]">
-                      {cost != null ? formatMoney(cost, h.currency) : "—"}
-                    </td>
-                    <td className={`mono px-5 py-2.5 text-right ${pnl != null ? color : "text-[var(--faint)]"}`}>
-                      {pnl != null
-                        ? `${pos ? "+" : "−"}${formatMoney(Math.abs(pnl), h.currency)}`
-                        : "—"}
-                    </td>
-                    <td className={`mono px-5 py-2.5 text-right ${pct != null ? color : "text-[var(--faint)]"}`}>
-                      {pct != null ? `${pos ? "+" : "−"}${Math.abs(pct).toFixed(1)}%` : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      <DialogBody className="p-0">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-[var(--panel)]">
+            <tr className="border-b border-line text-left">
+              {["Holding", "Value", "Cost basis", "P&L", "%"].map((h, i) => (
+                <th
+                  key={h}
+                  className={`px-5 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ h, value, cost, pnl }) => {
+              const pct = pnl != null && cost ? (pnl / cost) * 100 : null;
+              const pos = (pnl ?? 0) >= 0;
+              const color = pos ? "text-[var(--jade)]" : "text-[var(--coral)]";
+              return (
+                <tr key={h.id} className="border-b border-line/60 last:border-0">
+                  <td className="px-5 py-2.5">
+                    <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+                    <span className="ml-2 text-[var(--muted)]">{cleanSecurityName(h.securityName)}</span>
+                  </td>
+                  <td className="mono px-5 py-2.5 text-right">
+                    {formatMoney(value, h.currency)}
+                  </td>
+                  <td className="mono px-5 py-2.5 text-right text-[var(--muted)]">
+                    {cost != null ? formatMoney(cost, h.currency) : "—"}
+                  </td>
+                  <td className={`mono px-5 py-2.5 text-right ${pnl != null ? color : "text-[var(--faint)]"}`}>
+                    {pnl != null
+                      ? `${pos ? "+" : "−"}${formatMoney(Math.abs(pnl), h.currency)}`
+                      : "—"}
+                  </td>
+                  <td className={`mono px-5 py-2.5 text-right ${pct != null ? color : "text-[var(--faint)]"}`}>
+                    {pct != null ? `${pos ? "+" : "−"}${Math.abs(pct).toFixed(1)}%` : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </DialogBody>
 
-        <div className="border-t border-line px-5 py-4 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-[var(--muted)]">Total cost basis</span>
-            <span className="mono">{formatCurrency(totalCost)}</span>
-          </div>
-          <div className="mt-1.5 flex items-center justify-between">
-            <span className="text-[var(--muted)]">Unrealized gain</span>
-            <span className={`mono ${gainPositive ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
-              {gainPositive ? "+" : "−"}
-              {formatCurrency(Math.abs(gain))}
-            </span>
-          </div>
-          {uncostedValue > 0.005 && (
-            <p className="mt-3 border-t border-line/60 pt-3 text-xs text-[var(--muted)]">
-              {formatCurrency(uncostedValue)} sits in holdings without a cost basis — counted in
-              market value but excluded from unrealized gain (no basis to compare against). Add a
-              cost basis to include them.
-            </p>
-          )}
+      <div className="shrink-0 border-t border-line px-5 py-4 text-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-[var(--muted)]">Total cost basis</span>
+          <span className="mono">{formatCurrency(totalCost)}</span>
         </div>
+        <div className="mt-1.5 flex items-center justify-between">
+          <span className="text-[var(--muted)]">Unrealized gain</span>
+          <span className={`mono ${gainPositive ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
+            {gainPositive ? "+" : "−"}
+            {formatCurrency(Math.abs(gain))}
+          </span>
+        </div>
+        {uncostedValue > 0.005 && (
+          <p className="mt-3 border-t border-line/60 pt-3 text-xs text-[var(--muted)]">
+            {formatCurrency(uncostedValue)} sits in holdings without a cost basis — counted in
+            market value but excluded from unrealized gain (no basis to compare against). Add a
+            cost basis to include them.
+          </p>
+        )}
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -3075,154 +3101,11 @@ function StatusBadge({ status }: { status: LiveStatus }) {
   );
 }
 
-/**
- * The desk's opening line: what the portfolio actually returned, against the
- * market, in points.
- *
- * This replaces a headline market value — a number that rises whenever you
- * deposit and therefore cannot answer "is this working?". The comparison it
- * shows was already being computed on every load and rendered only as a buried
- * table row.
- */
-function StandingHeader({
-  standing,
-  total,
-  cashValue,
-  positions,
-}: {
-  standing: ReturnType<typeof computeStanding>;
-  total: number;
-  cashValue: number;
-  positions: number;
-}) {
-  const unknown = standing.state === "unknown";
-  const behind = standing.state === "behind";
-  const tone = unknown
-    ? "text-[var(--muted)]"
-    : behind
-      ? "text-[var(--coral)]"
-      : "text-[var(--jade)]";
-
-  return (
-    <Card>
-      <p className="eyebrow">
-        Portfolio · {positions} {positions === 1 ? "position" : "positions"}
-        {standing.window ? ` · ${standing.windowLabel.toLowerCase()}` : ""}
-      </p>
-
-      {unknown ? (
-        <>
-          <p className="mt-2 font-display tabular text-4xl">{formatCurrency(total)}</p>
-          <p className="mt-2 max-w-xl text-sm text-[var(--muted)]">{standing.reason}</p>
-        </>
-      ) : (
-        <>
-          <p className={`mt-2 font-display tabular text-4xl ${tone}`}>
-            {standing.returnPct! >= 0 ? "+" : "−"}
-            {Math.abs(standing.returnPct!).toFixed(1)}%
-          </p>
-          <p className="mt-2 max-w-xl font-display text-lg leading-snug">
-            <span className={tone}>{standingHeadline(standing)}.</span>{" "}
-            <span className="text-[var(--muted)]">{standingDetail(standing)}</span>
-          </p>
-        </>
-      )}
-
-      <p className="mono mt-3 text-xs text-[var(--faint)]">
-        {formatCurrency(total)} market value
-        {cashValue > 0.005 && ` · ${formatCurrency(cashValue)} of it cash`}
-      </p>
-    </Card>
-  );
+/** "+$1,204.10" / "−$88.00" — same sign convention the tiles used; privacy mode masks the whole figure. */
+function signedCurrency(value: number): string {
+  return `${value >= 0 ? "+" : ""}${formatCurrency(value)}`;
 }
 
-/**
- * A stat that has nothing to say yet. Distinct from a zero on purpose — "we
- * haven't priced this" and "it didn't move" are different facts, and the tile
- * used to render both as +$0.00.
- */
-function PendingStat({ label, note }: { label: string; note: string }) {
-  return (
-    <Card>
-      <p className="eyebrow">{label}</p>
-      <p className="mt-2 font-display tabular text-3xl text-[var(--muted)]">—</p>
-      <p className="mono mt-1 text-xs text-[var(--faint)]">{note}</p>
-    </Card>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  big,
-  signed,
-  pct,
-  hint,
-  detail,
-  detailTitle,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  big?: boolean;
-  signed?: boolean;
-  pct?: number;
-  hint?: string;
-  detail?: string;
-  detailTitle?: string;
-  onClick?: () => void;
-}) {
-  const positive = value >= 0;
-  const color = signed ? (positive ? "text-[var(--jade)]" : "text-[var(--coral)]") : "";
-  const body = (
-    <>
-      <div className="flex items-center justify-between">
-        <p className="eyebrow">{label}</p>
-        {hint && onClick && (
-          <span className="text-[10px] text-[var(--faint)] transition-colors group-hover:text-[var(--brass)]">
-            {hint} →
-          </span>
-        )}
-      </div>
-      <p className={`mt-2 font-display tabular ${big ? "text-4xl" : "text-3xl"} ${color}`}>
-        {signed && positive ? "+" : ""}
-        {formatCurrency(value)}
-      </p>
-      {signed && pct !== undefined && (
-        <p className={`mono mt-1 text-sm ${color}`}>
-          {positive ? "+" : "−"}
-          {Math.abs(pct).toFixed(2)}%
-        </p>
-      )}
-      {detail && (
-        <p
-          className={`mt-1 text-xs text-[var(--muted)]${detailTitle ? " cursor-help" : ""}`}
-          title={detailTitle}
-        >
-          {detail}
-        </p>
-      )}
-    </>
-  );
-
-  if (onClick) {
-    return (
-      <Card
-        interactive
-        role="button"
-        tabIndex={0}
-        onClick={onClick}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onClick();
-          }
-        }}
-        className="group text-left hover:bg-[var(--panel-2)] focus:outline-none focus:ring-1 focus:ring-[var(--brass-dim)]"
-      >
-        {body}
-      </Card>
-    );
-  }
-  return <Card>{body}</Card>;
+function signedPct(pct: number): string {
+  return `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(2)}%`;
 }

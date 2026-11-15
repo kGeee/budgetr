@@ -14,6 +14,8 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Radar, LineChart, Activity, RotateCw } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
+import { optionsBookVerdict } from "@/lib/investments-verdict";
 import { OptionsAnalytics } from "@/components/options/options-analytics";
 import { useLivePrices } from "@/components/portfolio/live-prices";
 import { formatCurrency } from "@/lib/utils";
@@ -119,23 +121,46 @@ export function OptionsPositionsView({
 
   if (parsed.length === 0) return <EmptyDesk />;
 
+  const verdict = optionsBookVerdict(stats);
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Open contracts" value={String(round(stats.open))} sub={`${stats.underlyings} underlying${stats.underlyings === 1 ? "" : "s"}`} />
-        <Kpi
+      {/* The figure is in CONTRACTS. Holdings store option quantity in shares
+          (±100 per contract), so `stats.open` is that quantity ÷ CONTRACT_SIZE —
+          the trade tape, by contrast, already counts 1 per contract. */}
+      <Hero
+        eyebrow={`Open contracts · ${stats.underlyings} underlying${stats.underlyings === 1 ? "" : "s"}`}
+        figure={String(round(stats.open))}
+        verdict={
+          <>
+            <Mark tone={verdict.tone}>{verdict.expiry}</Mark>
+            {verdict.assigned != null && (
+              <>
+                {" "}
+                Assignment on the short puts would call for{" "}
+                <Mark tone="default">
+                  {formatCurrency(verdict.assigned, currency, { maximumFractionDigits: 0 })}
+                </Mark>
+                .
+              </>
+            )}
+          </>
+        }
+      />
+      <StatStrip>
+        <Stat
           label="Cash if assigned"
           value={formatCurrency(stats.ifAssigned, currency, { maximumFractionDigits: 0 })}
           sub="short puts at strike"
         />
-        <Kpi
+        <Stat
           label="Expiring ≤ 7d"
           value={String(stats.soon)}
           sub={stats.soonItm > 0 ? `${stats.soonItm} in the money` : "none in the money"}
-          tone={stats.soonItm > 0 ? "coral" : undefined}
+          tone={stats.soonItm > 0 ? "coral" : "default"}
         />
-        <Kpi label="Underlyings" value={String(stats.underlyings)} sub="with open legs" />
-      </div>
+        <Stat label="Underlyings" value={String(stats.underlyings)} sub="with open legs" />
+      </StatStrip>
 
       <Card className="overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
@@ -269,28 +294,6 @@ function EmptyDesk() {
       </Card>
       <ToolGrid hasPositions={false} />
     </div>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "coral";
-}) {
-  return (
-    <Card className="p-4">
-      <p className="eyebrow">{label}</p>
-      <p className={`mono mt-1.5 text-xl tabular ${tone === "coral" ? "text-[var(--coral)]" : ""}`}>
-        {value}
-      </p>
-      {sub && <p className="mt-0.5 text-xs text-[var(--faint)]">{sub}</p>}
-    </Card>
   );
 }
 

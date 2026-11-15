@@ -2,8 +2,10 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Pin, Plus, Receipt, Trash2, TrendingDown } from "lucide-react";
+import { Download, Pin, Plus, Receipt, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Mark, Stat, StatStrip, Verdict } from "@/components/ui/statement";
+import { realizedVerdict } from "@/lib/investments-verdict";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -61,6 +63,10 @@ function gainClass(v: number): string {
   return v > 0 ? "text-[var(--jade)]" : v < 0 ? "text-[var(--coral)]" : "text-[var(--muted)]";
 }
 
+function gainTone(v: number): "jade" | "coral" | "muted" {
+  return v > 0 ? "jade" : v < 0 ? "coral" : "muted";
+}
+
 function txnLabel(t: InvestmentTxnRow): string {
   const qty = t.quantity != null ? Math.abs(t.quantity) : 0;
   const px = t.price != null ? ` @ ${formatCurrency(t.price)}` : "";
@@ -91,6 +97,7 @@ export function RealizedGainsView({
     [lots, year],
   );
   const totals = useMemo(() => totalsFor(shown), [shown]);
+  const verdict = realizedVerdict({ total: totals.total, count: totals.count });
 
   // Spec-ID applies to owned lots: a sale-to-close matched to a buy-to-open.
   const sells = useMemo(
@@ -213,22 +220,30 @@ export function RealizedGainsView({
       ) : (
         <>
           {/* Capital-gains summary cards */}
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <SummaryCard label="Short-term" value={totals.shortTerm} accent />
-            <SummaryCard label="Long-term" value={totals.longTerm} accent />
-            <SummaryCard label="Total realized" value={totals.total} accent />
-            <Card className="p-5">
-              <p className="eyebrow flex items-center gap-1.5">
-                <TrendingDown size={13} /> Wash-sale disallowed
-              </p>
-              <p className="tabular mono mt-2 text-2xl font-semibold text-[var(--coral)]">
-                {formatCurrency(totals.disallowedWash)}
-              </p>
-              <p className="mt-1 text-xs text-[var(--muted)]">
-                {totals.count} lot{totals.count === 1 ? "" : "s"} · proceeds{" "}
-                {formatCurrency(totals.proceeds)}
-              </p>
-            </Card>
+          <div className="space-y-4">
+            {verdict && (
+              <Verdict>
+                {verdict.lead}
+                {verdict.amount != null && (
+                  <>
+                    {" "}
+                    <Mark tone={verdict.tone}>{formatCurrency(verdict.amount)}</Mark>
+                  </>
+                )}{" "}
+                {verdict.tail}
+              </Verdict>
+            )}
+            <StatStrip>
+              <Stat label="Total realized" value={formatCurrency(totals.total)} tone={gainTone(totals.total)} />
+              <Stat label="Short-term" value={formatCurrency(totals.shortTerm)} tone={gainTone(totals.shortTerm)} />
+              <Stat label="Long-term" value={formatCurrency(totals.longTerm)} tone={gainTone(totals.longTerm)} />
+              <Stat
+                label="Wash-sale disallowed"
+                value={formatCurrency(totals.disallowedWash)}
+                tone="coral"
+                sub={`${totals.count} lot${totals.count === 1 ? "" : "s"} · proceeds ${formatCurrency(totals.proceeds)}`}
+              />
+            </StatStrip>
           </div>
 
           {/* Lot detail table */}
@@ -409,28 +424,5 @@ export function RealizedGainsView({
         </>
       )}
     </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: number;
-  accent?: boolean;
-}) {
-  return (
-    <Card className="p-5">
-      <p className="eyebrow">{label}</p>
-      <p
-        className={`tabular mono mt-2 text-2xl font-semibold ${
-          accent ? gainClass(value) : "text-[var(--paper)]"
-        }`}
-      >
-        {formatCurrency(value)}
-      </p>
-    </Card>
   );
 }

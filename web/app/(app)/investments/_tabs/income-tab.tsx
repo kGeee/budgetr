@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card";
+import { SectionHead } from "@/components/ui/statement";
 import { DividendPanel } from "@/components/portfolio/dividend-panel";
 import { RealizedGainsView } from "@/components/portfolio/realized-gains-view";
 import {
@@ -41,7 +42,7 @@ export async function IncomeTab() {
         </Card>
       )}
       <div id="realized" className="scroll-mt-28 space-y-4">
-        <span className="eyebrow">Realized gains</span>
+        <SectionHead title="Realized gains" />
         <RealizedGainsView
           lots={lots}
           years={years}

@@ -48,6 +48,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Hero, Mark, Stat, StatStrip } from "@/components/ui/statement";
 import { IvSurface } from "@/components/options/iv-surface";
 import { OptionsAnalytics } from "@/components/options/options-analytics";
 import { StrategyBuilder } from "@/components/options/strategy-builder";
@@ -319,12 +320,12 @@ function PositioningHeader({
   const pc = stats.chainPc.oiRatio;
   const sentiment =
     pc == null
-      ? { label: "—", tone: "text-[var(--muted)]" }
+      ? ({ label: "—", tone: "muted" } as const)
       : pc > 1.15
-        ? { label: "Put-heavy / hedged", tone: "text-[var(--coral)]" }
+        ? ({ label: "Put-heavy / hedged", tone: "coral" } as const)
         : pc < 0.7
-          ? { label: "Call-heavy / bullish", tone: "text-[var(--jade)]" }
-          : { label: "Balanced", tone: "text-[var(--paper)]" };
+          ? ({ label: "Call-heavy / bullish", tone: "jade" } as const)
+          : ({ label: "Balanced", tone: "default" } as const);
 
   const skewRead =
     stats.sk == null
@@ -336,73 +337,67 @@ function PositioningHeader({
           : "Flat";
 
   return (
-    <Card className="p-0">
-      <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line px-6 py-5">
-        <div className="flex items-baseline gap-3">
-          <span className="font-display text-2xl text-[var(--paper)]">{ticker}</span>
-          {spot != null && (
-            <span className="mono text-lg text-[var(--brass)]">
-              {formatCurrency(spot, currency)}
-            </span>
-          )}
+    <section className="space-y-5" aria-label={`${ticker} chain summary`}>
+      <Hero
+        eyebrow={`${ticker} · spot`}
+        figure={spot != null ? formatCurrency(spot, currency) : "—"}
+        verdict={
+          <>
+            Positioning reads{" "}
+            <Mark tone={sentiment.tone}>{sentiment.label === "—" ? "unclear" : sentiment.label.toLowerCase()}</Mark>
+            {stats.atm != null && (
+              <>
+                , with at-the-money vol at{" "}
+                <Mark tone="default">{(stats.atm * 100).toFixed(1)}%</Mark>
+              </>
+            )}
+            {stats.em != null && spot != null && (
+              <>
+                {" "}
+                and a <Mark tone="default">±{formatCurrency(stats.em, currency)}</Mark> move priced
+                in by expiry
+              </>
+            )}
+            .
+          </>
+        }
+      >
+        <span
+          className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wide ${
+            isLive ? "text-[var(--jade)]" : "text-[var(--muted)]"
+          }`}
+        >
           <span
-            className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wide ${
-              isLive ? "text-[var(--jade)]" : "text-[var(--muted)]"
-            }`}
-          >
-            <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${isLive ? "bg-[var(--jade)] animate-pulse" : "bg-[var(--muted)]"}`}
-            />
-            {isLive ? "live" : "delayed"}
-          </span>
-        </div>
-        <span className={`text-sm font-medium ${sentiment.tone}`}>{sentiment.label}</span>
-      </div>
-      <div className="grid grid-cols-2 divide-x divide-y divide-line/60 sm:grid-cols-3 lg:grid-cols-6">
-        <Stat label="ATM IV" hint={selectedExpiry ? `${stats.dte}d` : undefined}>
-          {stats.atm != null ? `${(stats.atm * 100).toFixed(1)}%` : "—"}
-        </Stat>
-        <Stat label="Exp. move ±1σ">
-          {stats.em != null && spot != null ? `±${formatCurrency(stats.em, currency)}` : "—"}
-        </Stat>
-        <Stat label="Max pain">{stats.pain != null ? formatStrike(stats.pain) : "—"}</Stat>
-        <Stat label="P/C ratio (OI)" hint="whole chain">
-          {stats.chainPc.oiRatio != null ? stats.chainPc.oiRatio.toFixed(2) : "—"}
-        </Stat>
-        <Stat label="Skew">{skewRead}</Stat>
+            className={`inline-block h-1.5 w-1.5 rounded-full ${isLive ? "bg-[var(--jade)] animate-pulse" : "bg-[var(--muted)]"}`}
+          />
+          {isLive ? "live" : "delayed"}
+        </span>
+      </Hero>
+      <StatStrip>
+        <Stat
+          label="ATM IV"
+          sub={selectedExpiry ? `${stats.dte}d` : undefined}
+          value={stats.atm != null ? `${(stats.atm * 100).toFixed(1)}%` : "—"}
+        />
+        <Stat
+          label="Exp. move ±1σ"
+          value={stats.em != null && spot != null ? `±${formatCurrency(stats.em, currency)}` : "—"}
+        />
+        <Stat label="Max pain" value={stats.pain != null ? formatStrike(stats.pain) : "—"} />
+        <Stat
+          label="P/C ratio (OI)"
+          sub="whole chain"
+          value={stats.chainPc.oiRatio != null ? stats.chainPc.oiRatio.toFixed(2) : "—"}
+        />
+        <Stat label="Skew" value={skewRead} />
         <Stat
           label="Dealer GEX"
-          hint={stats.gex != null ? (stats.gex >= 0 ? "positive · pinning" : "negative · volatile") : undefined}
-          tone={stats.gex == null ? undefined : stats.gex >= 0 ? "jade" : "coral"}
-        >
-          {stats.gex != null ? compactSigned(stats.gex) : "—"}
-        </Stat>
-      </div>
-    </Card>
-  );
-}
-
-function Stat({
-  label,
-  hint,
-  tone,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  tone?: "jade" | "coral";
-  children: React.ReactNode;
-}) {
-  const color =
-    tone === "jade" ? "text-[var(--jade)]" : tone === "coral" ? "text-[var(--coral)]" : "text-[var(--paper)]";
-  return (
-    <div className="px-5 py-4">
-      <p className="eyebrow flex items-center gap-1.5">
-        {label}
-        {hint && <span className="text-[9px] normal-case text-[var(--faint)]">· {hint}</span>}
-      </p>
-      <p className={`mono mt-1.5 text-lg ${color}`}>{children}</p>
-    </div>
+          sub={stats.gex != null ? (stats.gex >= 0 ? "positive · pinning" : "negative · volatile") : undefined}
+          tone={stats.gex == null ? "default" : stats.gex >= 0 ? "jade" : "coral"}
+          value={stats.gex != null ? compactSigned(stats.gex) : "—"}
+        />
+      </StatStrip>
+    </section>
   );
 }
 

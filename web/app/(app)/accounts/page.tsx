@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { PlaidLink } from "@/components/onboarding/plaid-link";
 import { PageHead } from "@/components/page-head";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import { AccountVisibilityToggle } from "@/components/account-visibility-toggle";
 import { ConnectWalletButton, WalletsCard } from "@/components/portfolio/connect-wallet-dialog";
 import { ConnectionAlert, ConnectionChip } from "@/components/connection-status";
@@ -12,6 +13,7 @@ import { getAccounts, getHiddenWalletTokens, getWallets } from "@/lib/queries";
 import { formatCurrency, formatMoney, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
 import { demoEnabled } from "@/lib/site";
+import { accountsVerdict } from "@/lib/accounts-verdict";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +65,16 @@ export default function AccountsPage() {
     (s, a) => s + convertToDisplay(signedBalance(a.type, a.currentBalance), a.currency),
     0,
   );
+  // The two halves of that net, for the sentence and the strip under the hero.
+  // A liability's balance is what is owed, so it is summed unsigned.
+  const assets = visible
+    .filter((a) => !isLiability(a.type))
+    .reduce((s, a) => s + convertToDisplay(a.currentBalance ?? 0, a.currency), 0);
+  const liabilities = visible
+    .filter((a) => isLiability(a.type))
+    .reduce((s, a) => s + convertToDisplay(a.currentBalance ?? 0, a.currency), 0);
+  const verdict = accountsVerdict({ count: visible.length, assets, liabilities });
+  const allLive = connections.liveCount === connections.total;
 
   return (
     <div className="space-y-7">
@@ -81,13 +93,54 @@ export default function AccountsPage() {
 
       <ConnectionAlert summary={connections} />
 
+      <section className="rise space-y-5" aria-label="Net across your accounts">
+        <Hero
+          eyebrow={`Net across ${visible.length} ${visible.length === 1 ? "account" : "accounts"}`}
+          figure={formatCurrency(net, displayCurrency)}
+          tone={net < 0 ? "coral" : "default"}
+          verdict={
+            verdict && (
+              <>
+                {verdict.lead}
+                {verdict.amount != null && (
+                  <>
+                    {" "}
+                    <Mark tone={verdict.tone}>
+                      {formatCurrency(verdict.amount, displayCurrency)}
+                    </Mark>{" "}
+                    {verdict.tail}
+                  </>
+                )}
+              </>
+            )
+          }
+        />
+        <StatStrip>
+          <Stat label="Held" value={formatCurrency(assets, displayCurrency)} />
+          <Stat
+            label="Owed"
+            value={formatCurrency(liabilities, displayCurrency)}
+            tone={liabilities > 0.005 ? "coral" : "default"}
+          />
+          <Stat
+            label="Accounts"
+            value={visible.length.toLocaleString()}
+            sub={hiddenCount > 0 ? `${hiddenCount} hidden` : undefined}
+          />
+          {!demo && connections.total > 0 && (
+            <Stat
+              label="Reporting normally"
+              value={`${connections.liveCount} of ${connections.total}`}
+              tone={allLive ? "jade" : "brass"}
+              sub={connections.total === 1 ? "institution" : "institutions"}
+            />
+          )}
+        </StatStrip>
+      </section>
+
       {/* Plaid/Finnhub keys stay in Settings; say so where connecting needs them. */}
       {!demo && (
-        <p className="-mt-3 text-sm text-[var(--muted)]">
-          {connections.total > 0 &&
-            `${connections.liveCount} of ${connections.total} ${
-              connections.total === 1 ? "institution is" : "institutions are"
-            } reporting normally. `}
+        <p className="text-sm text-[var(--muted)]">
           {hasPlaidCredentials() ? (
             <>
               Plaid and Finnhub keys live in{" "}
@@ -109,16 +162,6 @@ export default function AccountsPage() {
         </p>
       )}
 
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="font-display text-3xl tabular">
-          {formatCurrency(net, displayCurrency)}
-        </span>
-        <span className="text-sm text-[var(--muted)]">
-          net across {visible.length} {visible.length === 1 ? "account" : "accounts"}
-          {hiddenCount > 0 && ` · ${hiddenCount} hidden`}
-        </span>
-      </div>
-
       {accounts.length === 0 && wallets.length === 0 && (
         <Card>
           <p className="text-sm text-[var(--muted)]">
@@ -129,6 +172,8 @@ export default function AccountsPage() {
       )}
 
       <WalletsCard wallets={wallets} hiddenTokens={hiddenWalletTokens} />
+
+      {byItem.size > 0 && <SectionHead title="Institutions" count={byItem.size} />}
 
       <div className="space-y-5">
         {[...byItem.entries()].map(([itemId, { label: institution, source, accts }]) => {

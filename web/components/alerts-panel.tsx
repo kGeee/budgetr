@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { SectionHead } from "@/components/ui/statement";
 import {
   AlertTriangle,
   CopyMinus,
@@ -76,7 +77,7 @@ export function AlertsPanel({
 
   if (things === 0) {
     return (
-      <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6">
+      <div className="border-y border-line py-4">
         <div className="flex items-center gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[color-mix(in_srgb,var(--jade)_35%,transparent)] text-[var(--jade)]">
             <ShieldCheck size={16} />
@@ -99,30 +100,27 @@ export function AlertsPanel({
   }
 
   return (
-    <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6 shadow-[var(--elev-2)]">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="eyebrow">Needs attention</p>
-          <p className="mt-0.5 text-sm text-[var(--muted)]">
-            {things} {things === 1 ? "thing" : "things"} worth a look
-          </p>
-        </div>
-        {typeof limit === "number" && alerts.length > limit && (
-          <button
-            onClick={() => setExpanded((e) => !e)}
-            className="text-xs text-[var(--brass)] hover:underline"
-          >
-            {expanded ? "Show fewer" : `See all ${alerts.length}`}
-          </button>
-        )}
-      </div>
+    <section className="space-y-4">
+      <SectionHead
+        title="Needs attention"
+        count={`${things} ${things === 1 ? "thing" : "things"} worth a look`}
+        action={
+          typeof limit === "number" &&
+          alerts.length > limit && (
+            <button
+              onClick={() => setExpanded((e) => !e)}
+              className="text-xs text-[var(--brass)] hover:underline"
+            >
+              {expanded ? "Show fewer" : `See all ${alerts.length}`}
+            </button>
+          )
+        }
+      />
 
       {reviewCount > 0 && (
         <Link
           href="/transactions?view=review"
-          className={`flex items-center gap-3 rounded-lg border border-line bg-[var(--panel-2)] px-4 py-3 text-sm transition-colors hover:border-[var(--line-strong)] ${
-            shown.length > 0 ? "mb-3" : ""
-          }`}
+          className="flex items-center gap-3 rounded-lg border border-line bg-[var(--panel-2)] px-4 py-3 text-sm transition-colors hover:border-[var(--line-strong)]"
         >
           <ListChecks size={16} className="shrink-0 text-[var(--brass)]" />
           <span className="flex-1 text-[var(--paper)]">
@@ -144,12 +142,12 @@ export function AlertsPanel({
       {hidden > 0 && (
         <button
           onClick={() => setExpanded(true)}
-          className="mt-4 block w-full text-center text-xs text-[var(--muted)] hover:text-[var(--paper)]"
+          className="block w-full text-center text-xs text-[var(--muted)] hover:text-[var(--paper)]"
         >
           +{hidden} more
         </button>
       )}
-    </div>
+    </section>
   );
 }
 

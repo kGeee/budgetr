@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 import type { SectorSlice } from "@/components/charts";
+import { Hero, Mark } from "@/components/ui/statement";
+import { allocationVerdict } from "@/lib/investments-verdict";
+import { formatCurrency } from "@/lib/utils";
 import { AssetAllocation, type AllocRow } from "@/components/portfolio/asset-allocation";
 import { LivePricesProvider, useLivePrices } from "@/components/portfolio/live-prices";
 import {
@@ -112,17 +115,40 @@ function AllocationInner({
     [knownSectors, slices],
   );
 
+  const verdict = useMemo(
+    () => allocationVerdict({ slices, total, unassigned: UNASSIGNED }),
+    [slices, total],
+  );
+
+  // AssetAllocation renders nothing for an empty book; so does this.
+  if (rows.length === 0) return null;
+
   return (
-    <AssetAllocation
-      rows={rows}
-      total={total}
-      targets={allocationTargets}
-      assetClassOverrides={assetClassOverrides}
-      geographyOverrides={geographyOverrides}
-      knownSectors={sectorOptions}
-      sectorSlices={slices}
-      activeSector={activeSector}
-      onSelectSector={setActiveSector}
-    />
+    <div className="space-y-7">
+      {/* The tab's one figure is the book the slices below divide up — the same
+          live-valued total the panel takes its percentages from. */}
+      <Hero
+        eyebrow={`Allocated · ${rows.length} ${rows.length === 1 ? "position" : "positions"}`}
+        figure={formatCurrency(total)}
+        verdict={
+          verdict && (
+            <>
+              {verdict.lead} <Mark tone={verdict.tone}>{verdict.share}</Mark> {verdict.tail}
+            </>
+          )
+        }
+      />
+      <AssetAllocation
+        rows={rows}
+        total={total}
+        targets={allocationTargets}
+        assetClassOverrides={assetClassOverrides}
+        geographyOverrides={geographyOverrides}
+        knownSectors={sectorOptions}
+        sectorSlices={slices}
+        activeSector={activeSector}
+        onSelectSector={setActiveSector}
+      />
+    </div>
   );
 }

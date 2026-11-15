@@ -24,6 +24,7 @@ import {
   YAxis,
 } from "recharts";
 import { Card } from "@/components/ui/card";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import { formatCurrency } from "@/lib/utils";
 import { formatOptionExpiry } from "@/lib/options";
 import {
@@ -41,27 +42,6 @@ const pct = (n: number | null, digits = 1) =>
   n == null ? "—" : `${(n * 100).toFixed(digits)}%`;
 const signedPct = (n: number | null, digits = 1) =>
   n == null ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n * 100).toFixed(digits)}%`;
-const signColor = (n: number) => (n >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]");
-
-function Stat({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="eyebrow text-[var(--muted)]">{label}</div>
-      <div className={`mt-1 font-display text-2xl tabular ${tone ?? ""}`}>{value}</div>
-      {hint ? <div className="mt-0.5 text-xs text-[var(--muted)]">{hint}</div> : null}
-    </div>
-  );
-}
 
 export function LeapsView({
   ticker,
@@ -170,18 +150,25 @@ export function LeapsView({
       </Card>
 
       {/* ── the headline tradeoff ───────────────────────────────────── */}
-      <Card>
-        <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
-          <Stat
-            label="Capital"
-            value={money(selected.contractCost)}
-            hint={`vs ${money(selected.sharesCost)} for 100 shares`}
-          />
+      <section className="space-y-5">
+        <Hero
+          eyebrow={`Capital · one ${money(selected.strike)} call`}
+          figure={money(selected.contractCost)}
+          verdict={
+            <>
+              Against {money(selected.sharesCost)} for 100 shares, that frees up{" "}
+              <Mark tone="jade">{money(selected.capitalFreed)}</Mark> — and puts the whole{" "}
+              <Mark tone="coral">{money(selected.maxLoss)}</Mark> premium at risk below{" "}
+              {money(selected.worthlessAtOrBelow)}.
+            </>
+          }
+        />
+        <StatStrip>
           <Stat
             label="Frees up"
             value={money(selected.capitalFreed)}
-            hint={`${pct(selected.capitalFreedPct, 0)} of the share cost`}
-            tone="text-[var(--jade)]"
+            sub={`${pct(selected.capitalFreedPct, 0)} of the share cost`}
+            tone="jade"
           />
           <Stat
             label="Exposure"
@@ -190,7 +177,7 @@ export function LeapsView({
                 ? "—"
                 : `${selected.deltaEquivalentShares.toFixed(0)} sh`
             }
-            hint={
+            sub={
               selected.effectiveLeverage == null
                 ? "delta unavailable"
                 : `${selected.effectiveLeverage.toFixed(1)}× per dollar`
@@ -199,51 +186,51 @@ export function LeapsView({
           <Stat
             label="Max loss"
             value={money(selected.maxLoss)}
-            hint={`the whole premium, below ${money(selected.worthlessAtOrBelow)}`}
-            tone="text-[var(--coral)]"
+            sub={`the whole premium, below ${money(selected.worthlessAtOrBelow)}`}
+            tone="coral"
           />
-        </div>
-      </Card>
+        </StatStrip>
+      </section>
 
       {/* ── what the leverage costs ─────────────────────────────────── */}
-      <Card>
-        <div className="eyebrow mb-3 text-[var(--brass)]">What the leverage costs</div>
-        <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
+      <section className="space-y-4">
+        <SectionHead title="What the leverage costs" />
+        <StatStrip className="border-t-0 pt-0">
           <Stat
             label="Time value"
             value={money2(selected.extrinsic * 100)}
-            hint={`${pct(selected.extrinsicPctOfSpot)} of spot, over ${selected.years.toFixed(1)}y`}
+            sub={`${pct(selected.extrinsicPctOfSpot)} of spot, over ${selected.years.toFixed(1)}y`}
           />
           <Stat
             label="Dividends forgone"
             value={dividendYield == null ? "—" : money2(selected.forgoneDividends * 100)}
-            hint={dividendYield == null ? "no yield data" : `${pct(dividendYield, 2)} yield`}
+            sub={dividendYield == null ? "no yield data" : `${pct(dividendYield, 2)} yield`}
           />
           <Stat
             label="Implied borrow rate"
             value={pct(selected.impliedFinancingRate)}
-            hint={
+            sub={
               selected.impliedFinancingRate == null
                 ? "out of the money — not a replacement"
                 : `cash earns ${pct(rate)} · margin ${pct(marginRate)}`
             }
             tone={
               selected.vsMarginRate == null
-                ? undefined
+                ? "default"
                 : selected.vsMarginRate <= 0
-                  ? "text-[var(--jade)]"
-                  : "text-[var(--brass)]"
+                  ? "jade"
+                  : "brass"
             }
           />
           <Stat
             label="Net carry"
             value={money2(selected.netCarry * 100)}
-            hint="time value + dividends − interest earned"
-            tone={signColor(-selected.netCarry)}
+            sub="time value + dividends − interest earned"
+            tone={-selected.netCarry >= 0 ? "jade" : "coral"}
           />
-        </div>
+        </StatStrip>
 
-        <p className="mt-4 border-t border-line pt-4 text-sm leading-relaxed text-[var(--muted)]">
+        <p className="border-t border-line pt-4 text-sm leading-relaxed text-[var(--muted)]">
           {trails >= 0 ? (
             <>
               Above {money(selected.strike)} this call trails 100 shares by a flat{" "}
@@ -276,7 +263,7 @@ export function LeapsView({
             </>
           )}
         </p>
-      </Card>
+      </section>
 
       {/* ── terminal P/L, both positions ────────────────────────────── */}
       <Card>

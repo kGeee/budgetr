@@ -8,7 +8,7 @@ import {
   VendorGroupDetail,
   VendorMergeProvider,
 } from "@/components/transactions/vendor-merge-dialog";
-import { Card } from "@/components/ui/card";
+import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import {
   getCategories,
   getVendorCategoryBreakdown,
@@ -49,32 +49,48 @@ export function VendorView({ v }: { v?: string }) {
 
   return (
     <>
-      <div className="space-y-1">
-        <p className="text-sm">
-          <span className="font-medium text-[var(--paper)]">
-            {formatCurrency(merchantTotal)}
-          </span>{" "}
-          <span className="text-[var(--muted)]">
-            across {merchants.length} {merchants.length === 1 ? "merchant" : "merchants"}
-            {mostFrequent && (
-              <>
-                {" "}
-                — most frequent is{" "}
-                <span className="text-[var(--paper)]">{mostFrequent.displayName}</span> at{" "}
-                {mostFrequent.count} {mostFrequent.count === 1 ? "visit" : "visits"}
-              </>
-            )}
-            .
-          </span>
-        </p>
-        {movement.length > 0 && (
-          <p className="text-xs text-[var(--muted)]">
-            A further {formatCurrency(movementTotal)} across {movement.length} transfer and
-            card-payment {movement.length === 1 ? "row" : "rows"}, listed separately below — not
-            spending.
-          </p>
-        )}
-      </div>
+      {/* The directory's one figure is what went to real merchants; transfers
+          and card payments are counted on the rule below, apart from it. */}
+      <section className="space-y-5" aria-label="Vendor spending, all time">
+        <Hero
+          eyebrow="Spent with merchants · all time"
+          figure={formatCurrency(merchantTotal)}
+          verdict={
+            <>
+              Across <Mark tone="default">{merchants.length}</Mark>{" "}
+              {merchants.length === 1 ? "merchant" : "merchants"}
+              {mostFrequent && (
+                <>
+                  {" "}
+                  — most frequent is <Mark tone="brass">{mostFrequent.displayName}</Mark> at{" "}
+                  {mostFrequent.count} {mostFrequent.count === 1 ? "visit" : "visits"}
+                </>
+              )}
+              .
+            </>
+          }
+        />
+        <StatStrip>
+          <Stat label="Merchants" value={merchants.length.toLocaleString()} />
+          {mostFrequent && (
+            <Stat
+              label="Most frequent"
+              value={mostFrequent.displayName}
+              sub={`${mostFrequent.count} ${mostFrequent.count === 1 ? "visit" : "visits"}`}
+            />
+          )}
+          {movement.length > 0 && (
+            <Stat
+              label="Money movement"
+              tone="muted"
+              value={formatCurrency(movementTotal)}
+              sub={`${movement.length} transfer and card-payment ${
+                movement.length === 1 ? "row" : "rows"
+              }, listed separately below — not spending`}
+            />
+          )}
+        </StatStrip>
+      </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         {/* Vendor list */}
@@ -164,16 +180,24 @@ export function VendorView({ v }: { v?: string }) {
         <div className="lg:col-span-3">
           {selected ? (
             <div className="space-y-4">
-              <div className="flex items-end justify-between gap-4 rounded-[var(--radius)] border border-line bg-[var(--panel)] p-5">
-                <div>
+              <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[var(--line-strong)] pb-3">
+                <div className="min-w-0">
                   <p className="eyebrow">Vendor</p>
-                  <p className="mt-1 font-display text-2xl">{selected.displayName}</p>
+                  <h2 className="mt-1 font-display text-2xl tracking-tight">
+                    {selected.displayName}
+                  </h2>
                 </div>
                 <div className="text-right">
                   <p className="font-display text-2xl tabular">{formatCurrency(selected.spent)}</p>
                   <p className="text-xs text-[var(--muted)]">across {selected.count} transactions</p>
                 </div>
               </div>
+
+              <StatStrip className="border-t-0 pt-0">
+                <Stat label="Avg / txn" value={formatCurrency(avg)} />
+                <Stat label="Active months" value={String(monthly.length)} />
+                <Stat label="Last seen" value={selected.lastDate} />
+              </StatStrip>
 
               {/* Group management panel */}
               {selected.groupId && (
@@ -184,47 +208,41 @@ export function VendorView({ v }: { v?: string }) {
                 />
               )}
 
-              <div className="grid grid-cols-3 gap-3">
-                <MiniStat label="Avg / txn" value={formatCurrency(avg)} />
-                <MiniStat label="Active months" value={String(monthly.length)} />
-                <MiniStat label="Last seen" value={selected.lastDate} mono />
-              </div>
-
-              <Card className="p-0">
-                <div className="flex items-baseline justify-between border-b border-line px-5 py-3.5">
-                  <span className="eyebrow">Monthly spend</span>
-                  {monthly.length > 0 && (
-                    <span className="text-xs text-[var(--faint)]">
-                      {format(parseISO(monthly[0].month + "-01"), "MMM")} –{" "}
-                      {format(parseISO(monthly[monthly.length - 1].month + "-01"), "MMM yyyy")}
-                    </span>
-                  )}
-                </div>
-                <div className="px-2 py-4 sm:px-4">
-                  {monthly.length > 0 ? (
-                    <MonthlySpendChart data={monthly} />
-                  ) : (
-                    <p className="py-10 text-center text-sm text-[var(--muted)]">
-                      No dated activity to chart yet.
-                    </p>
-                  )}
-                </div>
-              </Card>
+              <section className="space-y-4 pt-2">
+                <SectionHead
+                  title="Monthly spend"
+                  action={
+                    monthly.length > 0 && (
+                      <span className="text-xs text-[var(--muted)]">
+                        {format(parseISO(monthly[0].month + "-01"), "MMM")} –{" "}
+                        {format(parseISO(monthly[monthly.length - 1].month + "-01"), "MMM yyyy")}
+                      </span>
+                    )
+                  }
+                />
+                {monthly.length > 0 ? (
+                  <MonthlySpendChart data={monthly} />
+                ) : (
+                  <p className="py-10 text-center text-sm text-[var(--muted)]">
+                    No dated activity to chart yet.
+                  </p>
+                )}
+              </section>
 
               {breakdown.length > 1 && (
-                <Card>
-                  <p className="eyebrow mb-4">Category split</p>
+                <section className="space-y-4 pt-2">
+                  <SectionHead title="Category split" />
                   <CategoryChart data={breakdown} />
-                </Card>
+                </section>
               )}
             </div>
           ) : (
-            <div className="grid h-full min-h-[200px] place-items-center rounded-[var(--radius)] border border-dashed border-line bg-[var(--panel)] p-10 text-center">
+            <div className="grid h-full min-h-[200px] place-items-center rounded-[var(--radius)] border border-dashed border-line p-10 text-center">
               <div className="space-y-1">
                 <p className="text-sm text-[var(--muted)]">
                   Select a vendor to see spend trends and every transaction over time.
                 </p>
-                <p className="text-xs text-[var(--faint)]">
+                <p className="text-xs text-[var(--muted)]">
                   Hover a vendor and click <GitMerge size={11} className="inline" /> to combine similar ones.
                 </p>
               </div>
@@ -236,21 +254,10 @@ export function VendorView({ v }: { v?: string }) {
       {/* Full-width transaction log below — room to read every column cleanly */}
       {selected && (
         <div className="space-y-3">
-          <p className="eyebrow">
-            Transactions · {txns.length}
-          </p>
+          <SectionHead title="Transactions" count={txns.length} />
           <TransactionsTable transactions={txns} categories={categories} />
         </div>
       )}
     </>
-  );
-}
-
-function MiniStat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-4">
-      <p className="eyebrow">{label}</p>
-      <p className={`mt-1.5 text-lg ${mono ? "mono" : "font-display tabular"}`}>{value}</p>
-    </div>
   );
 }

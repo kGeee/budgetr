@@ -24,7 +24,8 @@ const TONE: Record<Tone, string> = {
  */
 export function Figure({ value, className }: { value: string; className?: string }) {
   const dot = value.lastIndexOf(".");
-  const hasCents = dot > 0 && /^\d{1,2}\D*$/.test(value.slice(dot + 1));
+  // Exactly two digits, and not a percentage — "25.3%" has no cents to quiet.
+  const hasCents = dot > 0 && /^\d{2}[^\d%]*$/.test(value.slice(dot + 1));
   if (!hasCents) return <span className={className}>{value}</span>;
   return (
     <span className={className}>
