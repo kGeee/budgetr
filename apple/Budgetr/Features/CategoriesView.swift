@@ -7,6 +7,8 @@ import SwiftUI
 /// because a category list ordered by name is a reference table and one ordered
 /// by money is an answer.
 struct CategoriesView: View {
+    @Environment(\.managedObjectContext) private var context
+
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "date", ascending: false)])
     private var transactions: FetchedResults<CDTransaction>
 
@@ -37,16 +39,40 @@ struct CategoriesView: View {
             },
             uniquingKeysWith: { a, _ in a }
         )
+        let plaidMap = Dictionary(
+            categories.compactMap { c -> (String, String)? in
+                guard let id = c.id, let primary = c.plaidPrimary, !primary.isEmpty else { return nil }
+                return (primary, id)
+            },
+            uniquingKeysWith: { a, _ in a }
+        )
+        let groupById = Dictionary(
+            categories.compactMap { c -> (String, String)? in
+                guard let id = c.id, let group = c.group else { return nil }
+                return (id, group)
+            },
+            uniquingKeysWith: { a, _ in a }
+        )
 
-        var spent: [String: Double] = [:]
+        let totals = CategorySpend.totals(
+            lines: transactions.map(\.spendLine),
+            month: month,
+            plaidPrimaryToCategoryId: plaidMap,
+            categoryGroupById: groupById
+        )
+
         var counts: [String: Int] = [:]
         for txn in transactions where (txn.date ?? "").hasPrefix(month) && txn.amount > 0 {
             let key = idx.resolvedId(for: txn) ?? "__none__"
-            spent[key, default: 0] += txn.amount
+            let group = key == "__none__" ? nil : groupById[key]
+            guard CategoryMapping.countsTowardSpend(
+                resolvedGroup: group,
+                plaidPrimary: txn.category
+            ) else { continue }
             counts[key, default: 0] += 1
         }
 
-        return spent
+        return totals
             .map { key, value in
                 Row(
                     id: key,
@@ -64,7 +90,12 @@ struct CategoriesView: View {
     var body: some View {
         ScrollView {
             let rows = self.rows
-            if rows.isEmpty {
+            if FirstRunImport.storeIsEmpty(context) {
+                EmptyStorePrompt(
+                    title: "No categories yet",
+                    detail: "Import budgetr.db to load your category list."
+                )
+            } else if rows.isEmpty {
                 ContentUnavailableView(
                     "Nothing spent this month",
                     systemImage: "tag",
@@ -115,9 +146,18 @@ struct CategoriesView: View {
             }
 
             if let budget = row.budget, budget > 0 {
-                MeterBar(fraction: row.spent / budget, color: over ? T.coral : tint)
+                let ratio = row.spent / budget
+                HStack(alignment: .center, spacing: 10) {
+                    MeterBar(fraction: ratio, color: over ? T.coral : tint)
+                    if let mult = BudgetUtilisation.multiplierLabel(spent: row.spent, limit: budget) {
+                        Text(mult)
+                            .font(F.monoSemibold(10))
+                            .foregroundStyle(T.coral)
+                            .fixedSize()
+                    }
+                }
                 Text(over
-                     ? "\((row.spent - budget).money()) over \(budget.money())"
+                     ? "\((row.spent - budget).money()) over"
                      : "\((budget - row.spent).money()) left of \(budget.money())")
                     .font(F.mono(10))
                     .foregroundStyle(over ? T.coral : T.faint)
@@ -129,5 +169,16 @@ struct CategoriesView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+}
+
+private extension CDTransaction {
+    var spendLine: CategorySpend.Line {
+        CategorySpend.Line(
+            amount: amount,
+            date: date ?? "",
+            userCategoryId: userCategory?.id,
+            plaidPrimary: category
+        )
     }
 }

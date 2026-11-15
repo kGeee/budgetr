@@ -1,13 +1,23 @@
 import { BrandMark } from "@/components/brand-mark";
-import { PlaidLink } from "@/components/plaid-link";
+import { PlaidLink } from "@/components/onboarding/plaid-link";
+import { AlertsPanel } from "@/components/alerts-panel";
 import { DashboardView, type ResolvedWidget } from "@/components/dashboard-view";
 import { DataFreshnessBanner } from "@/components/data-freshness";
+import { ThisMonthStrip } from "@/components/home-strip";
+import { detectAnomalies } from "@/lib/anomalies";
 import { getDataFreshness } from "@/lib/data-freshness";
+import { getDataHealthAlerts } from "@/lib/data-health";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
+import { monthPace, portfolioTotals, presentOrder } from "@/lib/home-layout";
 import {
+  countUnreviewed,
   ensureOverviewDashboard,
   getCategories,
+  getHoldings,
   getItems,
+  getMonthlyBudgetSummary,
+  getTransactionsToReview,
+  getUpcomingBills,
   getWidgetData,
 } from "@/lib/queries";
 import type { WidgetConfig } from "@/lib/queries";
@@ -23,12 +33,14 @@ function parseConfig(raw: string | null): WidgetConfig {
   }
 }
 
+/** How many review rows Home lists before pointing at the full inbox. */
+const REVIEW_PREVIEW = 3;
+
 /**
- * The Overview landing screen is now a customizable dashboard: it renders the
- * reserved "Overview" board (seeded on first run with the net-worth hero,
- * spending review, review queue, cashflow, budgets, activity and bills) through
- * the same editable/draggable widget grid as any custom dashboard. Users can add,
- * remove and reorder widgets here to shape what — and how — they see on landing.
+ * Home: the reserved Overview board's widgets — add, remove and reorder them to
+ * shape the landing page — with two fixed pieces woven in: the "this month"
+ * rule under the hero, and "Needs you" (data health, spending alerts, the first
+ * of the review backlog) at the head of the wide column.
  */
 export default async function Overview() {
   let items = getItems();
@@ -42,8 +54,8 @@ export default async function Overview() {
   const { dashboard, widgets } = ensureOverviewDashboard();
 
   // Resolve each widget's data server-side so the client grid stays a pure,
-  // serializable renderer (same contract as /dashboards/[id]).
-  const resolved: ResolvedWidget[] = widgets.map((w) => ({
+  // serializable renderer.
+  const resolved: ResolvedWidget[] = presentOrder(widgets).map((w) => ({
     id: w.id,
     config: parseConfig(w.config),
     data: getWidgetData(w.type, parseConfig(w.config)),
@@ -56,10 +68,46 @@ export default async function Overview() {
   // thing that should interrupt before any figure below it is read.
   const freshness = getDataFreshness();
 
+  // Health first, always — a clear spending board only reassures if the data
+  // behind it is complete. The review-backlog health alert is dropped here
+  // because the card's own review line already says it, with a live count.
+  const alerts = [
+    ...getDataHealthAlerts().filter((a) => a.key !== "health:review-backlog"),
+    ...detectAnomalies(),
+  ];
+  const reviewCount = countUnreviewed();
+  const review = reviewCount > 0 ? getTransactionsToReview(REVIEW_PREVIEW) : [];
+
+  // The "this month" rule, from the same queries the pages it links to use.
+  const budget = getMonthlyBudgetSummary();
+  const nextBill = getUpcomingBills(31)[0] ?? null;
+
   return (
     <>
       <DataFreshnessBanner freshness={freshness} className="mb-6" />
-      <DashboardView dashboard={dashboard} widgets={resolved} categories={categories} overview />
+      <DashboardView
+        dashboard={dashboard}
+        widgets={resolved}
+        categories={categories}
+        strip={
+          <ThisMonthStrip
+            budget={budget}
+            pace={monthPace(budget.month, new Date())}
+            portfolio={portfolioTotals(getHoldings())}
+            nextBill={nextBill}
+          />
+        }
+        lead={
+          <AlertsPanel
+            alerts={alerts}
+            reviewCount={reviewCount}
+            review={review}
+            categories={categories}
+            limit={3}
+            compact
+          />
+        }
+      />
     </>
   );
 }

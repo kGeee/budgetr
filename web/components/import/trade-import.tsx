@@ -114,7 +114,7 @@ export function TradeImport({ accounts }: { accounts: ManualAccount[] }) {
           <a href="/investments" className={jade}>
             View investments <ArrowRight size={15} />
           </a>
-          <a href="/realized-gains" className={ghost}>
+          <a href="/investments?tab=income" className={ghost}>
             Realized gains
           </a>
           <button className={ghost} onClick={reset}>

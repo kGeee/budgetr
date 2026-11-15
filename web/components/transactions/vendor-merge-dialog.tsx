@@ -3,6 +3,7 @@
 import { createContext, useContext, useMemo, useRef, useState, useTransition } from "react";
 import { GitMerge, Plus, Sparkles, X, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import {
   addVendorToGroup,
   createVendorGroup,
@@ -12,21 +13,6 @@ import {
 } from "@/lib/actions";
 import type { VendorCandidate, VendorGroupRow } from "@/lib/queries";
 import { rankSimilarVendors } from "@/lib/utils";
-
-// ── Small inline modal ───────────────────────────────────────────────────────
-
-function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
-        {children}
-      </div>
-    </div>
-  );
-}
 
 // ── Shared merge context ─────────────────────────────────────────────────────
 
@@ -138,13 +124,14 @@ export function MergeVendorButton({
       </button>
 
       {open && (
-        <Modal onClose={close}>
-          <div className="border-b border-line px-5 py-4">
-            <p className="text-sm font-medium">{vendorName}</p>
-            <p className="mt-0.5 text-xs text-[var(--muted)]">Merge into a vendor group</p>
-          </div>
+        <Dialog onClose={close} label={`Merge ${vendorName} into a vendor group`}>
+          <DialogHeader
+            title={vendorName}
+            description="Merge into a vendor group"
+            onClose={close}
+          />
 
-          <div className="space-y-1 p-3">
+          <DialogBody className="max-h-[60vh] space-y-1 px-3 py-3">
             {suggestions.length > 0 && (
               <>
                 <p className="flex items-center gap-1.5 px-2 py-1 text-xs text-[var(--brass)]">
@@ -159,7 +146,7 @@ export function MergeVendorButton({
                   >
                     <GitMerge size={13} className="shrink-0 text-[var(--brass)]" />
                     <span className="flex-1 truncate">{item.displayName}</span>
-                    <span className="text-xs text-[var(--faint)]">
+                    <span className="text-xs text-[var(--muted)]">
                       {item.groupId
                         ? `${item.memberCount} vendors`
                         : `${item.count} ${item.count === 1 ? "txn" : "txns"}`}
@@ -172,7 +159,7 @@ export function MergeVendorButton({
 
             {groups.length > 0 && (
               <>
-                <p className="px-2 py-1 text-xs text-[var(--faint)]">Existing groups</p>
+                <p className="px-2 py-1 text-xs text-[var(--muted)]">Existing groups</p>
                 {groups.map((g) => (
                   <button
                     key={g.id}
@@ -182,14 +169,14 @@ export function MergeVendorButton({
                   >
                     <GitMerge size={13} className="shrink-0 text-[var(--brass)]" />
                     <span className="flex-1 truncate">{g.name}</span>
-                    <span className="text-xs text-[var(--faint)]">{g.members.length} vendors</span>
+                    <span className="text-xs text-[var(--muted)]">{g.members.length} vendors</span>
                   </button>
                 ))}
                 <div className="my-2 border-t border-line/60" />
               </>
             )}
 
-            <p className="px-2 py-1 text-xs text-[var(--faint)]">New group</p>
+            <p className="px-2 py-1 text-xs text-[var(--muted)]">New group</p>
             <div className="flex gap-2 px-2 pb-1">
               <input
                 ref={inputRef}
@@ -203,10 +190,10 @@ export function MergeVendorButton({
                 <Plus size={13} />
               </Button>
             </div>
-          </div>
+          </DialogBody>
 
-          {currentGroupId && (
-            <div className="border-t border-line px-5 py-3">
+          <DialogFooter className="justify-between">
+            {currentGroupId ? (
               <button
                 disabled={isPending}
                 onClick={unmerge}
@@ -214,15 +201,14 @@ export function MergeVendorButton({
               >
                 <X size={12} /> Remove from current group
               </button>
-            </div>
-          )}
-
-          <div className="border-t border-line px-5 py-3">
+            ) : (
+              <span />
+            )}
             <button onClick={close} className="text-xs text-[var(--muted)] hover:text-[var(--paper)]">
               Cancel
             </button>
-          </div>
-        </Modal>
+          </DialogFooter>
+        </Dialog>
       )}
     </>
   );

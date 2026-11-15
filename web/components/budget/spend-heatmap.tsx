@@ -10,7 +10,7 @@ import {
   subDays,
 } from "date-fns";
 import { X } from "lucide-react";
-import { TransactionsTable } from "@/components/transactions-table";
+import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { getTransactionsForDate } from "@/lib/actions";
 import { formatMoney } from "@/lib/utils";
 import type { CategoryRow, TransactionRow } from "@/lib/queries";
@@ -304,7 +304,7 @@ export function SpendHeatmap({
             <p className="eyebrow">{format(parseISO(selectedDate), "MMMM d, yyyy")}</p>
             <button
               onClick={() => selectDate(null)}
-              className="rounded-full p-0.5 text-[var(--faint)] transition hover:text-[var(--paper)]"
+              className="rounded-full p-0.5 text-[var(--muted)] transition hover:text-[var(--paper)]"
               aria-label="Clear selected day"
             >
               <X size={13} />

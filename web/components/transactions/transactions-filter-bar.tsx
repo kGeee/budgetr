@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bookmark, Check, Filter, Save, Search, Trash2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Check, Trash2, X } from "lucide-react";
 import { deleteFilter, saveFilter } from "@/lib/actions";
+import { setCountPending } from "@/lib/actions-settings";
 import type { CategoryRow, TxTag, TxnCriteria } from "@/lib/queries";
 import type { SavedFilter } from "@/db/schema";
 
@@ -21,11 +21,18 @@ function toParams(c: TxnCriteria): URLSearchParams {
   if (c.dateTo) p.set("to", c.dateTo);
   if (c.amountMin != null) p.set("min", String(c.amountMin));
   if (c.amountMax != null) p.set("max", String(c.amountMax));
+  if (c.reviewed != null) p.set("reviewed", c.reviewed ? "yes" : "no");
   return p;
 }
 
-const inputCls =
-  "rounded-md border border-line bg-[var(--ink)] px-2.5 py-1.5 text-sm text-[var(--paper)] outline-none transition-colors focus:border-[var(--brass-dim)]";
+const FIELD =
+  "min-h-11 min-w-0 rounded-xl border border-line bg-[var(--ink)] px-3 text-sm text-[var(--paper)] outline-none transition-colors focus:border-[var(--brass-dim)]";
+const MONO_FIELD = `${FIELD} mono text-xs`;
+const PILL =
+  "inline-flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm transition active:scale-[0.98] disabled:opacity-45";
+const PILL_STRONG = `${PILL} border border-[var(--line-strong)] text-[var(--paper)] hover:bg-[var(--panel-2)]`;
+
+const reviewedValue = (r: boolean | undefined) => (r == null ? "" : r ? "yes" : "no");
 
 export function TransactionsFilterBar({
   criteria,
@@ -33,14 +40,15 @@ export function TransactionsFilterBar({
   accounts,
   tags,
   savedFilters,
-  resultCount,
+  countPending,
 }: {
   criteria: TxnCriteria;
   categories: CategoryRow[];
   accounts: AccountOption[];
   tags: TxTag[];
   savedFilters: SavedFilter[];
-  resultCount: number;
+  /** The app-wide "count pending as spending" preference, when it's shown here. */
+  countPending?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -58,6 +66,8 @@ export function TransactionsFilterBar({
     criteria.amountMax != null ? String(criteria.amountMax) : "",
   );
 
+  const [reviewed, setReviewedFilter] = useState(reviewedValue(criteria.reviewed));
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filterName, setFilterName] = useState("");
@@ -70,7 +80,8 @@ export function TransactionsFilterBar({
     !!dateFrom ||
     !!dateTo ||
     !!amountMin ||
-    !!amountMax;
+    !!amountMax ||
+    !!reviewed;
 
   function buildCriteria(): TxnCriteria {
     const c: TxnCriteria = {};
@@ -84,6 +95,7 @@ export function TransactionsFilterBar({
     if (!Number.isNaN(min)) c.amountMin = min;
     const max = parseFloat(amountMax);
     if (!Number.isNaN(max)) c.amountMax = max;
+    if (reviewed) c.reviewed = reviewed === "yes";
     return c;
   }
 
@@ -105,6 +117,7 @@ export function TransactionsFilterBar({
     setDateTo("");
     setAmountMin("");
     setAmountMax("");
+    setReviewedFilter("");
     router.push("/transactions");
   }
 
@@ -123,6 +136,7 @@ export function TransactionsFilterBar({
     setDateTo(c.dateTo ?? "");
     setAmountMin(c.amountMin != null ? String(c.amountMin) : "");
     setAmountMax(c.amountMax != null ? String(c.amountMax) : "");
+    setReviewedFilter(reviewedValue(c.reviewed));
     setMenuOpen(false);
     navigate(c);
   }
@@ -138,6 +152,13 @@ export function TransactionsFilterBar({
     });
   }
 
+  function togglePending() {
+    start(async () => {
+      await setCountPending(!countPending);
+      router.refresh();
+    });
+  }
+
   function removeSaved(id: string) {
     start(async () => {
       await deleteFilter(id);
@@ -145,37 +166,142 @@ export function TransactionsFilterBar({
     });
   }
 
+  const onEnter = (e: React.KeyboardEvent) => e.key === "Enter" && apply();
+
   return (
-    <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-4">
-      {/* Row 1 — free text + saved-filter menu */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[220px] flex-1">
-          <Search
-            size={15}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--faint)]"
-          />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && apply()}
-            placeholder="Search name, merchant, or notes…"
-            className={`${inputCls} w-full pl-9`}
-            aria-label="Search transactions"
-          />
-        </div>
+    <section aria-label="Filters" className="flex flex-col gap-2.5">
+      {/* Row 1 — free text and the four things a row can be narrowed by */}
+      <div className="flex flex-wrap gap-2">
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={onEnter}
+          placeholder="Search name, merchant, or notes…"
+          className={`${FIELD} flex-[2_1_240px] bg-[var(--panel)] px-3.5`}
+          aria-label="Search transactions"
+        />
+
+        <select
+          value={accountId}
+          onChange={(e) => setAccountId(e.target.value)}
+          className={`${FIELD} flex-[1_1_130px]`}
+          aria-label="Account"
+        >
+          <option value="">All accounts</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={categoryId}
+          onChange={(e) => setCategoryId(e.target.value)}
+          className={`${FIELD} flex-[1_1_130px]`}
+          aria-label="Category"
+        >
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={tagId}
+          onChange={(e) => setTagId(e.target.value)}
+          className={`${FIELD} flex-[1_1_110px]`}
+          aria-label="Tag"
+        >
+          <option value="">All tags</option>
+          {tags.map((t) => (
+            <option key={t.id} value={t.id}>
+              #{t.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={reviewed}
+          onChange={(e) => setReviewedFilter(e.target.value)}
+          className={`${FIELD} flex-[1_1_130px]`}
+          aria-label="Review status"
+        >
+          <option value="">Any status</option>
+          <option value="no">Not reviewed</option>
+          <option value="yes">Reviewed</option>
+        </select>
+      </div>
+
+      {/* Row 2 — range, the pending preference, saved filters, apply */}
+      <div className="flex flex-wrap items-center gap-2 text-[13px] text-[var(--muted)]">
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          onKeyDown={onEnter}
+          className={MONO_FIELD}
+          aria-label="From date"
+        />
+        <span>to</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          onKeyDown={onEnter}
+          className={MONO_FIELD}
+          aria-label="To date"
+        />
+        <input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          value={amountMin}
+          onChange={(e) => setAmountMin(e.target.value)}
+          onKeyDown={onEnter}
+          placeholder="Min $"
+          className={`${MONO_FIELD} w-[84px]`}
+          aria-label="Minimum amount"
+        />
+        <input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          value={amountMax}
+          onChange={(e) => setAmountMax(e.target.value)}
+          onKeyDown={onEnter}
+          placeholder="Max $"
+          className={`${MONO_FIELD} w-[84px]`}
+          aria-label="Maximum amount"
+        />
+
+        {countPending != null && (
+          <label className="flex min-h-11 cursor-pointer items-center gap-2 px-1.5">
+            <input
+              type="checkbox"
+              checked={countPending}
+              disabled={pending}
+              onChange={togglePending}
+              className="h-4 w-4 cursor-pointer accent-[var(--jade)]"
+            />
+            Count pending as spending
+          </label>
+        )}
+
+        <span className="grow" />
 
         <div className="relative">
-          <Button
-            variant="secondary"
-            size="sm"
+          <button
             onClick={() => setMenuOpen((o) => !o)}
             aria-expanded={menuOpen}
+            className={`${PILL} border border-line text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--paper)]`}
           >
-            <Bookmark size={14} /> Saved
-            {savedFilters.length > 0 && (
-              <span className="mono text-xs text-[var(--muted)]">{savedFilters.length}</span>
-            )}
-          </Button>
+            Saved filters
+            {savedFilters.length > 0 && <span className="mono text-xs">{savedFilters.length}</span>}
+          </button>
 
           {menuOpen && (
             <>
@@ -196,7 +322,7 @@ export function TransactionsFilterBar({
                       {savedFilters.map((f) => (
                         <li
                           key={f.id}
-                          className="flex items-center gap-2 border-b border-line/60 px-3 py-2 last:border-0"
+                          className="flex items-center gap-2 border-b border-line px-3 py-2 last:border-0"
                         >
                           <button
                             onClick={() => applySaved(f)}
@@ -208,7 +334,7 @@ export function TransactionsFilterBar({
                             onClick={() => removeSaved(f.id)}
                             disabled={pending}
                             aria-label={`Delete ${f.name}`}
-                            className="shrink-0 rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--coral)]"
+                            className="shrink-0 rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--coral)]"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -217,150 +343,57 @@ export function TransactionsFilterBar({
                     </ul>
                   )}
                 </div>
-
-                <div className="border-t border-line p-2">
-                  {saving ? (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        autoFocus
-                        value={filterName}
-                        onChange={(e) => setFilterName(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && saveCurrent()}
-                        placeholder="Filter name"
-                        className={`${inputCls} min-w-0 flex-1`}
-                      />
-                      <Button size="sm" onClick={saveCurrent} disabled={pending}>
-                        <Check size={14} /> Save
-                      </Button>
-                      <button
-                        onClick={() => setSaving(false)}
-                        aria-label="Cancel"
-                        className="rounded-md p-1.5 text-[var(--faint)] hover:text-[var(--paper)]"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setSaving(true)}
-                      disabled={!hasActive}
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--muted)] transition-colors hover:bg-[var(--panel)] hover:text-[var(--paper)] disabled:opacity-45 disabled:hover:bg-transparent"
-                    >
-                      <Save size={14} /> Save current filter
-                    </button>
-                  )}
-                </div>
               </div>
             </>
           )}
         </div>
-      </div>
 
-      {/* Row 2 — structured controls */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <select
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-          className={inputCls}
-          aria-label="Category"
-        >
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={accountId}
-          onChange={(e) => setAccountId(e.target.value)}
-          className={inputCls}
-          aria-label="Account"
-        >
-          <option value="">All accounts</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={tagId}
-          onChange={(e) => setTagId(e.target.value)}
-          className={inputCls}
-          aria-label="Tag"
-        >
-          <option value="">All tags</option>
-          {tags.map((t) => (
-            <option key={t.id} value={t.id}>
-              #{t.name}
-            </option>
-          ))}
-        </select>
-
-        <div className="flex items-center gap-1.5">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className={inputCls}
-            aria-label="From date"
-          />
-          <span className="text-sm text-[var(--faint)]">→</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className={inputCls}
-            aria-label="To date"
-          />
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            value={amountMin}
-            onChange={(e) => setAmountMin(e.target.value)}
-            placeholder="Min $"
-            className={`${inputCls} w-24`}
-            aria-label="Minimum amount"
-          />
-          <span className="text-sm text-[var(--faint)]">–</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            value={amountMax}
-            onChange={(e) => setAmountMax(e.target.value)}
-            placeholder="Max $"
-            className={`${inputCls} w-24`}
-            aria-label="Maximum amount"
-          />
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          {hasActive && (
-            <button
-              onClick={clearAll}
-              className="inline-flex items-center gap-1 text-sm text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
-            >
-              <X size={14} /> Clear
+        {saving ? (
+          <span className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              value={filterName}
+              onChange={(e) => setFilterName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveCurrent();
+                if (e.key === "Escape") setSaving(false);
+              }}
+              placeholder="Filter name"
+              aria-label="Filter name"
+              className={`${FIELD} w-40`}
+            />
+            <button onClick={saveCurrent} disabled={pending} className={PILL_STRONG}>
+              <Check size={14} /> Save
             </button>
-          )}
-          <Button size="sm" onClick={apply}>
-            <Filter size={14} /> Apply
-          </Button>
-        </div>
-      </div>
+            <button
+              onClick={() => setSaving(false)}
+              aria-label="Cancel"
+              className="grid h-11 w-9 place-items-center rounded-full text-[var(--muted)] hover:text-[var(--paper)]"
+            >
+              <X size={16} />
+            </button>
+          </span>
+        ) : (
+          <button onClick={() => setSaving(true)} disabled={!hasActive} className={PILL_STRONG}>
+            Save filter
+          </button>
+        )}
 
-      <p className="mt-3 text-xs text-[var(--muted)]">
-        {resultCount} {resultCount === 1 ? "result" : "results"}
-        {hasActive && " for current filter"}
-      </p>
-    </div>
+        {hasActive && (
+          <button
+            onClick={clearAll}
+            className={`${PILL} px-2 text-[var(--muted)] hover:text-[var(--paper)]`}
+          >
+            <X size={14} /> Clear
+          </button>
+        )}
+        <button
+          onClick={apply}
+          className={`${PILL} bg-[var(--jade)] font-semibold text-[var(--on-jade)] hover:brightness-105`}
+        >
+          Apply
+        </button>
+      </div>
+    </section>
   );
 }

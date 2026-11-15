@@ -321,65 +321,6 @@ export function CategoryChart({ data }: { data: { category: string; total: numbe
   );
 }
 
-export function PortfolioChart({ data }: { data: { date: string; value: number }[] }) {
-  if (data.length === 0)
-    return (
-      <Empty
-        label="No price history yet"
-        hint="Historical closes load from Yahoo Finance for your tickers."
-      />
-    );
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
-        <defs>
-          <linearGradient id="pf" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--brass)" stopOpacity={0.28} />
-            <stop offset="100%" stopColor="var(--brass)" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
-        <XAxis
-          dataKey="date"
-          tickFormatter={(d) => format(parseISO(d), "MMM d")}
-          tick={tick}
-          tickLine={false}
-          axisLine={{ stroke: GRID }}
-          minTickGap={28}
-        />
-        <YAxis
-          tickFormatter={(v) => formatCompactCurrency(v)}
-          tick={tick}
-          tickLine={false}
-          axisLine={false}
-          width={58}
-        />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          labelStyle={labelStyle}
-          itemStyle={itemStyle}
-          cursor={{ stroke: "var(--brass)", strokeWidth: 1, strokeDasharray: "3 3" }}
-          formatter={(value) => [formatCurrency(Number(value)), "Value"]}
-          labelFormatter={(d) => format(parseISO(d as string), "PP")}
-        />
-        <Area
-          type="monotone"
-          dataKey="value"
-          stroke="var(--brass)"
-          strokeWidth={2.5}
-          fill="url(#pf)"
-          isAnimationActive={false}
-          activeDot={{ r: 4, fill: "var(--brass)", stroke: "var(--chart-dot-stroke)", strokeWidth: 2 }}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-}
-
-/**
- * Generic value-over-time area chart over `{ date, value }`. Backs both the
- * net-worth and portfolio history trackers (via ValueHistory's window tabs).
- */
 export function ValueAreaChart({
   data,
   color = "var(--brass)",

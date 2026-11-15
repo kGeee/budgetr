@@ -2,8 +2,8 @@
 
 import { useMemo } from "react";
 import { differenceInCalendarDays, format, parseISO, startOfWeek } from "date-fns";
-import { CategoriesSpendChart } from "@/components/categories-spend-chart";
-import { DailySpendChart } from "@/components/daily-spend-chart";
+import { CategoriesSpendChart } from "@/components/budget/categories-spend-chart";
+import { DailySpendChart } from "@/components/budget/daily-spend-chart";
 import { formatMoney } from "@/lib/utils";
 import type { CategoryRow } from "@/lib/queries";
 

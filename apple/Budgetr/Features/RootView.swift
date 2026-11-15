@@ -25,7 +25,7 @@ struct RootView: View {
 
         var title: String {
             switch self {
-            case .overview: return "Overview"
+            case .overview: return "Home"
             case .accounts: return "Accounts"
             case .transactions: return "Transactions"
             case .categories: return "Categories"
@@ -58,10 +58,8 @@ struct RootView: View {
         }
     }
 
-    @Environment(\.managedObjectContext) private var context
+    @Environment(\.triggerImport) private var triggerImport
     @State private var selection: Item? = .overview
-    @State private var showingImporter = false
-    @State private var importAlert: ImportAlert?
 
     private var groups: [(name: String, items: [Item])] {
         var out: [(String, [Item])] = []
@@ -86,15 +84,6 @@ struct RootView: View {
         .background(T.ink)
         .tint(T.jade)
         .preferredColorScheme(.dark)
-        .fileImporter(
-            isPresented: $showingImporter,
-            allowedContentTypes: [.init(filenameExtension: "db")!]
-        ) { result in
-            importAlert = ImportRunner.handle(result, context: context)
-        }
-        .alert(item: $importAlert) { alert in
-            Alert(title: Text(alert.title), message: Text(alert.message))
-        }
     }
 
     private var sidebar: some View {
@@ -120,12 +109,10 @@ struct RootView: View {
         .navigationTitle("budgetr")
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button {
-                    showingImporter = true
-                } label: {
+                Button(action: triggerImport) {
                     Label("Import", systemImage: "square.and.arrow.down")
                 }
-                .help("Import from web/data/budgetr.db")
+                .help("Import budgetr.db")
             }
         }
     }

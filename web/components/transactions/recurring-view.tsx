@@ -3,23 +3,15 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Check, Pencil } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { ArrowDownLeft, ArrowUpRight, Check, Pencil } from "lucide-react";
+import { Figure, Hero, Mark } from "@/components/ui/statement";
 import { renameRecurringStream } from "@/lib/actions/recurring";
+import { cadenceLabel, commitmentLead } from "@/lib/plan-verdict";
 import { daysLate, monthlyCommitment, splitByDue, streamLabel } from "@/lib/recurring";
 import { formatCurrency } from "@/lib/utils";
 import type { RecurringRow } from "@/lib/queries";
 
-const FREQUENCY_LABEL: Record<string, string> = {
-  WEEKLY: "Weekly",
-  BIWEEKLY: "Every 2 weeks",
-  SEMI_MONTHLY: "Twice a month",
-  MONTHLY: "Monthly",
-  ANNUALLY: "Yearly",
-  UNKNOWN: "Irregular",
-};
-
-const prettyFrequency = (f: string | null) => (f && FREQUENCY_LABEL[f]) ?? "Recurring";
+const prettyFrequency = cadenceLabel;
 
 /**
  * Recurring streams, triaged.
@@ -28,6 +20,10 @@ const prettyFrequency = (f: string | null) => (f && FREQUENCY_LABEL[f]) ?? "Recu
  * different fact from a bill that's coming; that a total across mixed
  * frequencies isn't "per period" but per *month*, once normalised; and that a
  * stream Plaid never named can be named by you.
+ *
+ * Laid out as a statement: the monthly commitment and the sentence that reads
+ * it, three figures on a rule beside it, then one ruled table per due-group
+ * sharing a single column set.
  */
 export function RecurringView({
   bills,
@@ -44,67 +40,102 @@ export function RecurringView({
   const largest = [...bills].sort(
     (a, b) => Math.abs(b.averageAmount ?? 0) - Math.abs(a.averageAmount ?? 0),
   )[0];
+  const lead = commitmentLead(bills, total);
+  const late = due.overdue.length;
 
   return (
-    <div className="space-y-7">
-      <Card>
-        <p className="eyebrow">Committed monthly · {bills.length} active streams</p>
-        <p className="display-1 mt-1.5 font-display text-5xl tabular">{formatCurrency(total)}</p>
-        <p className="mt-3 text-sm text-[var(--muted)]">
-          normalised to a monthly equivalent, so weekly and yearly streams are comparable.
-          {irregular > 0 && (
-            <>
-              {" "}
-              {irregular} irregular {irregular === 1 ? "stream is" : "streams are"} not included —
-              they have no monthly figure.
-            </>
-          )}
-        </p>
+    <div className="space-y-9">
+      <section aria-label="Monthly commitment" className="flex flex-wrap items-stretch gap-10">
+        <Hero
+          className="flex-[1_1_380px]"
+          eyebrow={`Committed each month · ${bills.length} active stream${bills.length === 1 ? "" : "s"}`}
+          figure={formatCurrency(total)}
+          verdict={
+            lead ? (
+              <>
+                {streamLabel(lead.row).name} is{" "}
+                <Mark tone="brass">{Math.round(lead.share * 100)}% of it</Mark>.{" "}
+                {late > 0
+                  ? `${late === 1 ? "One bill is" : `${late} bills are`} past ${
+                      late === 1 ? "its" : "their"
+                    } date with no charge seen yet.`
+                  : "Nothing is past its date."}
+              </>
+            ) : (
+              <span className="text-[var(--muted)]">
+                No bill has a regular cadence yet, so there is no monthly figure to commit to.
+              </span>
+            )
+          }
+        >
+          <p className="max-w-[60ch] text-[13px] text-[var(--muted)]">
+            Every stream is normalised to a monthly equivalent, so weekly and yearly ones are
+            comparable.
+            {irregular > 0 && (
+              <>
+                {" "}
+                {irregular} irregular {irregular === 1 ? "stream is" : "streams are"} not included;{" "}
+                {irregular === 1 ? "it has" : "they have"} no monthly figure.
+              </>
+            )}
+          </p>
+        </Hero>
 
-        <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3">
-          <Stat label="Due next 7 days" value={formatCurrency(soonTotal)} sub={`${due.soon.length} bills`} />
-          <Stat
+        <dl className="flex flex-[1_1_380px] flex-wrap gap-y-4 self-end border-t border-line pt-3.5">
+          <BigStat
+            label="Due next 7 days"
+            value={formatCurrency(soonTotal)}
+            sub={`${due.soon.length} bill${due.soon.length === 1 ? "" : "s"}`}
+          />
+          <BigStat
             label="Largest"
             value={largest ? formatCurrency(Math.abs(largest.averageAmount ?? 0)) : "—"}
             sub={largest ? streamLabel(largest).name : undefined}
           />
-          <Stat
+          <BigStat
             label="Awaiting confirmation"
-            value={String(due.overdue.length)}
-            sub={due.overdue.length > 0 ? "past their date" : "none"}
-            tone={due.overdue.length > 0 ? "brass" : undefined}
+            value={String(late)}
+            sub={late > 0 ? "past their date" : "none"}
+            tone={late > 0 ? "brass" : undefined}
           />
-        </div>
-      </Card>
+        </dl>
+      </section>
 
-      {due.overdue.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius)] border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_12%,transparent)] px-4 py-3 text-sm">
-          <AlertTriangle size={15} className="shrink-0 text-[var(--brass)]" />
-          <p className="min-w-0 flex-1">
-            <span className="font-medium">
-              {due.overdue.length} {due.overdue.length === 1 ? "stream was" : "streams were"} due
-              before today
-            </span>
-            <span className="text-[var(--muted)]">
-              {" — "}
-              and no matching charge has arrived. Expected while a sync is behind; worth a look
-              otherwise.
-            </span>
-          </p>
+      <section aria-label="Recurring streams">
+        <div className="overflow-x-auto">
+          <div className="min-w-[720px]">
+            {late > 0 && (
+              <Group
+                title="Awaiting confirmation"
+                dateHead="Expected"
+                tone="brass"
+                rows={due.overdue}
+                today={today}
+                note={`${late} ${late === 1 ? "stream was" : "streams were"} due before today and no matching charge has arrived.`}
+              />
+            )}
+            {due.soon.length > 0 && (
+              <Group title="Due next 7 days" dateHead="Due" rows={due.soon} today={today} />
+            )}
+            {due.later.length > 0 && (
+              <Group title="Upcoming" dateHead="Due" rows={due.later} today={today} />
+            )}
+            {income.length > 0 && (
+              <Group title="Income" dateHead="Due" rows={income} today={today} />
+            )}
+          </div>
         </div>
-      )}
-
-      {due.overdue.length > 0 && (
-        <Section title="Awaiting confirmation" rows={due.overdue} today={today} />
-      )}
-      {due.soon.length > 0 && <Section title="Due next 7 days" rows={due.soon} today={today} />}
-      {due.later.length > 0 && <Section title="Upcoming" rows={due.later} today={today} />}
-      {income.length > 0 && <Section title="Income" rows={income} today={today} />}
+        <p className="text-[13px] text-[var(--muted)]">
+          The pencil renames a stream; streams your bank never named ask for one. Late items are
+          expected while a sync is behind, and worth a look otherwise.
+        </p>
+      </section>
     </div>
   );
 }
 
-function Stat({
+/** A strip cell whose figure is set in the display face, one rank under the hero. */
+function BigStat({
   label,
   value,
   sub,
@@ -116,40 +147,64 @@ function Stat({
   tone?: "brass";
 }) {
   return (
-    <div className="bg-[var(--panel)] px-4 py-3">
-      <p className="eyebrow">{label}</p>
-      <p
-        className={`mono mt-1 text-lg tabular ${tone === "brass" ? "text-[var(--brass)]" : ""}`}
+    <div className="min-w-[7.5rem] flex-1 border-l border-line px-4 first:border-l-0 first:pl-0">
+      <dt className="text-[13px] text-[var(--muted)]">{label}</dt>
+      <dd
+        className={`font-display text-2xl tabular ${tone === "brass" ? "text-[var(--brass)]" : ""}`}
       >
-        {value}
-      </p>
-      {sub && <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{sub}</p>}
+        <Figure value={value} />
+      </dd>
+      {sub && <dd className="truncate text-xs text-[var(--muted)]">{sub}</dd>}
     </div>
   );
 }
 
-function Section({
+const COLS =
+  "grid grid-cols-[24px_minmax(200px,1.6fr)_minmax(120px,0.9fr)_minmax(110px,0.8fr)_150px_120px] gap-4";
+
+function Group({
   title,
+  dateHead,
   rows,
   today,
+  note,
+  tone,
 }: {
   title: string;
+  dateHead: string;
   rows: RecurringRow[];
   today: string;
+  note?: string;
+  tone?: "brass";
 }) {
   return (
-    <section>
-      <p className="eyebrow mb-3">
-        {title} · {rows.length}
-      </p>
-      <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
-        <ul>
-          {rows.map((r) => (
-            <Row key={r.id} row={r} today={today} />
-          ))}
-        </ul>
+    <div className="pb-7">
+      <div
+        className={`${COLS} items-end border-b border-[var(--line-strong)] pb-2.5 text-xs text-[var(--muted)]`}
+      >
+        <span />
+        <h2 className="font-display text-lg tracking-tight text-[var(--paper)]">
+          {title}
+          <span
+            className={`mono ml-2 text-xs ${tone === "brass" ? "text-[var(--brass)]" : "text-[var(--muted)]"}`}
+          >
+            {rows.length}
+          </span>
+        </h2>
+        <span>Cadence</span>
+        <span>Account</span>
+        <span>{dateHead}</span>
+        <span className="text-right">Amount</span>
       </div>
-    </section>
+      {note && (
+        <p className="border-b border-line py-2.5 text-[13px] text-[var(--brass)]">{note}</p>
+      )}
+      <ul>
+        {rows.map((r) => (
+          <Row key={r.id} row={r} today={today} />
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -160,43 +215,33 @@ function Row({ row, today }: { row: RecurringRow; today: string }) {
   const late = daysLate(row.predictedNextDate, today);
 
   return (
-    <li className="flex items-center gap-4 border-b border-line/60 px-6 py-4 transition-colors last:border-0 hover:bg-[var(--panel-2)]">
-      <span
-        className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border ${
-          income
-            ? "border-[color-mix(in_srgb,var(--jade)_35%,transparent)] text-[var(--jade)]"
-            : "border-line text-[var(--muted)]"
-        }`}
-      >
-        {income ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+    <li className={`${COLS} min-h-14 items-center border-b border-line`}>
+      {income ? (
+        <ArrowDownLeft size={16} role="img" aria-label="Income" className="text-[var(--jade)]" />
+      ) : (
+        <ArrowUpRight size={16} role="img" aria-label="Bill" className="text-[var(--muted)]" />
+      )}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className={`truncate font-medium ${needsName ? "text-[var(--muted)]" : ""}`}>
+          {name}
+        </span>
+        <NameEditor id={row.id} current={row.userLabel} needsName={needsName} />
       </span>
-
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-medium">{name}</p>
-          {late > 0 && (
-            <span className="shrink-0 rounded-full border border-[var(--brass-dim)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]">
-              {late}d late
-            </span>
-          )}
-          <NameEditor id={row.id} current={row.userLabel} needsName={needsName} />
-        </div>
-        <p className="truncate text-xs text-[var(--muted)]">
-          {prettyFrequency(row.frequency)} · {row.accountName}
-          {row.predictedNextDate && (
-            <>
-              {" · "}
-              {late > 0 ? "expected" : "due"} {format(parseISO(row.predictedNextDate), "MMM d")}
-            </>
-          )}
-        </p>
-      </div>
-
-      <span
-        className={`mono w-24 shrink-0 text-right text-sm ${
-          income ? "text-[var(--jade)]" : "text-[var(--paper)]"
-        }`}
-      >
+      <span className="truncate text-[13px] text-[var(--muted)]">
+        {prettyFrequency(row.frequency)}
+      </span>
+      <span className="truncate text-[13px] text-[var(--muted)]">{row.accountName ?? "—"}</span>
+      <span className={`mono text-xs ${late > 0 ? "text-[var(--brass)]" : "text-[var(--muted)]"}`}>
+        {row.predictedNextDate ? (
+          <>
+            {format(parseISO(row.predictedNextDate), "MMM d")}
+            {late > 0 && ` · ${late}d late`}
+          </>
+        ) : (
+          "No date"
+        )}
+      </span>
+      <span className={`mono text-right ${income ? "text-[var(--jade)]" : ""}`}>
         {formatCurrency(amount, row.currency ?? "USD")}
       </span>
     </li>
@@ -234,14 +279,14 @@ function NameEditor({
     return (
       <button
         onClick={() => setEditing(true)}
-        className={`shrink-0 cursor-pointer rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
+        className={`shrink-0 cursor-pointer transition-colors ${
           needsName
-            ? "border-[var(--brass-dim)] text-[var(--brass)] hover:bg-[var(--panel-2)]"
-            : "border-transparent text-[var(--faint)] hover:border-line hover:text-[var(--muted)]"
+            ? "min-h-8 rounded-full border border-[var(--brass-dim)] px-3 text-xs text-[var(--brass)] hover:bg-[var(--panel-2)]"
+            : "grid h-9 w-9 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
         }`}
-        aria-label={`Rename this stream`}
+        aria-label="Rename this stream"
       >
-        {needsName ? "Name it" : <Pencil size={11} aria-hidden />}
+        {needsName ? "Name it" : <Pencil size={13} aria-hidden />}
       </button>
     );
   }

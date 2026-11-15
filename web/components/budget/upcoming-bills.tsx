@@ -1,58 +1,64 @@
-import { format, parseISO } from "date-fns";
 import Link from "next/link";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionHead } from "@/components/ui/statement";
+import { shortDate } from "@/components/transactions/ledger-bits";
 import { formatCurrency } from "@/lib/utils";
 import type { RecurringRow } from "@/lib/queries";
 import { streamLabel } from "@/lib/recurring";
 
+/** Predicted charges, soonest first, as ruled rows: date, name, amount. */
 export function UpcomingBills({ bills }: { bills: RecurringRow[] }) {
   const total = bills.reduce((s, b) => s + Math.abs(b.averageAmount ?? 0), 0);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Next two weeks</CardTitle>
-        <Link href="/recurring" className="text-xs text-[var(--brass)] hover:underline">
-          Recurring →
-        </Link>
-      </CardHeader>
+    <section aria-label="Upcoming bills">
+      <SectionHead
+        id="upcoming"
+        title="Upcoming"
+        action={
+          <Link
+            href="/plan?tab=bills"
+            className="text-[13px] text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+          >
+            Bills &amp; income
+          </Link>
+        }
+      />
 
       {bills.length === 0 ? (
-        <p className="py-2 text-sm text-[var(--muted)]">No bills predicted in the next 14 days.</p>
+        <p className="border-b border-line py-3.5 text-sm text-[var(--muted)]">
+          No bills predicted in the next two weeks.
+        </p>
       ) : (
         <>
-          <ul className="-mx-2">
+          <ul>
             {bills.map((b) => (
               <li
                 key={b.id}
-                className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-[var(--panel-2)]"
+                className="flex min-h-[46px] items-center justify-between gap-3 border-b border-line text-sm"
               >
-                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-center">
-                  <span className="mono text-[10px] uppercase leading-none text-[var(--muted)]">
-                    {b.predictedNextDate && format(parseISO(b.predictedNextDate), "MMM")}
+                <span className="flex min-w-0 items-baseline gap-3">
+                  <span className="mono w-12 shrink-0 text-xs text-[var(--muted)]">
+                    {b.predictedNextDate ? shortDate(b.predictedNextDate) : "—"}
                   </span>
-                  <span className="font-display text-sm leading-none">
-                    {b.predictedNextDate && format(parseISO(b.predictedNextDate), "d")}
-                  </span>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
+                  <span className="min-w-0 truncate">
                     {streamLabel(b).name}
-                  </p>
-                  <p className="truncate text-xs text-[var(--muted)]">{b.accountName}</p>
-                </div>
-                <span className="mono shrink-0 text-sm">
+                    {b.accountName && (
+                      <span className="text-[13px] text-[var(--muted)]"> · {b.accountName}</span>
+                    )}
+                  </span>
+                </span>
+                <span className="mono shrink-0">
                   {formatCurrency(Math.abs(b.averageAmount ?? 0), b.currency ?? "USD")}
                 </span>
               </li>
             ))}
           </ul>
-          <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
-            <span className="eyebrow">Due soon</span>
-            <span className="mono text-sm text-[var(--paper)]">{formatCurrency(total)}</span>
-          </div>
+          <p className="flex items-center justify-between gap-3 pt-2.5 text-xs text-[var(--muted)]">
+            <span>Due soon</span>
+            <span className="mono text-[13px] text-[var(--paper)]">{formatCurrency(total)}</span>
+          </p>
         </>
       )}
-    </Card>
+    </section>
   );
 }

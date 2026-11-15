@@ -1,5 +1,5 @@
 import { ArrowUpRight, Lock } from "lucide-react";
-import { LicenseForm } from "@/components/license-form";
+import { LicenseForm } from "@/components/license/license-form";
 import { LICENSE_BUY_URL, type LicenseStatus } from "@/lib/license";
 import { SITE } from "@/lib/site";
 

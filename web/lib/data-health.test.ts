@@ -47,14 +47,14 @@ describe("detectDataHealth", () => {
     expect(alert.severity).toBe("high");
     expect(alert.title).toContain("Chase");
     expect(alert.title).toContain("a month ago");
-    expect(alert.action?.href).toBe("/settings#connections");
+    expect(alert.action?.href).toBe("/accounts");
   });
 
   it("sends each alert somewhere it can actually be resolved", () => {
     // A review backlog is not fixed in Settings; routing every health alert to
     // one destination is what makes an insight a notification.
     const backlog = detectDataHealth(healthy, { total: 699, unreviewed: 594 })[0];
-    expect(backlog.action?.href).toBe("/transactions?reviewed=no");
+    expect(backlog.action?.href).toBe("/transactions?view=review");
   });
 
   it("raises one alert per dead connection", () => {

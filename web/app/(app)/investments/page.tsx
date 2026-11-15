@@ -1,198 +1,30 @@
 import Link from "next/link";
 import { Upload } from "lucide-react";
 import { PageHead } from "@/components/page-head";
-import { PortfolioView, type HoldingRow } from "@/components/portfolio-view";
-import {
-  getAllocationTargets,
-  getAssetClassOverrides,
-  getDividendSummary,
-  getGeographyOverrides,
-  getHoldings,
-  getImportedHoldings,
-  getInvestmentSectors,
-  getInvestmentTransactions,
-  getKnownSectors,
-  getManualHoldings,
-  sectorKeyFor,
-} from "@/lib/queries";
-import {
-  buildReconstructedSeriesWithFlows,
-  downsampleHistories,
-  downsampleSeries,
-  getTickerHistories,
-  type PricePoint,
-} from "@/lib/portfolio-history";
-import { computeComparison, twrIndexSeries, type BenchmarkKey } from "@/lib/benchmark";
-import { parseOccSymbol } from "@/lib/options";
-import { getDividendCalendar } from "@/lib/yahoo";
+import { parseInvestmentsTab } from "@/components/investments-tab-keys";
+import { isTradingDeskEnabled } from "@/lib/trading-desk";
+import { HoldingsTab } from "./_tabs/holdings-tab";
+import { AllocationTab } from "./_tabs/allocation-tab";
+import { IncomeTab } from "./_tabs/income-tab";
 
 export const dynamic = "force-dynamic";
 // Holdings come from the DB (always fresh), but the Yahoo history fetches should
 // hit the Data Cache instead of being forced no-store by `force-dynamic`.
 export const fetchCache = "default-cache";
 
-export default async function InvestmentsPage() {
-  const plaidHoldingsRaw = getHoldings();
-  const transactions = getInvestmentTransactions();
-  const manual = getManualHoldings();
-  const sectors = getInvestmentSectors();
-  const knownSectors = getKnownSectors();
-  const allocationTargets = getAllocationTargets();
-  const assetClassOverrides = getAssetClassOverrides();
-  const geographyOverrides = getGeographyOverrides();
-  const dividendSummary = getDividendSummary();
-
-  // Attach the symbol-scoped sector key + its current sector to every Plaid
-  // holding so the row carries what the sector editor and allocation need.
-  const plaidHoldings: HoldingRow[] = plaidHoldingsRaw.map((h) => {
-    const sectorKey = sectorKeyFor(h.ticker, h.id);
-    return { ...h, sectorKey, sector: sectors[sectorKey] ?? null };
-  });
-
-  // Current positions derived from imported broker trades (source:'import') so
-  // they show alongside Plaid holdings and anchor the value curve.
-  const importedRaw = getImportedHoldings();
-
-  // Fetch price history for every tickered symbol — Plaid holdings + the
-  // symbol-priced manual holdings (e.g. BTC-USD) + imported positions.
-  const manualSymbols = manual
-    .map((m) => m.symbol)
-    .filter((s): s is string => Boolean(s));
-  const symbols = [
-    // Skip option (OCC) tickers — Yahoo has no history for them.
-    ...plaidHoldings
-      .map((h) => h.ticker)
-      .filter((t): t is string => Boolean(t) && !parseOccSymbol(t)),
-    ...manualSymbols,
-    ...importedRaw.map((h) => h.ticker).filter((t) => !parseOccSymbol(t)),
-  ];
-  const histories = await getTickerHistories(symbols);
-
-  // Map manual holdings into the holdings shape. Tickered ones are valued by
-  // quantity × price (live → Yahoo last close); fixed-value ones carry their
-  // user-set value directly.
-  const manualHoldings: HoldingRow[] = manual.map((m) => {
-    const sym = m.symbol?.toUpperCase();
-    const hist = sym ? histories[sym] : undefined;
-    const lastClose = hist && hist.length > 0 ? hist[hist.length - 1].close : null;
-    const sectorKey = sectorKeyFor(m.symbol, m.id);
-    return {
-      id: m.id,
-      quantity: m.quantity,
-      costBasis: m.costBasis,
-      price: null,
-      value: m.symbol ? null : m.manualValue, // fixed-value uses manualValue
-      closePrice: m.symbol ? lastClose : null,
-      currency: m.currency ?? "USD",
-      ticker: m.symbol,
-      securityName: m.name,
-      securityType: m.type,
-      // Wallet-imported tokens group under the wallet's label as their own
-      // "account"; hand-entered holdings stay under "Manual".
-      accountName: m.walletLabel ?? "Manual",
-      manual: true,
-      fromWallet: Boolean(m.walletId),
-      sectorKey,
-      sector: sectors[sectorKey] ?? null,
-    };
-  });
-
-  // Imported positions valued like tickered manual holdings: quantity × last
-  // close. Grouped under their import account's name.
-  const importedHoldings: HoldingRow[] = importedRaw.map((h) => {
-    const sym = h.ticker.toUpperCase();
-    const hist = histories[sym];
-    const lastClose = hist && hist.length > 0 ? hist[hist.length - 1].close : null;
-    const sectorKey = sectorKeyFor(h.ticker, h.id);
-    return {
-      id: h.id,
-      quantity: h.quantity,
-      costBasis: h.costBasis,
-      price: null,
-      value: null,
-      closePrice: lastClose,
-      currency: h.currency ?? "USD",
-      ticker: h.ticker,
-      securityName: h.securityName,
-      securityType: null,
-      accountName: h.accountName ?? "Imported",
-      manual: true,
-      fromWallet: false,
-      sectorKey,
-      sector: sectors[sectorKey] ?? null,
-    };
-  });
-
-  // Interleave manual + imported holdings with Plaid ones, ordered by best-known
-  // value so they sort in by size rather than always landing at the bottom. Live
-  // prices refine the figure client-side but don't reorder (avoids jumpiness).
-  const estValue = (h: HoldingRow): number =>
-    h.value ?? (h.price ?? h.closePrice ?? 0) * (h.quantity ?? 0);
-  const holdings = [...plaidHoldings, ...manualHoldings, ...importedHoldings].sort(
-    (a, b) => estValue(b) - estValue(a),
-  );
-
-  // Reconstruct the value curve from the actual buy/sell ledger (anchored to
-  // today's holdings) so older days reflect what was really held back then.
-  // Manual tickered holdings have no trade ledger, so they ride at constant
-  // quantity across the window.
-  const trades = transactions
-    .filter((t) => t.quantity != null && t.quantity !== 0)
-    .map((t) => ({ ticker: t.ticker, date: t.date, quantity: t.quantity }));
-  // Reconstructed series carries each day's external cash flow (buys/sells) too,
-  // which the time-weighted return below needs. The plain value line ignores it.
-  const reconstructed = buildReconstructedSeriesWithFlows(holdings, trades, histories);
-  const rawSeries = reconstructed.map((p) => ({ date: p.date, value: p.value }));
-
-  // Fold fixed-value manual assets (no symbol) into the chart as a constant so
-  // the portfolio line matches the headline Market value. Tickered manual
-  // holdings are already in the series via `holdings`.
-  const fixedValueTotal = manual
-    .filter((m) => !m.symbol)
-    .reduce((s, m) => s + (m.manualValue ?? 0), 0);
-  const portfolioSeries =
-    fixedValueTotal > 0
-      ? rawSeries.map((p) => ({ date: p.date, value: p.value + fixedValueTotal }))
-      : rawSeries;
-
-  // Time-weighted return index (base 100) for the benchmark comparison. TWR
-  // removes the effect of deposits/withdrawals so the portfolio's return is
-  // measured purely on price appreciation — apples-to-apples with SPY/QQQ, which
-  // carry no cash flows. Basing this on `reconstructed` (the tickered series +
-  // its dated buy/sell flows) deliberately EXCLUDES the constant fixed-value
-  // block: with no dated flow and a flat value, folding it in would only drag
-  // every daily return toward zero without representing any real performance.
-  const portfolioReturnSeries = twrIndexSeries(reconstructed);
-
-  // Benchmark comparison: pull SPY/QQQ closes (via the shared 6h Yahoo Data
-  // Cache) and measure the portfolio's return against them per window. Skipped
-  // when there's no portfolio series to compare (empty holdings).
-  const benchmarkSeries =
-    portfolioSeries.length > 1
-      ? await getTickerHistories(["SPY", "QQQ"])
-      : ({} as Record<string, PricePoint[]>);
-  const benchmarks: Partial<Record<BenchmarkKey, PricePoint[]>> = {
-    SPY: benchmarkSeries.SPY,
-    QQQ: benchmarkSeries.QQQ,
-  };
-  // Compare the deposit-adjusted (time-weighted) portfolio return against the
-  // benchmarks, not the raw market-value line — otherwise a day's deposit would
-  // read as outperformance.
-  const comparison = computeComparison(portfolioReturnSeries, benchmarks);
-
-  // No option chains are fetched here any more. The desk that needs them lives
-  // at /investments/options; this page shows a three-number summary and links to
-  // it. Dropping the fetch removes three multi-megabyte requests per render —
-  // MU's chain alone is 7.3 MB, over Next's 2 MB data-cache ceiling, so it was
-  // re-fetched every single time this page was drawn.
-
-  // Ex-dividend calendar: pull Yahoo's upcoming ex-div/pay dates for the held
-  // tickers, but only once we know some dividend income exists (the panel is
-  // hidden otherwise, so the fetch would be wasted). Cached in the Data Cache.
-  const dividendCalendar =
-    dividendSummary.payments.length > 0 && symbols.length > 0
-      ? await getDividendCalendar(symbols)
-      : [];
+/**
+ * Investments, in three tabs (`?tab=`): Holdings (default), Allocation, and
+ * Income & gains. Each tab loads only its own data — the value history and
+ * benchmarks, the risk analysis, the dividend calendar and tax lots used to be
+ * one long page (plus /investments/analysis and /realized-gains), and every
+ * visit paid for all of them. The tab bar itself is in investments/layout.tsx.
+ */
+export default async function InvestmentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const tab = parseInvestmentsTab((await searchParams).tab);
 
   return (
     <div className="space-y-7">
@@ -207,26 +39,13 @@ export default async function InvestmentsPage() {
           </Link>
         }
       />
-      <PortfolioView
-        holdings={holdings}
-        // Raw daily history above powers valuation, the reconstructed value
-        // curve and the TWR index; only the display copy crosses to the client.
-        histories={downsampleHistories(histories)}
-        portfolioSeries={portfolioSeries}
-        portfolioReturnSeries={portfolioReturnSeries}
-        benchmarks={{
-          SPY: benchmarks.SPY && downsampleSeries(benchmarks.SPY),
-          QQQ: benchmarks.QQQ && downsampleSeries(benchmarks.QQQ),
-        }}
-        comparison={comparison}
-        transactions={transactions}
-        knownSectors={knownSectors}
-        allocationTargets={allocationTargets}
-        assetClassOverrides={assetClassOverrides}
-        geographyOverrides={geographyOverrides}
-        dividendSummary={dividendSummary}
-        dividendCalendar={dividendCalendar}
-      />
+      {tab === "allocation" ? (
+        <AllocationTab />
+      ) : tab === "income" ? (
+        <IncomeTab />
+      ) : (
+        <HoldingsTab tradingDesk={isTradingDeskEnabled()} />
+      )}
     </div>
   );
 }

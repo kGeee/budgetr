@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { X } from "lucide-react";
-import { DailySpendChart } from "@/components/daily-spend-chart";
-import { TransactionsTable } from "@/components/transactions-table";
+import { DailySpendChart } from "@/components/budget/daily-spend-chart";
+import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { getTransactionsForDate } from "@/lib/actions";
 import type { CategoryRow, TransactionRow } from "@/lib/queries";
 
@@ -58,7 +58,7 @@ export function CategoriesSpendChart({
             </p>
             <button
               onClick={() => setSelectedDate(null)}
-              className="rounded-full p-0.5 text-[var(--faint)] transition hover:text-[var(--paper)]"
+              className="rounded-full p-0.5 text-[var(--muted)] transition hover:text-[var(--paper)]"
               aria-label="Clear date filter"
             >
               <X size={13} />

@@ -9,6 +9,11 @@ enum CategoryMapping {
         "TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS",
     ]
 
+    /// Category `group` value for internal money movement — Transfer In/Out,
+    /// Loan Payments, and Reimbursable (`cat_reimbursable`). Web spend queries
+    /// skip `group = 'transfer'`; matching that keeps Overview/Budgets honest.
+    static let transferGroup = "transfer"
+
     /// User override (`userCategoryId`) wins; otherwise fall back to the Plaid
     /// primary category. Returns the *category id* to attribute the txn to,
     /// or nil if it should map purely by Plaid primary (resolved upstream).
@@ -20,10 +25,24 @@ enum CategoryMapping {
         return categoryIdForPlaidPrimary(plaidPrimary)
     }
 
-    /// Whether a transaction counts toward income/expense reports.
+    /// Whether a transaction counts toward income/expense reports, from the
+    /// Plaid primary alone (no resolved category yet).
     static func countsTowardCashflow(plaidPrimary: String?) -> Bool {
         guard let plaidPrimary else { return true }
         return !transferPrimaries.contains(plaidPrimary)
+    }
+
+    /// Whether an outflow counts as *spend* — mirrors web's
+    /// `(cat.group IS NULL OR cat.group != 'transfer')` plus the Plaid-primary
+    /// fallback when nothing resolves.
+    ///
+    /// The resolved category's group wins: overriding a transfer into Dining
+    /// counts; filing Dining as Reimbursable (transfer group) does not.
+    static func countsTowardSpend(resolvedGroup: String?, plaidPrimary: String?) -> Bool {
+        if let resolvedGroup {
+            return resolvedGroup != transferGroup
+        }
+        return countsTowardCashflow(plaidPrimary: plaidPrimary)
     }
 
     /// `FOOD_AND_DRINK` → `Food and drink`. Plaid's constants are shouty and

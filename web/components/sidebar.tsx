@@ -7,14 +7,18 @@ import {
   Menu,
   X,
   LayoutDashboard,
-  LayoutGrid,
   ArrowLeftRight,
+  PieChart,
+  CalendarClock,
   LineChart,
   Wallet,
   Settings,
+  Landmark,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
+import { PaletteTrigger } from "@/components/command-palette";
 import { formatCurrency, isLiability, signedBalance } from "@/lib/utils";
 import { convertToDisplay, getDisplayCurrency } from "@/lib/currency";
 
@@ -28,77 +32,57 @@ type NavItem = {
 };
 
 /**
- * The four screens this app is opened for. They get icons, size, and a fixed
- * position above the scroll; everything else is one rank quieter. A flat list of
- * twenty-one equal rows can't say that Transactions is a daily habit and
- * Fundamentals is a twice-a-year visit — so it said neither.
+ * The six screens this app is opened for, one question each: am I OK (Home),
+ * what happened (Transactions), where did it go (Spending), am I on plan
+ * (Budgets), what's coming (Plan), what do I own (Investments). They get icons,
+ * size, and a fixed position above the scroll.
  *
- * Editing this list is the whole knob: move an href up here to promote it.
+ * 0.15 folded twenty-one destinations into these — most of the old pages were
+ * the same queries drawn a second time. Editing this list is the whole knob.
  */
 const primaryNav: NavItem[] = [
-  { href: "/overview", label: "Overview", icon: LayoutDashboard },
-  // { href: "/dashboards", label: "Dashboards", icon: LayoutGrid },
-  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
-  { href: "/investments", label: "Investments", icon: LineChart },
+  { href: "/overview", label: "Home", icon: LayoutDashboard },
+  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight, badge: "review" },
+  { href: "/spending", label: "Spending", icon: PieChart },
   { href: "/budgets", label: "Budgets", icon: Wallet },
+  { href: "/plan", label: "Plan", icon: CalendarClock },
+  { href: "/investments", label: "Investments", icon: LineChart },
 ];
 
-/** Everything else, grouped by what you're doing rather than by data model. */
-const navGroups: { label: string; items: NavItem[] }[] = [
-  {
-    label: "Ledger",
-    items: [
-      { href: "/accounts", label: "Accounts" },
-      { href: "/recurring", label: "Recurring" },
-      { href: "/shared", label: "Shared" },
-      { href: "/vendors", label: "Vendors" },
-      { href: "/categories", label: "Categories" },
-    ],
-  },
-  {
-    label: "Investing",
-    items: [
-      { href: "/markets", label: "Markets" },
-      { href: "/investments/options", label: "Options" },
-      { href: "/investments/analysis", label: "Analysis" },
-      { href: "/fundamentals", label: "Fundamentals" },
-      { href: "/realized-gains", label: "Realized gains" },
-    ],
-  },
-  {
-    label: "Planning",
-    items: [
-      { href: "/cashflow", label: "Cashflow" },
-      { href: "/goals", label: "Goals" },
-      { href: "/fire", label: "FIRE" },
-    ],
-  },
-  {
-    label: "Assistant",
-    items: [
-      { href: "/review", label: "Review", badge: "review" },
-      { href: "/insights", label: "Insights" },
-      { href: "/rules", label: "Auto-tag rules" },
-    ],
-  },
-];
+/** The occasional destinations, one rank quieter. */
+const ledgerGroup = {
+  label: "Ledger",
+  items: [
+    { href: "/accounts", label: "Accounts", icon: Landmark },
+    { href: "/shared", label: "Shared", icon: Users },
+  ],
+};
+
+/** Trading tools — shown only when Settings → Trading desk is on (lib/trading-desk.ts). */
+const deskGroup = {
+  label: "Trading desk",
+  items: [
+    { href: "/markets", label: "Markets" },
+    { href: "/investments/options", label: "Options" },
+    { href: "/fundamentals", label: "Fundamentals" },
+  ],
+};
 
 const settingsItem: NavItem = { href: "/settings", label: "Settings", icon: Settings };
 
-const nav: NavItem[] = [...primaryNav, ...navGroups.flatMap((g) => g.items), settingsItem];
+const nav: NavItem[] = [
+  ...primaryNav,
+  ...ledgerGroup.items,
+  ...deskGroup.items,
+  settingsItem,
+];
 
-// On the read-only web demo, drop nav items that only make sense on a real
-// install (Settings → API keys). Everything else is browsable.
-const DEMO_HIDDEN = new Set(["/settings"]);
-function visibleGroups(webDemo: boolean) {
-  if (!webDemo) return navGroups;
-  return navGroups
-    .map((g) => ({ ...g, items: g.items.filter((i) => !DEMO_HIDDEN.has(i.href)) }))
-    .filter((g) => g.items.length > 0);
+function visibleGroups(tradingDesk: boolean): { label: string; items: NavItem[] }[] {
+  return tradingDesk ? [ledgerGroup, deskGroup] : [ledgerGroup];
 }
 
 // Does `pathname` sit at or under `href`? Uses a segment-aware prefix test so
-// "/investments" matches "/investments/analysis" but never "/investments-foo".
+// "/investments" matches "/investments/options" but never "/investments-foo".
 function matchesHref(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
@@ -106,7 +90,7 @@ function matchesHref(pathname: string, href: string) {
 
 // The single most-specific nav item for the current path: the longest matching
 // href across all items. This makes exactly one row active — on
-// "/investments/analysis" only "Analysis" lights up (not its "/investments"
+// "/investments/options" only "Options" lights up (not its "/investments"
 // parent), and the mobile header resolves to the deepest match.
 function bestMatchHref(pathname: string, items: NavItem[]): string | null {
   let best: string | null = null;
@@ -127,21 +111,6 @@ export type SidebarAccount = {
   currency: string | null;
   excluded?: boolean;
 };
-
-// Display order + labels for the grouped accounts section. Labelled the way a
-// person would say it, not the way Plaid types it — "Cash", never "Depository".
-const ACCOUNT_GROUPS: { type: string; label: string }[] = [
-  { type: "depository", label: "Cash" },
-  { type: "investment", label: "Investments" },
-  { type: "credit", label: "Cards" },
-  { type: "loan", label: "Loans" },
-  { type: "other", label: "Other" },
-];
-
-function fmtBalance(amount: number | null, currency: string | null) {
-  // Routes through the shared formatter so privacy mode masks these too.
-  return formatCurrency(amount ?? 0, currency ?? "USD", { maximumFractionDigits: 0 });
-}
 
 /** Every balance in one currency, so a mixed-currency book still totals. */
 function inDisplayCurrency(a: SidebarAccount): number {
@@ -236,24 +205,6 @@ function LedgerHeadline({ ledger, compact = false }: { ledger: Ledger; compact?:
   );
 }
 
-/** One account line: what it's called, what's in it. */
-function AccountRow({ account }: { account: SidebarAccount }) {
-  const liability = isLiability(account.type);
-  return (
-    <li className="flex items-center justify-between gap-2 rounded-lg px-3 py-1 text-[13px]">
-      <span className="min-w-0 truncate text-[var(--muted)]">{account.name}</span>
-      <span
-        className={`mono shrink-0 text-xs ${liability ? "text-[var(--coral)]" : "text-[var(--paper)]"}`}
-      >
-        {/* Debt reads as debt. A card balance shown as a positive number is the
-            one place this sidebar could quietly flatter you. */}
-        {liability && (account.currentBalance ?? 0) > 0 && "−"}
-        {fmtBalance(account.currentBalance, account.currency)}
-      </span>
-    </li>
-  );
-}
-
 /** Count that appears only when it's non-zero — an inbox worth opening. */
 function Badge({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -264,160 +215,116 @@ function Badge({ count }: { count: number }) {
   );
 }
 
-/** The brass rail that marks the current page in both ranks of the nav. */
-function ActiveRail({ active }: { active: boolean }) {
-  return (
-    <span
-      className={`absolute left-0 top-1/2 h-4 -translate-y-1/2 rounded-full bg-[var(--brass)] transition-all ${
-        active ? "w-[3px] opacity-100" : "w-0 opacity-0"
-      }`}
-    />
-  );
-}
+export type SidebarStatus = { tone: "ok" | "warn" | "bad"; label: string };
+
+const STATUS_DOT: Record<SidebarStatus["tone"], string> = {
+  ok: "bg-[var(--jade)]",
+  warn: "bg-[var(--brass)]",
+  bad: "bg-[var(--coral)]",
+};
 
 export function Sidebar({
   accounts,
   reviewCount = 0,
   webDemo = false,
+  tradingDesk = false,
+  status,
 }: {
   accounts: SidebarAccount[];
   reviewCount?: number;
   webDemo?: boolean;
+  tradingDesk?: boolean;
+  /** One line on whether the data behind every figure is current. */
+  status?: SidebarStatus;
 }) {
   const pathname = usePathname();
-  const groupsNav = visibleGroups(webDemo);
   // Resolve the single active href once per render; an item is active iff it is
   // that most-specific match.
   const activeHref = bestMatchHref(pathname, nav);
 
-  // Excluded accounts are hidden from the sidebar entirely — managed on /accounts.
+  // Excluded accounts stay out of the headline — managed on /accounts.
   const visible = accounts.filter((a) => !a.excluded);
   const ledger = summarize(visible);
-  const groups = ACCOUNT_GROUPS.map((g) => ({
-    ...g,
-    accounts: visible.filter((a) =>
-      g.type === "other"
-        ? !["credit", "depository", "investment", "loan"].includes(a.type)
-        : a.type === g.type,
-    ),
-  })).filter((g) => g.accounts.length > 0);
-
   const counts: Record<string, number> = { review: reviewCount };
+
+  const secondary: NavItem[] = [...ledgerGroup.items, ...(webDemo ? [] : [settingsItem])];
+
+  function row({ href, label, icon: Icon, badge }: NavItem, quiet = false) {
+    const active = href === activeHref;
+    return (
+      <Link
+        key={href}
+        href={href}
+        aria-current={active ? "page" : undefined}
+        className={`flex min-h-11 items-center gap-3 rounded-[10px] px-2.5 text-sm transition-colors duration-200 ${
+          quiet ? "" : "font-medium"
+        } ${
+          active
+            ? "bg-[var(--panel-2)] text-[var(--paper)]"
+            : "text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--paper)]"
+        }`}
+      >
+        {Icon ? (
+          <Icon size={18} strokeWidth={1.7} className={active ? "text-[var(--jade)]" : undefined} />
+        ) : (
+          <span className="w-[18px]" aria-hidden />
+        )}
+        <span className="flex-1">{label}</span>
+        {badge && <Badge count={counts[badge] ?? 0} />}
+      </Link>
+    );
+  }
 
   return (
     /*
-      Three zones, each with a job. The habits sit at the top and the money sits
-      at the bottom, both out of the scroll; only the long tail of secondary
-      destinations moves. Before this, one 1,400px column scrolled as a unit and
-      the balances — the reason you open a finance app — lived permanently below
-      the fold.
+      One column, read top to bottom: where you are (brand), how to get anywhere
+      (search), what you have (net worth), the six habits, then the three
+      occasional places, and at the foot whether the data can be trusted. The
+      per-account list that used to be pinned here lives on Accounts — the
+      headline is the figure you open the app for; the parts are one click away.
     */
-    <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-line md:flex">
-      <div className="shrink-0 px-5 pt-6 pb-4">
-        <Link
-          href="/overview"
-          className="flex items-center gap-2.5 px-2 transition-opacity hover:opacity-90"
-        >
-          <BrandMark size={28} />
-          <span className="font-display text-xl tracking-tight">budgetr</span>
-        </Link>
+    <aside className="sticky top-0 hidden h-dvh w-[232px] shrink-0 flex-col gap-[18px] overflow-y-auto border-r border-line px-3.5 py-5 md:flex">
+      <Link
+        href="/overview"
+        className="flex min-h-11 items-center gap-2.5 px-2.5 transition-opacity hover:opacity-90"
+      >
+        <BrandMark size={26} />
+        <span className="font-display text-[21px] tracking-tight">budgetr</span>
+      </Link>
 
-        <nav className="mt-6 flex flex-col gap-0.5">
-          {primaryNav.map(({ href, label, icon: Icon }) => {
-            const active = href === activeHref;
-            return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={`relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-200 ${
-                  active
-                    ? "bg-[var(--panel-2)] text-[var(--paper)] shadow-[var(--elev-1)]"
-                    : "text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--paper)]"
-                }`}
-              >
-                <ActiveRail active={active} />
-                {Icon && <Icon size={17} strokeWidth={active ? 2.2 : 1.8} />}
-                {label}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
+      <PaletteTrigger />
 
-      {/* The tail: everything you reach for occasionally, one rank quieter and
-          one indent in. Nothing is hidden — only weighted. */}
-      <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-1">
-        {groupsNav.map((group) => (
-          <div key={group.label}>
-            <p className="eyebrow mb-1 px-3">{group.label}</p>
-            <div className="flex flex-col">
-              {group.items.map(({ href, label, badge }) => {
-                const active = href === activeHref;
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    aria-current={active ? "page" : undefined}
-                    className={`relative flex items-center gap-2 rounded-lg py-[5px] pl-6 pr-3 text-[13px] transition-colors ${
-                      active
-                        ? "text-[var(--brass)]"
-                        : "text-[var(--muted)] hover:text-[var(--paper)]"
-                    }`}
-                  >
-                    <ActiveRail active={active} />
-                    {label}
-                    {badge && <Badge count={counts[badge] ?? 0} />}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </nav>
-
-      {/* The ledger itself, pinned. Capped so a book with fifteen accounts
-          scrolls inside this panel instead of pushing the nav off-screen. */}
       {visible.length > 0 && (
-        <div className="shrink-0 border-t border-line px-5 pt-4 pb-2">
+        <Link href="/accounts" className="block rounded-[10px] py-1 transition-opacity hover:opacity-90">
           <LedgerHeadline ledger={ledger} />
-          <div className="mt-3 max-h-[30dvh] space-y-3 overflow-y-auto">
-            {groups.map((g) => (
-              <div key={g.type}>
-                <p className="eyebrow mb-1 px-3">{g.label}</p>
-                <ul>
-                  {g.accounts.map((a) => (
-                    <AccountRow key={a.id} account={a} />
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
+        </Link>
       )}
 
-      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line px-5 py-3">
-        {!webDemo && (
-          <Link
-            href="/settings"
-            aria-current={settingsItem.href === activeHref ? "page" : undefined}
-            className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] transition-colors ${
-              settingsItem.href === activeHref
-                ? "text-[var(--brass)]"
-                : "text-[var(--muted)] hover:text-[var(--paper)]"
-            }`}
-          >
-            <Settings size={15} />
-            Settings
-          </Link>
-        )}
-        <p
-          className="ml-auto text-right text-[11px] leading-tight text-[var(--faint)]"
-          title="budgetr keeps every figure in a local database. Nothing is uploaded."
-        >
-          {webDemo ? "Read-only demo" : "Stays on this machine"}
-        </p>
-      </div>
+      <nav aria-label="Primary" className="flex flex-col gap-0.5">
+        {primaryNav.map((item) => row(item))}
+      </nav>
+
+      <nav aria-label="Ledger and settings" className="flex flex-col gap-0.5 border-t border-line pt-3">
+        {secondary.map((item) => row(item, true))}
+      </nav>
+
+      {tradingDesk && (
+        <nav aria-label="Trading desk" className="flex flex-col gap-0.5 border-t border-line pt-3">
+          <p className="eyebrow mb-1 px-2.5">{deskGroup.label}</p>
+          {deskGroup.items.map((item) => row(item, true))}
+        </nav>
+      )}
+
+      <p
+        className="mt-auto flex items-start gap-2 border-t border-line px-2.5 pt-3 text-xs leading-snug text-[var(--muted)]"
+        title="budgetr keeps every figure in a local database. Nothing is uploaded."
+      >
+        <span
+          aria-hidden
+          className={`mt-[5px] h-[7px] w-[7px] shrink-0 rounded-full ${STATUS_DOT[status?.tone ?? "ok"]}`}
+        />
+        <span>{status?.label ?? (webDemo ? "Read-only demo" : "Stays on this machine")}</span>
+      </p>
     </aside>
   );
 }
@@ -426,10 +333,12 @@ export function MobileNav({
   accounts = [],
   reviewCount = 0,
   webDemo = false,
+  tradingDesk = false,
 }: {
   accounts?: SidebarAccount[];
   reviewCount?: number;
   webDemo?: boolean;
+  tradingDesk?: boolean;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -437,7 +346,7 @@ export function MobileNav({
   // so the analysis page reads "Analysis" rather than its "/investments" parent.
   const activeHref = bestMatchHref(pathname, nav);
   const current = nav.find(({ href }) => href === activeHref);
-  const groupsNav = visibleGroups(webDemo);
+  const groupsNav = visibleGroups(tradingDesk);
   const visible = accounts.filter((a) => !a.excluded);
   const counts: Record<string, number> = { review: reviewCount };
 
@@ -502,7 +411,7 @@ export function MobileNav({
           )}
 
           <div className="mb-5 flex flex-col gap-0.5">
-            {primaryNav.map(({ href, label, icon: Icon }) => {
+            {primaryNav.map(({ href, label, icon: Icon, badge }) => {
               const active = href === activeHref;
               return (
                 <Link
@@ -518,6 +427,7 @@ export function MobileNav({
                 >
                   {Icon && <Icon size={19} strokeWidth={active ? 2.2 : 1.8} />}
                   {label}
+                  {badge && <Badge count={counts[badge] ?? 0} />}
                 </Link>
               );
             })}

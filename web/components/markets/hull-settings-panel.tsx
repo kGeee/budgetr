@@ -42,7 +42,7 @@ export function HullSettingsPanel({
     onChange({ ...prefs, hull: { ...prefs.hull, ...patch } });
 
   return (
-    <div className="grid gap-5 rounded-[var(--radius)] border border-line bg-[var(--panel)] p-5 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-5 border-y border-line py-5 sm:grid-cols-2 lg:grid-cols-4">
       <Field label="Hull variation" hint="Pine: modeSwitch">
         <div className="flex rounded-full border border-line bg-[var(--ink)] p-0.5">
           {HULL_MODES.map((m) => (
@@ -160,9 +160,9 @@ function Field({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="eyebrow">{label}</span>
+      <span className="text-[13px] text-[var(--muted)]">{label}</span>
       {children}
-      {hint && <span className="text-[10px] text-[var(--faint)]">{hint}</span>}
+      {hint && <span className="text-[10px] text-[var(--muted)]">{hint}</span>}
     </label>
   );
 }

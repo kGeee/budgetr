@@ -54,13 +54,13 @@ export function CurrencySwitcher({ current }: { current: string }) {
   return (
     <div className="relative">
       <Button
-        variant="ghost"
-        size="sm"
+        variant="secondary"
+        className="mono h-11 px-4"
         onClick={() => setOpen((v) => !v)}
         disabled={pending}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label="Display currency"
+        aria-label={`Display currency, ${current}`}
         title="Display currency — convert all figures to this unit"
       >
         <Coins size={15} className="hidden sm:block" />

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { disconnectItem, type DisconnectResult } from "@/lib/actions";
 
 /**
@@ -70,10 +71,9 @@ export function DisconnectInstitution({
         type="button"
         onClick={() => setOpen(true)}
         aria-label={`Disconnect ${institution}`}
-        title={`Disconnect ${institution}`}
-        className="rounded-lg p-1.5 text-[var(--faint)] transition-colors hover:bg-[color-mix(in_srgb,var(--coral)_12%,transparent)] hover:text-[var(--coral)]"
+        className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-line px-3.5 text-[13px] text-[var(--coral)] transition-colors hover:border-[color-mix(in_srgb,var(--coral)_45%,transparent)] hover:bg-[color-mix(in_srgb,var(--coral)_10%,transparent)]"
       >
-        <Trash2 size={15} />
+        Disconnect
       </button>
 
       {/* The upstream revoke failed: the local data is gone but Plaid still holds
@@ -103,17 +103,10 @@ export function DisconnectInstitution({
       )}
 
       {open && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Disconnect ${institution}`}
-          className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
-          onClick={(e) => e.target === e.currentTarget && close()}
-        >
-          <div className="w-full max-w-md rounded-2xl border border-line bg-[var(--panel)] p-6 shadow-[var(--elev-2)]">
-            <h2 className="font-display text-2xl tracking-tight">Disconnect {institution}?</h2>
-
-            <p className="mt-3 text-sm text-[var(--muted)]">
+        <Dialog onClose={close} label={`Disconnect ${institution}`} size="md">
+          <DialogHeader title={`Disconnect ${institution}?`} onClose={close} />
+          <DialogBody>
+            <p className="text-sm text-[var(--muted)]">
               This revokes the Plaid link and permanently deletes{" "}
               <b className="text-[var(--paper)]">
                 {accountCount} account{accountCount === 1 ? "" : "s"}
@@ -139,27 +132,26 @@ export function DisconnectInstitution({
             />
 
             {error && <p className="mt-3 text-sm text-[var(--coral)]">{error}</p>}
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={close}
-                className="rounded-full border border-line px-4 py-1.5 text-sm text-[var(--muted)] transition hover:text-[var(--paper)]"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={run}
-                disabled={!confirmed || pending}
-                className="inline-flex items-center gap-2 rounded-full bg-[var(--coral)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {pending && <Loader2 size={14} className="animate-spin" />}
-                {pending ? "Disconnecting…" : "Disconnect"}
-              </button>
-            </div>
-          </div>
-        </div>
+          </DialogBody>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={close}
+              className="rounded-full border border-line px-4 py-1.5 text-sm text-[var(--muted)] transition hover:text-[var(--paper)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={run}
+              disabled={!confirmed || pending}
+              className="inline-flex items-center gap-2 rounded-full bg-[var(--coral)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {pending && <Loader2 size={14} className="animate-spin" />}
+              {pending ? "Disconnecting…" : "Disconnect"}
+            </button>
+          </DialogFooter>
+        </Dialog>
       )}
     </>
   );

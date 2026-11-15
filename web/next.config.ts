@@ -30,6 +30,39 @@ const nextConfig: NextConfig = {
   // `localhost` origin and 403s cross-origin requests by default. Without this
   // the Electron window renders but never hydrates — the UI loads frozen.
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // 0.15 folded twenty-one destinations into nine. Every retired URL lands on
+  // the page that absorbed it, so bookmarks, the desktop app's deep links and
+  // the marketing video rig keep working. Query strings pass through (?period,
+  // ?ticker, ?v). Order matters: the specific options paths must precede the
+  // legacy `:ticker` catch-alls, which would otherwise swallow them.
+  async redirects() {
+    const to = (source: string, destination: string) => ({ source, destination, permanent: true });
+    return [
+      to("/dashboards", "/overview"),
+      to("/dashboards/:id", "/overview"),
+      to("/insights", "/overview"),
+      to("/review", "/spending?view=trends"),
+      to("/report", "/spending?report=1"),
+      to("/categories", "/spending"),
+      to("/categories/:id", "/spending?category=:id"),
+      to("/vendors", "/spending?view=vendor"),
+      to("/cashflow", "/plan"),
+      to("/recurring", "/plan?tab=bills"),
+      to("/fire", "/plan?tab=long-run"),
+      to("/goals", "/budgets#goals"),
+      to("/rules", "/settings#rules"),
+      to("/investments/analysis", "/investments?tab=allocation"),
+      to("/realized-gains", "/investments?tab=income"),
+      to("/investments/options/vol", "/investments/options/chain?mode=vol"),
+      to("/investments/options/leaps", "/investments/options/chain?mode=leaps"),
+      to("/investments/options/scanner", "/investments/options/wheel?tab=scan"),
+      to("/investments/options/:ticker/fixed-strike", "/investments/options/chain?ticker=:ticker&mode=vol"),
+      to(
+        "/investments/options/:ticker((?!chain$|wheel$)[^/]+)",
+        "/investments/options/chain?ticker=:ticker",
+      ),
+    ];
+  },
   async headers() {
     return [
       {
