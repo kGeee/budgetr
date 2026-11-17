@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { SectionHead } from "@/components/ui/statement";
 import {
   AlertTriangle,
   CopyMinus,
@@ -11,12 +12,13 @@ import {
   X,
   Clock,
   PlugZap,
-  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import { dismissAlert, snoozeAlert } from "@/lib/actions-alerts";
+import { ReviewInbox } from "@/components/transactions/review-inbox";
 import { formatCurrency } from "@/lib/utils";
 import type { Alert, AlertKind } from "@/lib/anomalies";
+import type { CategoryRow, TransactionRow } from "@/lib/queries";
 
 const ICONS: Record<AlertKind, LucideIcon> = {
   spike: AlertTriangle,
@@ -27,14 +29,14 @@ const ICONS: Record<AlertKind, LucideIcon> = {
 };
 
 // Per-kind accent — coral for money-at-risk (spike/duplicate) and for data the
-// app can't stand behind (health), brass for heads-up (creep/trial). Drives
-// icon chip + left rail colour.
+// app can't stand behind (health), brass for heads-up (creep/trial). Colours
+// the row's icon and its amount.
 const ACCENT: Record<AlertKind, string> = {
-  spike: "var(--coral)",
-  duplicate: "var(--coral)",
-  creep: "var(--brass)",
-  trial: "var(--brass)",
-  health: "var(--coral)",
+  spike: "text-[var(--coral)]",
+  duplicate: "text-[var(--coral)]",
+  creep: "text-[var(--brass)]",
+  trial: "text-[var(--brass)]",
+  health: "text-[var(--coral)]",
 };
 
 const KIND_LABEL: Record<AlertKind, string> = {
@@ -45,80 +47,123 @@ const KIND_LABEL: Record<AlertKind, string> = {
   health: "Data health",
 };
 
+const HEAD_LINK = "text-[13px] text-[var(--muted)] transition-colors hover:text-[var(--paper)]";
+const PILL =
+  "inline-flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm transition active:scale-[0.98] disabled:opacity-50";
+const PILL_PRIMARY = `${PILL} bg-[var(--jade)] font-semibold text-[var(--on-jade)] hover:brightness-105`;
+const PILL_STRONG = `${PILL} border border-[var(--line-strong)] text-[var(--paper)] hover:bg-[var(--panel-2)]`;
+const PILL_QUIET = `${PILL} border border-line text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--paper)]`;
+
 function snoozeDate(days: number): string {
   return new Date(Date.now() + days * 86400_000).toISOString().slice(0, 10);
 }
 
+/**
+ * Home's "Needs you": data-health and spending alerts, then the first few
+ * transactions waiting for review, each a ruled row with its actions beside it.
+ * With `limit` it shows the first few alerts and expands in place — there's no
+ * separate insights page to send you to any more.
+ */
 export function AlertsPanel({
   alerts,
   compact = false,
   limit,
+  reviewCount = 0,
+  review = [],
+  categories = [],
 }: {
   alerts: Alert[];
   compact?: boolean;
   limit?: number;
+  /** Unreviewed settled transactions — the whole backlog, not just `review`. */
+  reviewCount?: number;
+  /** The first few of that backlog, listed here with their one-click actions. */
+  review?: TransactionRow[];
+  /** Backs the detail panel a review row opens. */
+  categories?: CategoryRow[];
 }) {
-  const shown = typeof limit === "number" ? alerts.slice(0, limit) : alerts;
+  const [expanded, setExpanded] = useState(false);
+  const capped = typeof limit === "number" && !expanded;
+  const shown = capped ? alerts.slice(0, limit) : alerts;
   const hidden = alerts.length - shown.length;
+  const things = alerts.length + reviewCount;
+  const moreReview = reviewCount - review.length;
 
-  if (alerts.length === 0) {
+  if (things === 0) {
     return (
-      <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6">
-        <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[color-mix(in_srgb,var(--jade)_35%,transparent)] text-[var(--jade)]">
-            <ShieldCheck size={16} />
+      <section aria-label="Needs you">
+        <SectionHead title="Needs you" />
+        {/* A clear board is a claim about what was checked, not an absence of
+            output — so it names the checks. Saying only "nothing unusual" is
+            what let a seven-week-dead connection sit behind a reassuring green
+            tick. */}
+        <p className="border-b border-line py-3.5 text-sm">
+          <span className="font-medium text-[var(--jade)]">Nothing needs you.</span>{" "}
+          <span className="text-[var(--muted)]">
+            Every connection is reporting, your ledger is current, every transaction is reviewed,
+            and no spending spikes, duplicate charges or subscription surprises turned up.
           </span>
-          <div>
-            {/* A clear board is a claim about what was checked, not an absence
-                of output — so it names the checks. Saying only "nothing
-                unusual" is what let a seven-week-dead connection sit behind a
-                reassuring green tick. */}
-            <p className="text-sm font-medium text-[var(--paper)]">Nothing needs you</p>
-            <p className="text-xs text-[var(--muted)]">
-              Every connection is reporting, your ledger is current, and no spending spikes,
-              duplicate charges or subscription surprises turned up.
-            </p>
-          </div>
-        </div>
-      </div>
+        </p>
+      </section>
     );
   }
 
   return (
-    <div className="rounded-[var(--radius)] border border-line bg-[var(--panel)] p-6 shadow-[var(--elev-2)]">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="eyebrow">Alerts</p>
-          <p className="mt-0.5 text-sm text-[var(--muted)]">
-            {alerts.length} {alerts.length === 1 ? "thing" : "things"} worth a look
-          </p>
-        </div>
-        {compact && (
-          <Link href="/insights" className="text-xs text-[var(--brass)] hover:underline">
-            All insights →
-          </Link>
-        )}
-      </div>
+    <section aria-label="Needs you">
+      <SectionHead
+        title="Needs you"
+        count={things.toLocaleString()}
+        action={
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {typeof limit === "number" && alerts.length > limit && (
+              <button onClick={() => setExpanded((e) => !e)} className={HEAD_LINK}>
+                {expanded ? "Show fewer alerts" : `All ${alerts.length} alerts`}
+              </button>
+            )}
+            {reviewCount > 0 && (
+              <Link href="/transactions?view=review" className={HEAD_LINK}>
+                Open review
+              </Link>
+            )}
+          </span>
+        }
+      />
 
-      <div className="space-y-3">
-        {shown.map((a) => (
-          <AlertCard key={a.key} alert={a} compact={compact} />
-        ))}
-      </div>
+      {shown.map((a) => (
+        <AlertRow key={a.key} alert={a} compact={compact} />
+      ))}
 
       {hidden > 0 && (
-        <Link
-          href="/insights"
-          className="mt-4 block text-center text-xs text-[var(--muted)] hover:text-[var(--paper)]"
+        <button
+          onClick={() => setExpanded(true)}
+          className="block w-full border-b border-line py-3 text-left text-[13px] text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
         >
-          +{hidden} more on Insights →
+          {hidden} more {hidden === 1 ? "alert" : "alerts"}
+        </button>
+      )}
+
+      {review.length > 0 && (
+        <ReviewInbox bare transactions={review} categories={categories} total={reviewCount} />
+      )}
+
+      {moreReview > 0 && (
+        <Link
+          href="/transactions?view=review"
+          className="flex items-center justify-between gap-3 border-b border-line py-3 text-[13px] text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+        >
+          <span>
+            {review.length > 0
+              ? `${moreReview.toLocaleString()} more to review`
+              : `${moreReview.toLocaleString()} ${moreReview === 1 ? "transaction" : "transactions"} to review`}
+          </span>
+          <span aria-hidden>→</span>
         </Link>
       )}
-    </div>
+    </section>
   );
 }
 
-function AlertCard({ alert, compact }: { alert: Alert; compact: boolean }) {
+function AlertRow({ alert, compact }: { alert: Alert; compact: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [showSnooze, setShowSnooze] = useState(false);
@@ -141,104 +186,71 @@ function AlertCard({ alert, compact }: { alert: Alert; compact: boolean }) {
 
   return (
     <div
-      className="relative overflow-hidden rounded-lg border border-line bg-[var(--panel-2)] p-4 pl-5"
-      style={{ opacity: pending ? 0.5 : 1 }}
+      className={`flex flex-wrap items-center gap-3 border-b border-line py-3 ${pending ? "opacity-50" : ""}`}
     >
-      <span className="absolute left-0 top-0 h-full w-[3px]" style={{ background: accent }} />
-      <div className="flex items-start gap-3">
-        <span
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border"
-          style={{
-            color: accent,
-            borderColor: `color-mix(in srgb, ${accent} 35%, transparent)`,
-            background: `color-mix(in srgb, ${accent} 8%, transparent)`,
-          }}
-        >
-          <Icon size={16} />
-        </span>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p
-              className="eyebrow"
-              style={{ color: `color-mix(in srgb, ${accent} 80%, var(--paper))` }}
-            >
-              {KIND_LABEL[alert.kind]}
-            </p>
-            {alert.date && (
-              <span className="mono text-[10px] text-[var(--muted)]">{alert.date}</span>
-            )}
-          </div>
-          <p className="mt-1 text-sm font-medium text-[var(--paper)]">{alert.title}</p>
-          <p className="mt-0.5 text-xs leading-relaxed text-[var(--muted)]">{alert.detail}</p>
-
+      <div className="min-w-0 flex-[1_1_280px]">
+        <p className="text-sm font-medium text-[var(--paper)]">
+          <Icon size={14} className={`mr-2 inline-block align-[-2px] ${accent}`} aria-hidden />
+          {alert.title}
           {typeof alert.amount === "number" && !compact && (
-            <p className="mono mt-2 text-sm" style={{ color: accent }}>
+            <span className={`mono ml-2 font-normal ${accent}`}>
               {formatCurrency(alert.amount)}
-            </p>
+            </span>
           )}
+        </p>
+        <p className="text-[13px] leading-relaxed text-[var(--muted)]">
+          {KIND_LABEL[alert.kind]}
+          {alert.date && <span className="mono text-xs"> · {alert.date}</span>}
+          {" · "}
+          {alert.detail}
+        </p>
+      </div>
 
-          {/* Health alerts carry an action instead of a dismissal. Letting
-              someone permanently hide "Chase is disconnected" would reintroduce
-              exactly the silence these alerts exist to break — and dismissal is
-              keyed through detectAnomalies, which never sees them anyway, so the
-              button would appear to work and then undo itself on refresh. */}
-          {alert.kind === "health" ? (
-            alert.action && (
-              <div className="mt-3">
-                <Link
-                  href={alert.action.href}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-line bg-[var(--panel)] px-3 py-1 text-xs font-medium text-[var(--paper)] transition hover:border-[var(--line-strong)]"
-                >
-                  {alert.action.label} →
-                </Link>
-              </div>
-            )
+      {/* Health alerts carry an action instead of a dismissal. Letting someone
+          permanently hide "Chase is disconnected" would reintroduce exactly the
+          silence these alerts exist to break — and dismissal is keyed through
+          detectAnomalies, which never sees them anyway, so the button would
+          appear to work and then undo itself on refresh. */}
+      {alert.kind === "health" ? (
+        alert.action && (
+          <Link href={alert.action.href} className={PILL_PRIMARY}>
+            {alert.action.label}
+          </Link>
+        )
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          {showSnooze ? (
+            <>
+              <span className="text-[13px] text-[var(--muted)]">Snooze for</span>
+              {[7, 30, 90].map((d) => (
+                <button key={d} disabled={pending} onClick={() => snooze(d)} className={PILL_STRONG}>
+                  {d}d
+                </button>
+              ))}
+              <button
+                disabled={pending}
+                onClick={() => setShowSnooze(false)}
+                className={PILL_QUIET}
+              >
+                Cancel
+              </button>
+            </>
           ) : (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {showSnooze ? (
-              <>
-                <span className="text-xs text-[var(--muted)]">Snooze for</span>
-                {[7, 30, 90].map((d) => (
-                  <button
-                    key={d}
-                    disabled={pending}
-                    onClick={() => snooze(d)}
-                    className="rounded-full border border-line bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--paper)] transition hover:border-[var(--line-strong)] active:scale-[0.98]"
-                  >
-                    {d}d
-                  </button>
-                ))}
-                <button
-                  disabled={pending}
-                  onClick={() => setShowSnooze(false)}
-                  className="text-xs text-[var(--muted)] hover:text-[var(--paper)]"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  disabled={pending}
-                  onClick={dismiss}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-line bg-[var(--panel)] px-3 py-1 text-xs font-medium text-[var(--paper)] transition hover:border-[var(--line-strong)] active:scale-[0.98]"
-                >
-                  <X size={12} /> Dismiss
-                </button>
-                <button
-                  disabled={pending}
-                  onClick={() => setShowSnooze(true)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-line bg-[var(--panel)] px-3 py-1 text-xs font-medium text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--paper)] active:scale-[0.98]"
-                >
-                  <Clock size={12} /> Snooze
-                </button>
-              </>
-            )}
-          </div>
+            <>
+              <button disabled={pending} onClick={dismiss} className={PILL_STRONG}>
+                <X size={14} /> Dismiss
+              </button>
+              <button
+                disabled={pending}
+                onClick={() => setShowSnooze(true)}
+                className={PILL_QUIET}
+              >
+                <Clock size={14} /> Snooze
+              </button>
+            </>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

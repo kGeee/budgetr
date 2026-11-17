@@ -29,8 +29,9 @@ import {
 import { applySplits, type StockSplit } from "@/lib/import/splits";
 import { settledOnly } from "@/lib/pending";
 import type { SavingsContribution, Dashboard, DashboardWidget } from "@/db/schema";
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
+import { OVERVIEW_DEFAULT_WIDGETS, monthPace, type MonthPace } from "@/lib/home-layout";
 import {
   computeRealizedLots,
   summarize,
@@ -453,6 +454,8 @@ export function getBudgetsWithSpend(): BudgetRow[] {
 /** A BudgetRow plus its envelope/rollover state for the budget month. */
 export type EnvelopeBudgetRow = BudgetRow & {
   rollover: boolean;
+  /** A fixed cost — judged as paid/unpaid and left out of the spending pace. */
+  fixed: boolean;
   carryIn: number; // balance carried into this month (+ unused, − overspent)
   available: number; // budget + carryIn − spent — what's actually spendable
   carryOut: number; // projected balance rolling into next month (= available)
@@ -479,6 +482,7 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
       icon: string | null;
       budget: number | null;
       rollover: number;
+      fixed: number;
       carryIn: number;
       spent: number;
     }>(
@@ -486,6 +490,7 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
           SELECT cat.id AS categoryId, cat.name AS name, cat.icon AS icon,
              b.amount AS budget,
              COALESCE(b.rollover, 0) AS rollover,
+             COALESCE(b.fixed, 0) AS fixed,
              COALESCE((
                SELECT r.carry_in FROM budget_rollovers r
                WHERE r.category_id = cat.id AND r.month = ${month}
@@ -517,6 +522,7 @@ export function getEnvelopeBudgets(): EnvelopeBudgetRow[] {
         spent,
         remaining: budget == null ? null : budget - spent,
         rollover,
+        fixed: budget != null && Boolean(r.fixed),
         carryIn,
         available,
         carryOut: available,
@@ -2485,29 +2491,6 @@ export type SpendShift = {
   delta: number;
 };
 
-export type DashboardListItem = Dashboard & { widgetCount: number };
-
-/** All dashboards, ordered for the sidebar/index, each with its widget count. */
-export function getDashboards(): DashboardListItem[] {
-  const rows = db
-    .select({
-      id: dashboards.id,
-      name: dashboards.name,
-      sortOrder: dashboards.sortOrder,
-      createdAt: dashboards.createdAt,
-      widgetCount: sql<number>`(
-        SELECT COUNT(*) FROM ${dashboardWidgets}
-        WHERE ${dashboardWidgets.dashboardId} = ${dashboards.id}
-      )`,
-    })
-    .from(dashboards)
-    // The reserved Overview board is edited from /overview, not listed here.
-    .where(ne(dashboards.id, OVERVIEW_DASHBOARD_ID))
-    .orderBy(asc(dashboards.sortOrder), asc(dashboards.createdAt))
-    .all();
-  return rows.map((r) => ({ ...r, widgetCount: Number(r.widgetCount) }));
-}
-
 /** A single dashboard plus its widgets in display order, or null if it doesn't exist. */
 export function getDashboardWithWidgets(
   id: string,
@@ -2529,20 +2512,6 @@ export function getDashboardWithWidgets(
  * This fixed id lets us treat it as a singleton without a schema/`kind` column.
  */
 export const OVERVIEW_DASHBOARD_ID = "dash_overview";
-
-/** The stock Overview layout, seeded once — mirrors the old hard-coded overview
- *  (net-worth hero, cashflow, spend + budget) and folds the Review retrospective
- *  and inbox in as widgets. `wide` widgets come from WIDGET_META client-side. */
-const OVERVIEW_DEFAULT_WIDGETS: { type: WidgetType; config?: WidgetConfig }[] = [
-  { type: "net-worth-summary" },
-  { type: "spending-review" },
-  { type: "review-queue" },
-  { type: "cashflow", config: { months: 6 } },
-  { type: "spend-by-category", config: { days: 30 } },
-  { type: "budget-summary" },
-  { type: "recent-activity", config: { limit: 6 } },
-  { type: "upcoming-bills", config: { days: 14 } },
-];
 
 /**
  * Ensure the reserved Overview dashboard exists (seeding its default widgets on
@@ -2567,7 +2536,6 @@ export function ensureOverviewDashboard(): {
         .values({
           id: OVERVIEW_DASHBOARD_ID,
           name: "Overview",
-          // Sorts first on the /dashboards index; the reserved board leads.
           sortOrder: -1,
           createdAt: new Date(),
         })
@@ -2602,7 +2570,7 @@ export type WidgetData =
   | { type: "spend-by-category"; series: CategorySpend[] }
   | { type: "top-vendors"; merchants: TopMerchant[] }
   | { type: "daily-spend"; series: { date: string; spent: number }[]; start: string; end: string }
-  | { type: "budget-summary"; summary: BudgetSummary }
+  | { type: "budget-summary"; summary: BudgetSummary; rows: BudgetRow[]; pace: MonthPace }
   | {
       type: "net-worth-summary";
       nw: NetWorth;
@@ -2660,8 +2628,17 @@ export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetDa
         end: endStr,
       };
     }
-    case "budget-summary":
-      return { type: "budget-summary", summary: getMonthlyBudgetSummary() };
+    case "budget-summary": {
+      // The totals, each budgeted category so the widget can list them, and
+      // where today falls in the budget month, for the tick on each bar.
+      const summary = getMonthlyBudgetSummary();
+      return {
+        type: "budget-summary",
+        summary,
+        rows: getBudgetsWithSpend().filter((r) => r.budget != null),
+        pace: monthPace(summary.month, new Date()),
+      };
+    }
     case "net-worth-summary":
       return getNetWorthSummaryWidget();
     case "review-queue": {

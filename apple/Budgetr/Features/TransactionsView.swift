@@ -74,8 +74,8 @@ struct TransactionsView: View {
             .searchable(text: $searchText, prompt: "Search merchant or category")
             .scrollContentBackground(.hidden)
             .background(AuroraBackground())
-            .navigationTitle("Ledger")
-            .compactHeader(title: "Ledger", visible: tracking.collapsed)
+            .navigationTitle("Transactions")
+            .compactHeader(title: "Transactions", visible: tracking.collapsed)
             .onPreferenceChange(TitleOffsetKey.self) { tracking.update($0) }
             .sheet(item: $editing) { txn in
                 CategorizeSheet(txn: txn, categories: Array(categories), index: index)
@@ -90,7 +90,7 @@ struct TransactionsView: View {
         return List {
             Section {
                 VStack(alignment: .leading, spacing: 14) {
-                    PageHead(title: "Ledger", eyebrow: subtitle) { EmptyView() }
+                    PageHead(title: "Transactions", eyebrow: subtitle) { EmptyView() }
                         .background(TitleOffsetReader())
                     Segmented(
                         options: [("All", Filter.all), ("To review", Filter.review), ("Income", Filter.income)],
@@ -177,7 +177,7 @@ struct TransactionsView: View {
     }
 
     /// States the size of the list and the size of the backlog, because
-    /// "Ledger" alone doesn't say whether there's work to do.
+    /// "Transactions" alone doesn't say whether there's work to do.
     private var subtitle: String {
         let shown = filtered.count
         let backlog = unreviewed

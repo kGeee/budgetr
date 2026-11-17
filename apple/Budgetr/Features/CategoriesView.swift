@@ -42,7 +42,7 @@ struct CategoriesView: View {
 
         var spent: [String: Double] = [:]
         var counts: [String: Int] = [:]
-        for txn in transactions where (txn.date ?? "").hasPrefix(month) && txn.amount > 0 {
+        for txn in transactions where (txn.date ?? "").hasPrefix(month) && txn.amount > 0 && idx.countsTowardSpend(txn) {
             let key = idx.resolvedId(for: txn) ?? "__none__"
             spent[key, default: 0] += txn.amount
             counts[key, default: 0] += 1

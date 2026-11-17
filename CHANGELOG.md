@@ -7,6 +7,64 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-15
+
+Twenty-one pages become nine, and every one of them now opens the same way: one
+figure, one sentence that says what it means, then ruled tables on the canvas
+instead of a stack of cards.
+
+**Upgrade note:** this release adds a database migration (`0023`, a `fixed`
+flag on budgets). The desktop app applies it on launch. A self-hosted install
+must run `npm run db:migrate` before `/budgets` will load.
+
+### Changed
+
+- **Nine destinations.** Home, Transactions, Spending, Budgets, Plan and
+  Investments, with Accounts, Shared and Settings one rank quieter. Categories,
+  Vendors, Insights and Report are views of Spending; Cashflow, Recurring and
+  FIRE are tabs of Plan; Goals sit on Budgets; Review is a tab of Transactions;
+  Analysis, realized gains and dividends are tabs of Investments. Old addresses
+  redirect.
+- **The page's name and its tabs live in the top bar.** The date, the 40px
+  title and the rule under it are gone, so a page starts with its figure.
+- **A slimmer sidebar.** Search, net worth, the six habits, then the three
+  occasional places, and a line at the foot saying whether the data is current.
+  The per-account list moved to Accounts; the net worth headline links there.
+- **Every page reads as a statement.** A hero figure with its cents set
+  quieter, a sentence built only from numbers already on the page, and the
+  supporting figures on one rule. Tables sit on the canvas under ruled headings.
+- **Home** opens on net worth with its trend beside it, then left to spend,
+  portfolio and the next bill on one strip, then what needs you and recent
+  activity beside budgets and upcoming bills. A board you have customised keeps
+  its order; edit mode can reset to the stock layout.
+- **Transactions** is a ruled ledger with its filters on the canvas. The detail
+  opens as a panel beside the ledger on a wide screen. Possible matches moved to
+  the Review tab.
+- **Budgets** is one table: a bar with a tick at today, spent, budget, left and
+  a status word. A budget figure is edited by clicking it.
+- **Accounts** groups by what the money is — cash, investments, cards, loans —
+  with a subtotal on each rule and a separate list of connections.
+- **Shared** leads with what you are owed, then repayments to confirm, people
+  and one activity ledger.
+- **Settings** is one ruled page with a section index.
+- **Trading tools are off by default.** Markets, Options and Fundamentals
+  appear only with Settings → Trading desk switched on.
+
+### Added
+
+- **⌘K.** Every page, tab and desk tool, plus Sync, privacy mode and a
+  transaction search, from one field. Also reachable from the sidebar.
+- **Fixed budgets.** Mark a budget such as rent as a fixed cost and pace is
+  judged on flexible spending only, so a bill that lands on the 1st no longer
+  reads as "ahead of pace" for the rest of the month. With nothing marked, the
+  page behaves as before.
+- **One dialog.** Every modal now closes on Escape, keeps focus inside and
+  returns it afterwards.
+
+### Removed
+
+- Custom dashboards other than Home.
+
 ## [0.12.0] — 2026-08-17
 
 The companion phone stops being read-only. It gains a Shared tab, the ability to

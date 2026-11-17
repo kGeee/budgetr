@@ -7,6 +7,7 @@ import { appSettings } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import { CURRENCY_COOKIE, currencyFromCookie } from "@/lib/currency";
 import { setIncludePending } from "@/lib/pending";
+import { setTradingDeskEnabled } from "@/lib/trading-desk";
 import { upsertRates } from "@/lib/rates";
 
 /**
@@ -53,5 +54,11 @@ export async function setDisplayCurrency(code: string): Promise<void> {
  */
 export async function setCountPending(on: boolean): Promise<void> {
   setIncludePending(on);
+  revalidatePath("/", "layout");
+}
+
+/** Show or hide the trading tools (Markets, Options, Fundamentals). */
+export async function setTradingDesk(on: boolean): Promise<void> {
+  setTradingDeskEnabled(on);
   revalidatePath("/", "layout");
 }

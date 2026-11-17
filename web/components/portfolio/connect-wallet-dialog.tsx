@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Filter, RefreshCw, RotateCcw, Trash2, Wallet } from "lucide-react";
+import { Filter, RefreshCw, RotateCcw, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Dialog } from "@/components/ui/dialog";
 import {
   connectWallet,
   resyncWallet,
@@ -20,23 +20,8 @@ const CHAINS = [
   { id: "solana", label: "Solana", placeholder: "base58 address" },
 ] as const;
 
-function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="w-full max-w-sm overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] text-[var(--paper)] shadow-[var(--elev-3)]"
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
+// The shared dialog: Escape, focus containment and focus return come with it.
+const Modal = Dialog;
 
 function fmtUsd(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -88,8 +73,8 @@ export function ConnectWalletButton() {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <Wallet size={14} /> Connect wallet
+      <Button variant="secondary" onClick={() => setOpen(true)}>
+        <Wallet size={15} /> Connect wallet
       </Button>
 
       {open && (
@@ -142,7 +127,7 @@ export function ConnectWalletButton() {
             </label>
 
             {chain === "ethereum" && !result && (
-              <p className="text-[10px] text-[var(--faint)]">
+              <p className="text-xs text-[var(--muted)]">
                 Native ETH imports without setup; ERC-20 tokens need an ALCHEMY_API_KEY.
               </p>
             )}
@@ -164,39 +149,50 @@ export function ConnectWalletButton() {
   );
 }
 
-/** Card listing connected wallets with re-sync, junk-filter + remove controls. */
-export function WalletsCard({
+const ROW_BUTTON =
+  "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] transition-colors disabled:opacity-40";
+
+/**
+ * Connected wallets as rows of the Accounts page's Connections list — same
+ * columns as a bank link (name and state, what it feeds, last sync, actions),
+ * so a wallet reads as one more connection rather than its own card.
+ *
+ * `gridClassName` is the Connections column template, passed in by the page so
+ * these rows and the server-rendered bank rows cannot drift apart.
+ */
+export function WalletConnectionRows({
   wallets,
   hiddenTokens = {},
+  gridClassName,
 }: {
   wallets: WalletRow[];
   /** Hand-hidden tokens per wallet id — the junk filter's undo list. */
   hiddenTokens?: Record<string, HiddenWalletToken[]>;
+  gridClassName: string;
 }) {
-  if (wallets.length === 0) return null;
   return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <div className="flex items-center gap-3">
-          <span className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-[var(--panel-2)] text-[var(--brass)]">
-            <Wallet size={15} />
-          </span>
-          <span className="font-medium">Crypto wallets</span>
-        </div>
-        <span className="mono text-sm text-[var(--muted)]">
-          {fmtUsd(wallets.reduce((s, w) => s + (w.lastValueUsd ?? 0), 0))}
-        </span>
-      </div>
-      <ul>
-        {wallets.map((w) => (
-          <WalletRowItem key={w.id} wallet={w} hidden={hiddenTokens[w.id] ?? []} />
-        ))}
-      </ul>
-    </Card>
+    <>
+      {wallets.map((w) => (
+        <WalletRowItem
+          key={w.id}
+          wallet={w}
+          hidden={hiddenTokens[w.id] ?? []}
+          gridClassName={gridClassName}
+        />
+      ))}
+    </>
   );
 }
 
-function WalletRowItem({ wallet: w, hidden }: { wallet: WalletRow; hidden: HiddenWalletToken[] }) {
+function WalletRowItem({
+  wallet: w,
+  hidden,
+  gridClassName,
+}: {
+  wallet: WalletRow;
+  hidden: HiddenWalletToken[];
+  gridClassName: string;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(w.lastError);
@@ -222,64 +218,78 @@ function WalletRowItem({ wallet: w, hidden }: { wallet: WalletRow; hidden: Hidde
   const short = `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
   const synced = w.lastSyncedAt
     ? new Date(w.lastSyncedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-    : "never";
+    : "Never";
+  const tokens = w.lastTokenCount ?? 0;
+  const filtered = w.minValueUsd != null || hidden.length > 0;
 
   return (
-    <li className="px-6 py-4 transition-colors hover:bg-[var(--panel-2)]">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 truncate text-sm font-medium">
-            <span className="truncate">{w.label}</span>
-            <span className="shrink-0 rounded-full border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
-              {w.chain}
-            </span>
-          </p>
-          <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
-            <span className="mono">{short}</span>
-            {" · "}
-            {w.lastTokenCount ?? 0} {w.lastTokenCount === 1 ? "token" : "tokens"}
-            {hidden.length > 0 && ` · ${hidden.length} hidden`}
-            {" · synced "}
-            {synced}
-          </p>
-          {error && <p className="mt-0.5 text-xs text-[var(--coral)]">{error}</p>}
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="mono text-sm text-[var(--paper)]">{fmtUsd(w.lastValueUsd ?? 0)}</span>
+    <li className="border-b border-line">
+      <div className={`${gridClassName} min-h-[58px] items-center py-1.5`}>
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
+          <span
+            aria-hidden
+            className={`h-[7px] w-[7px] shrink-0 rounded-full ${error ? "bg-[var(--coral)]" : "bg-[var(--jade)]"}`}
+          />
+          <span className="truncate font-medium">{w.label}</span>
+          <span className={`text-xs ${error ? "text-[var(--coral)]" : "text-[var(--jade)]"}`}>
+            {error ? "Failing" : "Live"}
+          </span>
+          <span className="w-full pl-[17px] text-xs text-[var(--muted)]">
+            Wallet · read-only <span className="capitalize">{w.chain}</span> address
+          </span>
+        </span>
+        <span className="min-w-0 text-[13px] text-[var(--muted)]">
+          <span className="mono text-xs">{short}</span>
+          {" · "}
+          {tokens} {tokens === 1 ? "token" : "tokens"}
+          {" · "}
+          {hidden.length} hidden
+          <span className="mono block text-[var(--paper)]">{fmtUsd(w.lastValueUsd ?? 0)}</span>
+        </span>
+        <span className="mono text-xs text-[var(--muted)]">{synced}</span>
+        <span className="flex items-center justify-end gap-2">
           <button
+            type="button"
             onClick={() => setOpenFilters((v) => !v)}
             aria-expanded={openFilters}
-            aria-label={`Junk filter for ${w.label}`}
-            title="Junk filter — dust floor + hidden tokens"
-            className={`rounded-md p-1 transition hover:text-[var(--brass)] ${
-              openFilters || w.minValueUsd != null || hidden.length > 0
-                ? "text-[var(--brass)]"
-                : "text-[var(--faint)]"
+            aria-label={`Manage tokens for ${w.label}`}
+            title="Dust floor and hidden tokens"
+            className={`${ROW_BUTTON} ${
+              openFilters || filtered
+                ? "border-[var(--brass-dim)] text-[var(--brass)]"
+                : "border-[var(--line-strong)] text-[var(--paper)] hover:bg-[var(--panel-2)]"
             }`}
           >
-            <Filter size={14} />
+            <Filter size={13} aria-hidden /> Manage tokens
           </button>
           <button
+            type="button"
             onClick={sync}
             disabled={pending}
             aria-label={`Re-sync ${w.label}`}
             title="Re-sync balances"
-            className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--brass)] disabled:opacity-40"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-line text-[var(--muted)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--paper)] disabled:opacity-40"
           >
             <RefreshCw size={14} className={pending ? "animate-spin" : ""} />
           </button>
           <button
+            type="button"
             onClick={remove}
             disabled={pending}
-            aria-label={`Disconnect ${w.label}`}
-            title="Disconnect wallet"
-            className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--coral)] disabled:opacity-40"
+            aria-label={`Remove ${w.label}`}
+            title="Disconnect wallet and remove its imported tokens"
+            className={`${ROW_BUTTON} border-line text-[var(--coral)] hover:border-[color-mix(in_srgb,var(--coral)_45%,transparent)] hover:bg-[color-mix(in_srgb,var(--coral)_10%,transparent)]`}
           >
-            <Trash2 size={14} />
+            Remove
           </button>
-        </div>
+        </span>
       </div>
 
+      {error && (
+        <p role="alert" className="pb-3 pl-[17px] text-xs text-[var(--coral)]">
+          {error}
+        </p>
+      )}
       {openFilters && <WalletFilterPanel wallet={w} hidden={hidden} onError={setError} />}
     </li>
   );
@@ -327,10 +337,10 @@ function WalletFilterPanel({
   }
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg border border-line bg-[var(--panel-2)] p-3">
+    <div className="mb-4 ml-[17px] grid max-w-3xl gap-x-10 gap-y-4 border-l border-[var(--line-strong)] pl-5 sm:grid-cols-2">
       <div>
         <p className="text-xs font-medium">Dust floor</p>
-        <p className="mt-0.5 text-[11px] text-[var(--faint)]">
+        <p className="mt-0.5 text-xs text-[var(--muted)]">
           Skip tokens worth less than this at sync. Blank uses the default of $1.
         </p>
         <div className="mt-2 flex items-center gap-2">
@@ -353,12 +363,12 @@ function WalletFilterPanel({
         </div>
       </div>
 
-      <div className="border-t border-line pt-3">
+      <div>
         <p className="text-xs font-medium">
           Hidden tokens{hidden.length > 0 && ` (${hidden.length})`}
         </p>
         {hidden.length === 0 ? (
-          <p className="mt-0.5 text-[11px] text-[var(--faint)]">
+          <p className="mt-0.5 text-xs text-[var(--muted)]">
             None. Hide junk from a wallet holding on the Investments page — it stays hidden on re-sync.
           </p>
         ) : (
@@ -368,23 +378,23 @@ function WalletFilterPanel({
                 <span className="min-w-0 truncate">
                   <span className="text-[var(--paper)]">{t.label ?? "Unnamed token"}</span>
                   {t.contractAddress && (
-                    <span className="mono ml-2 text-[10px] text-[var(--faint)]">
+                    <span className="mono ml-2 text-[11px] text-[var(--muted)]">
                       {t.contractAddress.slice(0, 6)}…{t.contractAddress.slice(-4)}
                     </span>
                   )}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
                   {t.hiddenValueUsd != null && (
-                    <span className="mono text-[var(--faint)]">{fmtUsd(t.hiddenValueUsd)}</span>
+                    <span className="mono text-[var(--muted)]">{fmtUsd(t.hiddenValueUsd)}</span>
                   )}
                   <button
                     onClick={() => unhide(t.holdingId)}
                     disabled={pending}
                     title="Un-hide and re-sync"
                     aria-label={`Un-hide ${t.label ?? "token"}`}
-                    className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--brass)] disabled:opacity-40"
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-line px-2.5 text-xs text-[var(--muted)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--paper)] disabled:opacity-40"
                   >
-                    <RotateCcw size={13} />
+                    <RotateCcw size={12} aria-hidden /> Un-hide
                   </button>
                 </span>
               </li>

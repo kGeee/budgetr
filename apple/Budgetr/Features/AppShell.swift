@@ -105,6 +105,9 @@ struct AppShell: View {
             .animation(M.settle, value: companion.phase)
             .environmentObject(app)
             .environmentObject(companion)
+            // EmptyStorePrompt (from the 0.15 first-run work) opens the importer
+            // through the environment; route it to the one importer AppModel owns.
+            .environment(\.triggerImport, { app.showingImporter = true })
             .tint(T.jade)
             .preferredColorScheme(.dark)
             .fileImporter(isPresented: $app.showingImporter, allowedContentTypes: [Self.ledgerType]) { result in
@@ -178,8 +181,8 @@ private struct PhoneTabs: View {
 
     private var items: [FloatingTabBar<PhoneTab>.Item] {
         [
-            .init(tab: .overview, title: "Spending", symbol: "square.grid.2x2"),
-            .init(tab: .ledger, title: "Ledger", symbol: "arrow.left.arrow.right"),
+            .init(tab: .overview, title: "Home", symbol: "square.grid.2x2"),
+            .init(tab: .ledger, title: "Transactions", symbol: "arrow.left.arrow.right"),
             .init(tab: .review, title: "Review", symbol: "checkmark.circle", badge: unreviewed.count),
             .init(tab: .budgets, title: "Budgets", symbol: "chart.pie"),
             .init(tab: .more, title: "More", symbol: "ellipsis"),

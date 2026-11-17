@@ -17,8 +17,8 @@ import { ArrowRight, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ApiKeysForm } from "@/components/api-keys-form";
-import { PlaidLink } from "@/components/plaid-link";
-import { Stepper, Step, Walk, A } from "@/components/onboarding-steps";
+import { PlaidLink } from "@/components/onboarding/plaid-link";
+import { Stepper, Step, Walk, A } from "@/components/onboarding/onboarding-steps";
 
 type Initial = {
   hasPlaidKeys: boolean;

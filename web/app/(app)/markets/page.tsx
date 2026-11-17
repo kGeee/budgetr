@@ -1,5 +1,5 @@
 import { PageHead } from "@/components/page-head";
-import { InvestmentsTabs } from "@/components/investments-tabs";
+import { requireTradingDesk } from "@/lib/trading-desk";
 import { MarketsView } from "@/components/markets/markets-view";
 import { sourceFor } from "@/lib/markets-prefs";
 import { getDesk, getMarketsPrefs, getSymbolSources } from "@/lib/watchlist";
@@ -29,6 +29,8 @@ export const metadata = { title: "Markets — budgetr" };
  * tab bar itself — same arrangement as Fundamentals.
  */
 export default async function MarketsPage() {
+  // Part of the Trading desk: with it off, land on the Settings switch instead.
+  requireTradingDesk();
   const { symbols, derived } = getDesk();
   const prefs = getMarketsPrefs();
   const sources = getSymbolSources();
@@ -40,7 +42,6 @@ export default async function MarketsPage() {
 
   return (
     <div className="space-y-6">
-      <InvestmentsTabs />
       <PageHead
         title="Markets"
         action={

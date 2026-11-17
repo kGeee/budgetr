@@ -96,11 +96,11 @@ export function PnlMatrix({
             {formatStrike(Number(prices[hover.i].toFixed(2)))} · {dayLabel(days[hover.j], dte)} ·{" "}
             <span className={hoveredPnl! >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]"}>
               {money(hoveredPnl!, currency)}
-              {capital > 0 && <span className="text-[var(--faint)]"> · {pct(hoveredPnl!, capital)}</span>}
+              {capital > 0 && <span className="text-[var(--muted)]"> · {pct(hoveredPnl!, capital)}</span>}
             </span>
           </span>
         ) : (
-          <span className="text-[var(--faint)]">Hover a cell for its price, date &amp; P&amp;L</span>
+          <span className="text-[var(--muted)]">Hover a cell for its price, date &amp; P&amp;L</span>
         )}
       </div>
 
@@ -153,7 +153,7 @@ export function PnlMatrix({
               <div
                 key={j}
                 className={`pt-1 text-center text-[9px] uppercase tracking-wide ${
-                  d >= dte ? "text-[var(--brass)]" : "text-[var(--faint)]"
+                  d >= dte ? "text-[var(--brass)]" : "text-[var(--muted)]"
                 }`}
               >
                 {dayLabel(d, dte)}

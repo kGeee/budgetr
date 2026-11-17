@@ -17,7 +17,7 @@ struct RootView: View {
 
         var title: String {
             switch self {
-            case .overview: return "Spending"
+            case .overview: return "Home"
             case .accounts: return "Accounts"
             case .transactions: return "Transactions"
             case .categories: return "Categories"

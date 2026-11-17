@@ -1,8 +1,8 @@
 import { PageHead } from "@/components/page-head";
 import { OptionsToolTabs } from "@/components/investments-tabs";
 import { OptionsPositionsView } from "@/components/options/options-positions-view";
-import { LivePricesProvider } from "@/components/live-prices";
-import type { HoldingRow } from "@/components/portfolio-view";
+import { LivePricesProvider } from "@/components/portfolio/live-prices";
+import type { HoldingRow } from "@/components/portfolio/portfolio-view";
 import { getHoldings, getInvestmentSectors, sectorKeyFor } from "@/lib/queries";
 import { parseOccSymbol } from "@/lib/options";
 import { loadOptionChainContext } from "@/lib/options-desk";

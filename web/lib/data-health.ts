@@ -62,7 +62,7 @@ export function detectDataHealth(
         c.accountCount === 1 ? "Its balance is" : "Their balances are"
       } frozen and excluded from anything computed since.`,
       vendor: c.institutionName,
-      action: { href: "/settings#connections", label: "Reconnect" },
+      action: { href: "/accounts", label: "Reconnect" },
     });
   }
 
@@ -80,7 +80,7 @@ export function detectDataHealth(
           ? "Connect an account, or the figures on every page are empty rather than zero."
           : `That's ${describeAge(freshness.daysSinceLatest)}. Every "this month" figure covers only what arrived before then.`,
       date: freshness.latestDate ?? undefined,
-      action: { href: "/settings#connections", label: "Check connections" },
+      action: { href: "/accounts", label: "Check connections" },
     });
   }
 
@@ -98,7 +98,7 @@ export function detectDataHealth(
       detail: `${Math.round(
         (unreviewed / total) * 100,
       )}% of your history. Their categories are Plaid's guess, not yours — every category and budget figure inherits it.`,
-      action: { href: "/transactions?reviewed=no", label: "Start reviewing" },
+      action: { href: "/transactions?view=review", label: "Start reviewing" },
     });
   }
 

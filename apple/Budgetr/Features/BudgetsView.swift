@@ -50,7 +50,7 @@ struct BudgetsView: View {
         // the category Plaid's guess maps to. Counting overrides alone missed
         // every transaction the bank had already categorised correctly.
         var spent: [String: Double] = [:]
-        for t in transactions where (t.date ?? "").hasPrefix(month) && t.amount > 0 {
+        for t in transactions where (t.date ?? "").hasPrefix(month) && t.amount > 0 && idx.countsTowardSpend(t) {
             spent[idx.resolvedId(for: t) ?? "__none__", default: 0] += t.amount
         }
         let limits = Dictionary(

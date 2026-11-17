@@ -1,25 +1,22 @@
 "use client";
 
-import { Fragment, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { createContext, Fragment, useContext, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag, X } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { PayoffDiagram } from "@/components/payoff-diagram";
-import {
-  PIE_COLORS,
-  Sparkline,
-  TickerPriceChart,
-  type SectorSlice,
-} from "@/components/charts";
-import { ValueHistory } from "@/components/value-history";
+import { ArrowUpRight, Check, ChevronDown, Pencil, SlidersHorizontal, Tag } from "lucide-react";
+import { Dialog, DialogBody, DialogHeader } from "@/components/ui/dialog";
+import { Hero, Mark, SectionHead, Stat, StatStrip, Verdict } from "@/components/ui/statement";
+import { Bar, HeroLine, pill, ruled, RuledFooter, Segmented, SideFigure } from "@/components/portfolio/ruled";
+import { PayoffDiagram } from "@/components/options/payoff-diagram";
+import { Sparkline, TickerPriceChart } from "@/components/charts";
+import { ValueHistory } from "@/components/portfolio/value-history";
 import {
   AddManualHoldingButton,
   DeleteManualHoldingButton,
   EditCostBasisButton,
   EditManualHoldingButton,
   HideWalletTokenButton,
-} from "@/components/manual-holding-dialog";
+} from "@/components/portfolio/manual-holding-dialog";
 import { setHoldingSector } from "@/lib/actions";
 import { formatCurrency, formatMoney } from "@/lib/utils";
 import {
@@ -32,55 +29,41 @@ import {
   parseOccSymbol,
   riskLevel,
 } from "@/lib/options";
-import { AssetAllocation, type AllocRow } from "@/components/asset-allocation";
-import { DividendPanel } from "@/components/dividend-panel";
 import type { InvestmentTxnRow } from "@/lib/queries";
-import type { DividendSummary } from "@/lib/dividends";
-import type { DividendCalendarEntry, PricePoint as YahooPricePoint } from "@/lib/yahoo";
+import type { PricePoint as YahooPricePoint } from "@/lib/yahoo";
 import type { BenchmarkKey, ComparisonRow } from "@/lib/benchmark";
 import { classifyHolding, isCashLike, KIND_LABEL, KIND_ORDER, type HoldingKind } from "@/lib/portfolio/classify";
-import { computeStanding, standingDetail, standingHeadline, WINDOW_LABEL } from "@/lib/portfolio/standing";
-
-const UNASSIGNED = "Unassigned";
+import { computeStanding, standingHeadline, WINDOW_LABEL } from "@/lib/portfolio/standing";
+import {
+  effectiveValue,
+  liveSymbols,
+  sectorColorMap,
+  effectivePrice,
+  type HoldingRow,
+} from "@/components/portfolio/valuation";
 import {
   LivePricesProvider,
   useLivePrices,
   type LiveStatus,
   type LiveQuote,
-} from "@/components/live-prices";
+} from "@/components/portfolio/live-prices";
 
-export type HoldingRow = {
-  id: string;
-  quantity: number | null;
-  costBasis: number | null;
-  price: number | null;
-  value: number | null;
-  closePrice: number | null;
-  currency: string | null;
-  ticker: string | null;
-  securityName: string | null;
-  securityType: string | null;
-  accountName: string | null;
-  /** True for user-entered off-Plaid holdings (crypto, fixed-value assets). */
-  manual?: boolean;
-  /** True when imported from a connected wallet (quantity is chain-synced). */
-  fromWallet?: boolean;
-  /** Symbol-scoped key the sector assignment is stored under (see sectorKeyFor). */
-  sectorKey: string;
-  /** Currently assigned sector, or null when untagged. */
-  sector?: string | null;
-  /** Brokerage-reported basis before any user correction (Plaid holdings). */
-  plaidCostBasis?: number | null;
-  /** Raw cost-basis override inputs, for the correction dialog (Plaid holdings). */
-  overrideTotal?: number | null;
-  overrideUnit?: number | null;
-  overrideAsOf?: string | null;
-  /** True when `costBasis` reflects a user correction rather than the brokerage figure. */
-  hasOverride?: boolean;
-};
+export type { HoldingRow };
+
+/**
+ * Whether the Trading desk (Markets, Options, Fundamentals) is switched on.
+ * Rows deep in the table link into the desk, so the flag rides a context
+ * rather than being threaded through every row renderer.
+ */
+const TradingDeskContext = createContext(false);
 
 type PricePoint = { date: string; close: number };
 
+/**
+ * The Holdings tab of /investments: headline value, the value curve against the
+ * benchmarks, and the holdings themselves. Allocation and income have their own
+ * tabs (and their own data), so this no longer carries either.
+ */
 export function PortfolioView({
   holdings,
   histories = {},
@@ -90,11 +73,7 @@ export function PortfolioView({
   comparison = [],
   transactions = [],
   knownSectors = [],
-  allocationTargets = {},
-  assetClassOverrides = {},
-  geographyOverrides = {},
-  dividendSummary,
-  dividendCalendar = [],
+  tradingDesk = false,
 }: {
   holdings: HoldingRow[];
   histories?: Record<string, PricePoint[]>;
@@ -111,66 +90,27 @@ export function PortfolioView({
   comparison?: ComparisonRow[];
   transactions?: InvestmentTxnRow[];
   knownSectors?: string[];
-  /** User-set target allocation percentages, keyed by dimension (see targetKeyFor). */
-  allocationTargets?: Record<string, number>;
-  /** Per-position asset-class overrides, keyed by sectorKey. */
-  assetClassOverrides?: Record<string, string>;
-  /** Per-position geography overrides, keyed by sectorKey. */
-  geographyOverrides?: Record<string, string>;
-  /** Derived dividend income stream (trailing/projected/yield-on-cost). */
-  dividendSummary?: DividendSummary;
-  /** Yahoo ex-dividend calendar for held tickers. */
-  dividendCalendar?: DividendCalendarEntry[];
+  /** Trading desk on: rows get Chain/Vol/Fundamentals links and options get a summary card. */
+  tradingDesk?: boolean;
 }) {
-  // Exclude option (OCC-symbol) legs — Finnhub can't quote them, so skip the
-  // wasted live-price subscriptions; they're valued from Plaid instead.
-  const symbols = useMemo(() => {
-    const plain = holdings
-      .filter((h) => !parseOccSymbol(h.ticker))
-      .map((h) => h.ticker)
-      .filter((t): t is string => Boolean(t));
-    // Option legs can't be quoted, but their UNDERLYINGS can — and the option
-    // rows need a spot price for their in-the-money and assignment flags. They
-    // used to come from the full option chains this page fetched; a Finnhub
-    // quote is the same number for a fraction of the bytes.
-    const underlyings = holdings
-      .map((h) => parseOccSymbol(h.ticker)?.underlying)
-      .filter((u): u is string => Boolean(u));
-    return [...new Set([...plain, ...underlyings])];
-  }, [holdings]);
+  const symbols = useMemo(() => liveSymbols(holdings), [holdings]);
 
   return (
-    <LivePricesProvider symbols={symbols}>
-      <PortfolioInner
-        holdings={holdings}
-        histories={histories}
-        portfolioSeries={portfolioSeries}
-        portfolioReturnSeries={portfolioReturnSeries}
-        benchmarks={benchmarks}
-        comparison={comparison}
-        transactions={transactions}
-        knownSectors={knownSectors}
-        allocationTargets={allocationTargets}
-        assetClassOverrides={assetClassOverrides}
-        geographyOverrides={geographyOverrides}
-        dividendSummary={dividendSummary}
-        dividendCalendar={dividendCalendar}
-      />
-    </LivePricesProvider>
+    <TradingDeskContext.Provider value={tradingDesk}>
+      <LivePricesProvider symbols={symbols}>
+        <PortfolioInner
+          holdings={holdings}
+          histories={histories}
+          portfolioSeries={portfolioSeries}
+          portfolioReturnSeries={portfolioReturnSeries}
+          benchmarks={benchmarks}
+          comparison={comparison}
+          transactions={transactions}
+          knownSectors={knownSectors}
+        />
+      </LivePricesProvider>
+    </TradingDeskContext.Provider>
   );
-}
-
-/**
- * Effective price for a holding, in priority order:
- *   live Finnhub quote → Plaid institution price → security close price.
- * The closePrice fallback matters for instruments Finnhub can't quote and Plaid
- * leaves without an institution price (e.g. some mutual funds), which would
- * otherwise render as $0.00.
- */
-function effectivePrice(h: HoldingRow, quotes: Record<string, LiveQuote>): number | null {
-  const q = h.ticker ? quotes[h.ticker.toUpperCase()] : undefined;
-  if (q?.price != null) return q.price;
-  return h.price ?? h.closePrice ?? null;
 }
 
 /** Day-change % from the live quote's previous close, or null if unavailable. */
@@ -206,12 +146,6 @@ function cleanSecurityName(name: string | null | undefined): string | null {
     if (norm(parts[0]) === norm(parts[1])) return parts[1].trim();
   }
   return name;
-}
-
-function effectiveValue(h: HoldingRow, quotes: Record<string, LiveQuote>): number {
-  const price = effectivePrice(h, quotes);
-  if (price != null && h.quantity != null) return price * h.quantity;
-  return h.value ?? 0;
 }
 
 /** Unrealized P&L = current value − total cost basis, or null with no basis. */
@@ -535,11 +469,6 @@ function PortfolioInner({
   comparison,
   transactions,
   knownSectors,
-  allocationTargets,
-  assetClassOverrides,
-  geographyOverrides,
-  dividendSummary,
-  dividendCalendar,
 }: {
   holdings: HoldingRow[];
   histories: Record<string, PricePoint[]>;
@@ -549,13 +478,9 @@ function PortfolioInner({
   comparison: ComparisonRow[];
   transactions: InvestmentTxnRow[];
   knownSectors: string[];
-  allocationTargets: Record<string, number>;
-  assetClassOverrides: Record<string, string>;
-  geographyOverrides: Record<string, string>;
-  dividendSummary?: DividendSummary;
-  dividendCalendar?: DividendCalendarEntry[];
 }) {
   const { quotes, status } = useLivePrices();
+  const tradingDesk = useContext(TradingDeskContext);
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [sortKey, setSortKey] = useState<SortKey>("value");
@@ -565,7 +490,6 @@ function PortfolioInner({
   // sector lights up every position of that ticker instantly (the server action
   // persists in the background and a refresh reconciles).
   const [sectorEdits, setSectorEdits] = useState<Record<string, string | null>>({});
-  const [sectorFilter, setSectorFilter] = useState<string | null>(null);
   /** Un-folds the sub-1% tail. Off by default; the money is never hidden, only the rows. */
   const [showAll, setShowAll] = useState(false);
   const { visible: visibleCols, toggle: toggleColumn, reset: resetColumns } = useColumnPrefs();
@@ -586,46 +510,24 @@ function PortfolioInner({
     });
   }
 
-  // Stable color per sector: index by alphabetical name so a sector keeps its
-  // hue as live prices reorder it by value. Unassigned is always muted gray.
-  const sectorColor = useMemo(() => {
-    const names = Array.from(
-      new Set(holdings.map((h) => sectorOf(h) ?? UNASSIGNED).filter((s) => s !== UNASSIGNED)),
-    ).sort();
-    const map: Record<string, string> = { [UNASSIGNED]: "#8b948c" };
-    names.forEach((n, i) => (map[n] = PIE_COLORS[i % PIE_COLORS.length]));
-    return map;
+  const sectorColor = useMemo(
+    () => sectorColorMap(holdings.map(sectorOf)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holdings, sectorEdits]);
-
-  // Allocation by sector, recomputed on every live-price tick and sector edit.
-  const allocation = useMemo<SectorSlice[]>(() => {
-    const agg = new Map<string, { value: number; count: number }>();
-    for (const h of holdings) {
-      const s = sectorOf(h) ?? UNASSIGNED;
-      const cur = agg.get(s) ?? { value: 0, count: 0 };
-      cur.value += effectiveValue(h, quotes);
-      cur.count += 1;
-      agg.set(s, cur);
-    }
-    return Array.from(agg.entries())
-      .map(([sector, { value, count }]) => ({
-        sector,
-        value,
-        count,
-        color: sectorColor[sector] ?? "#8b948c",
-      }))
-      .sort((a, b) => b.value - a.value);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holdings, quotes, sectorEdits, sectorColor]);
+    [holdings, sectorEdits],
+  );
 
   // Suggestions for the sector editor: known sectors from the DB plus any added
   // optimistically this session, deduped.
   const sectorOptions = useMemo(
-    () => Array.from(new Set([...knownSectors, ...allocation.map((a) => a.sector)]))
-      .filter((s) => s !== UNASSIGNED)
-      .sort(),
-    [knownSectors, allocation],
+    () =>
+      Array.from(
+        new Set([
+          ...knownSectors,
+          ...holdings.map(sectorOf).filter((s): s is string => Boolean(s)),
+        ]),
+      ).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [knownSectors, holdings, sectorEdits],
   );
 
   // Group investment transactions by ticker for each holding's expanded panel.
@@ -639,37 +541,10 @@ function PortfolioInner({
     return map;
   }, [transactions]);
 
-  // Holdings shown in the table, narrowed to the drilled-into sector if any.
-  const visible = useMemo(
-    () =>
-      sectorFilter
-        ? holdings.filter((h) => (sectorOf(h) ?? UNASSIGNED) === sectorFilter)
-        : holdings,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [holdings, sectorFilter, sectorEdits],
-  );
-
   // Whole-portfolio market value — the denominator for each row's "% of total".
   const total = useMemo(
     () => holdings.reduce((s, h) => s + effectiveValue(h, quotes), 0),
     [holdings, quotes],
-  );
-
-  // Live-valued rows for the asset-allocation / targets panel, recomputed on each
-  // price tick and sector edit (sector drives the sector-target drift).
-  const allocRows = useMemo<AllocRow[]>(
-    () =>
-      holdings.map((h) => ({
-        id: h.id,
-        ticker: h.ticker,
-        securityType: h.securityType,
-        securityName: h.securityName,
-        sectorKey: h.sectorKey,
-        sector: sectorOf(h),
-        value: effectiveValue(h, quotes),
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [holdings, quotes, sectorEdits],
   );
 
   // Every option (OCC) leg across all holdings — drives the analytics panel.
@@ -683,8 +558,8 @@ function PortfolioInner({
   // normalized metrics and are sorted together by the chosen column, with rows
   // missing that metric sinking to the bottom in both directions.
   const items = useMemo(() => {
-    const singles = mergeCashRows(visible.filter((h) => !parseOccSymbol(h.ticker)), quotes);
-    const optionLegs = visible.filter((h) => parseOccSymbol(h.ticker) != null);
+    const singles = mergeCashRows(holdings.filter((h) => !parseOccSymbol(h.ticker)), quotes);
+    const optionLegs = holdings.filter((h) => parseOccSymbol(h.ticker) != null);
 
     const byUnderlying = new Map<string, HoldingRow[]>();
     for (const h of optionLegs) {
@@ -725,7 +600,7 @@ function PortfolioInner({
       if (bv === Number.NEGATIVE_INFINITY) return -1;
       return (av - bv) * dir;
     });
-  }, [visible, quotes, sortKey, sortDir, total]);
+  }, [holdings, quotes, sortKey, sortDir, total]);
 
   /**
    * The table's real shape: one section per kind of thing, each with its own
@@ -856,77 +731,104 @@ function PortfolioInner({
 
   return (
     <div className="space-y-7">
-      <SectionJump
-        hasOptions={optionLegs.length > 0}
-        hasDividends={Boolean(dividendSummary && dividendSummary.payments.length > 0)}
-      />
-
-      <div id="value" className="scroll-mt-28 space-y-4">
-        <StandingHeader
-          standing={standing}
-          total={total}
-          cashValue={cashValue}
-          positions={holdings.length}
-        />
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat
-            label="Market value"
-            value={total}
-            detail={
-              cashValue > 0.005
-                ? `${formatCurrency(cashValue)} of it cash`
-                : "all of it invested"
-            }
-          />
-          {/* Never render a computed zero as a measurement. Before quotes land,
-              every holding's day change is null, which summed to a confident
-              "+$0.00 · 0% of value has a live quote" — indistinguishable from a
-              genuinely flat market. Say we're still pricing instead. */}
-          {dayPriced.length === 0 ? (
-            <PendingStat label="Day change" note={`pricing ${holdings.length} positions…`} />
-          ) : (
-            <Stat
-              label="Day change"
-              value={dayChange}
-              signed
-              pct={dayChangePctTotal}
-              detail={`${Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote`}
-              detailTitle={
-                "Day change is computed only from holdings with a live intraday quote " +
-                "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
-                "funds, and untracked symbols are excluded, so this share is below 100%."
+      <div id="value" className="scroll-mt-28 space-y-6">
+        {/* One line: the figure and what it did today on the left, the figures
+            that qualify it on the right. Whether the book is *working* — the
+            time-weighted return against the index — is the Return figure here
+            and the sentence over the benchmark table below. */}
+        <HeroLine
+          hero={
+            <Hero
+              eyebrow={`Market value · ${holdings.length} ${holdings.length === 1 ? "position" : "positions"}`}
+              figure={formatCurrency(total)}
+              verdict={
+                /* Never render a computed zero as a measurement. Before quotes
+                   land every holding's day change is null, which would sum to a
+                   confident "+$0.00" — indistinguishable from a flat market. */
+                dayPriced.length === 0 ? (
+                  <span className="text-[var(--muted)]">
+                    Pricing {holdings.length} {holdings.length === 1 ? "position" : "positions"}…
+                  </span>
+                ) : (
+                  <>
+                    {dayChange >= 0 ? "Up" : "Down"}{" "}
+                    <Mark tone={dayChange >= 0 ? "jade" : "coral"}>
+                      {formatCurrency(Math.abs(dayChange))}
+                    </Mark>{" "}
+                    today, {Math.abs(dayChangePctTotal).toFixed(2)}%.{" "}
+                    <span
+                      className="cursor-help text-[var(--muted)]"
+                      title={
+                        "Day change is computed only from holdings with a live intraday quote " +
+                        "(equities/ETFs via Finnhub, crypto via CoinGecko). Cash, options, mutual " +
+                        "funds, and untracked symbols are excluded, so this share is below 100%."
+                      }
+                    >
+                      {Math.min(dayCoverage, 100).toFixed(0)}% of value has a live quote.
+                    </span>
+                  </>
+                )
               }
             />
-          )}
-          <Stat
+          }
+        >
+          <SideFigure
             label="Unrealized gain"
-            value={gain}
-            signed
-            pct={gainPct}
-            hint="View breakdown"
-            onClick={() => setShowBreakdown(true)}
+            tone={gain >= 0 ? "jade" : "coral"}
+            value={`${signedCurrency(gain)} · ${signedPct(gainPct)}`}
+            sub={
+              <button
+                type="button"
+                onClick={() => setShowBreakdown(true)}
+                className="text-[var(--brass)] underline-offset-2 transition-colors hover:text-[var(--paper)] hover:underline"
+              >
+                View breakdown →
+              </button>
+            }
           />
-          <Stat
+          <SideFigure
             label="Cost basis"
-            value={totalCost}
-            detail={
+            value={formatCurrency(totalCost)}
+            sub={
               uncostedValue > 0.005
                 ? `${formatCurrency(uncostedValue)} has no basis`
                 : "All positions costed"
             }
           />
-        </div>
+          {standing.state === "unknown" ? (
+            <SideFigure label="Return" tone="muted" value="—" sub={standing.reason} />
+          ) : (
+            <SideFigure
+              label={`Return · ${standing.windowLabel.toLowerCase()}`}
+              tone={standing.state === "behind" ? "coral" : "jade"}
+              value={`${standing.returnPct! >= 0 ? "+" : "−"}${Math.abs(standing.returnPct!).toFixed(1)}% time-weighted`}
+              sub={standingHeadline(standing)}
+            />
+          )}
+          <SideFigure
+            label="Cash"
+            value={formatCurrency(cashValue)}
+            sub={cashValue > 0.005 ? "of market value" : "all of it invested"}
+          />
+        </HeroLine>
 
         {/* The no-basis caveat silently qualifies two headline numbers, so it
-            gets said out loud rather than living in tile fine print. */}
+            gets said out loud rather than living in fine print. */}
         {uncostedValue > 0.005 && (
-          <p className="rounded-[var(--radius)] border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_9%,transparent)] px-4 py-2.5 text-xs text-[var(--brass)]">
+          <p className="border-l-2 border-[var(--brass-dim)] pl-3 text-xs text-[var(--brass)]">
             {formatCurrency(uncostedValue)} of value has no cost basis. Unrealized gain and
             yield-on-cost are computed over the remaining {formatCurrency(costedValue)} — not the
             whole portfolio.
           </p>
         )}
+
+        <ValueHistory
+          data={portfolioSeries}
+          portfolioReturnSeries={portfolioReturnSeries}
+          kind="portfolio"
+          benchmarks={benchmarks}
+          caption="Portfolio value, reconstructed from your trades"
+        />
       </div>
 
       {showBreakdown && (
@@ -940,104 +842,54 @@ function PortfolioInner({
         />
       )}
 
-      <Card className="p-0">
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <span className="eyebrow">Portfolio value</span>
-          <span className="text-xs text-[var(--faint)]">reconstructed from your trades</span>
-        </div>
-        <div className="px-3 py-5 sm:px-5">
-          <ValueHistory
-            data={portfolioSeries}
-            portfolioReturnSeries={portfolioReturnSeries}
-            kind="portfolio"
-            benchmarks={benchmarks}
-          />
-        </div>
-      </Card>
-
-      <BenchmarkComparison comparison={comparison} standing={standing} />
-
-      <div id="allocation" className="scroll-mt-28">
-        <AssetAllocation
-          rows={allocRows}
-          total={total}
-          targets={allocationTargets}
-          assetClassOverrides={assetClassOverrides}
-          geographyOverrides={geographyOverrides}
-          knownSectors={sectorOptions}
-          sectorSlices={allocation}
-          activeSector={sectorFilter}
-          onSelectSector={setSectorFilter}
-        />
-      </div>
-
-      <Card id="holdings" className="scroll-mt-28 overflow-hidden p-0">
-        <div className="border-b border-line px-4 py-4 sm:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-            <div className="flex items-center gap-3">
-              <span className="eyebrow">Holdings</span>
-              <StatusBadge status={status} />
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              {sectorFilter && (
-                <button
-                  onClick={() => setSectorFilter(null)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-[var(--muted)] transition hover:text-[var(--paper)]"
-                >
-                  <Tag size={11} />
-                  {sectorFilter}
-                  <span className="text-[var(--faint)]">·</span>
-                  {visible.length}
-                  <X size={11} />
-                </button>
-              )}
-              {/* The sheet has no column headers to click, so its sort is explicit. */}
-              {view === "sheet" && (
-                <SheetSort sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-              )}
-              <ViewToggle view={view} onChange={setView} />
-              {/* Column controls drive the table only; the sheet ignores them. */}
-              {view === "table" && (
-                <span className="hidden md:inline-flex">
-                  <ColumnsMenu
-                    visible={visibleCols}
-                    onToggle={toggleColumn}
-                    onReset={resetColumns}
-                  />
-                </span>
-              )}
-              <AddManualHoldingButton />
-            </div>
-          </div>
+      <section id="holdings" aria-label="Holdings" className="scroll-mt-28 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
           {/* What the rows themselves can't tell you: the shape of the book. */}
-          {concentration.count > 0 && (
-            <p className="mt-2.5 text-xs text-[var(--muted)]">
-              {concentration.count > 6 ? (
-                <>
-                  Top {concentration.n} of {concentration.count} positions hold{" "}
-                  <span className="mono text-[var(--paper)]">
-                    {concentration.share.toFixed(0)}%
-                  </span>{" "}
-                  of the book.
-                </>
-              ) : (
-                <>
-                  {concentration.count} {concentration.count === 1 ? "position" : "positions"}.
-                </>
-              )}
-              {topMover && (
-                <>
-                  {" "}
-                  <span className="mono text-[var(--paper)]">{topMover.name}</span> moved it most
-                  today,{" "}
-                  <span className={`mono ${signedColor(topMover.change)}`}>
-                    {fmtSigned(topMover.change, topMover.currency)}
-                  </span>
-                  .
-                </>
-              )}
-            </p>
-          )}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
+            <StatusBadge status={status} />
+            {concentration.count > 0 && (
+              <p>
+                {concentration.count > 6 ? (
+                  <>
+                    Top {concentration.n} of {concentration.count} positions hold{" "}
+                    <span className="mono text-[var(--paper)]">
+                      {concentration.share.toFixed(0)}%
+                    </span>{" "}
+                    of the book.
+                  </>
+                ) : (
+                  <>
+                    {concentration.count} {concentration.count === 1 ? "position" : "positions"}.
+                  </>
+                )}
+                {topMover && (
+                  <>
+                    {" "}
+                    <span className="mono text-[var(--paper)]">{topMover.name}</span> moved it most
+                    today,{" "}
+                    <span className={`mono ${signedColor(topMover.change)}`}>
+                      {fmtSigned(topMover.change, topMover.currency)}
+                    </span>
+                    .
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* Value, weight and today sort from the column heads; the sheet's
+                other sorts (P&L, name) have no column, so they stay explicit. */}
+            {view === "sheet" && (
+              <SheetSort sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+            )}
+            <ViewToggle view={view} onChange={setView} />
+            {/* Column controls drive the table only; the sheet ignores them. */}
+            {view === "table" && (
+              <span className="hidden md:inline-flex">
+                <ColumnsMenu visible={visibleCols} onToggle={toggleColumn} onReset={resetColumns} />
+              </span>
+            )}
+          </div>
         </div>
         {view === "sheet" ? (
           <HoldingsSheet
@@ -1048,6 +900,13 @@ function PortfolioInner({
             showAll={showAll}
             onShowAll={setShowAll}
             currency={holdings[0]?.currency ?? "USD"}
+            count={items.length}
+            total={total}
+            dayChange={dayPriced.length > 0 ? dayChange : null}
+            dayPct={dayPriced.length > 0 ? dayChangePctTotal : null}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={toggleSort}
             ctx={{
               maxWeight,
               histories,
@@ -1061,13 +920,12 @@ function PortfolioInner({
             empty={
               holdings.length === 0
                 ? "No holdings yet. Connect a brokerage account and hit Sync."
-                : visible.length === 0
-                  ? `No holdings in ${sectorFilter}.`
-                  : null
+                : null
             }
           />
         ) : (
           <>
+          <SectionHead title="Holdings" count={items.length} />
           {/* Mobile: a compact card per position (the wide table can't fit a phone). */}
           <ul className="divide-y divide-line/60 md:hidden">
             {items.map((it) =>
@@ -1154,11 +1012,11 @@ function PortfolioInner({
                       onClick={() => setShowAll(true)}
                       className="flex w-full items-center gap-3 text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
                     >
-                      <ChevronDown size={13} className="text-[var(--faint)]" />
+                      <ChevronDown size={13} className="text-[var(--muted)]" />
                       <span>
                         {groups.tail.length} positions under {TAIL_WEIGHT_PCT}% each
                       </span>
-                      <span className="mono ml-auto text-[var(--faint)]">
+                      <span className="mono ml-auto text-[var(--muted)]">
                         {formatMoney(groups.tailValue, holdings[0]?.currency ?? "USD")} ·{" "}
                         {groups.tailWeight.toFixed(1)}%
                       </span>
@@ -1189,97 +1047,32 @@ function PortfolioInner({
                   </td>
                 </tr>
               )}
-              {holdings.length > 0 && visible.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={orderedCols.length + 2}
-                    className="px-6 py-10 text-center text-[var(--muted)]"
-                  >
-                    No holdings in {sectorFilter}.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
           </div>
           </>
         )}
-      </Card>
+        <RuledFooter
+          className={view === "sheet" ? "border-t-0" : undefined}
+          note={view === "sheet" ? "Weight bars are scaled to the largest holding." : null}
+        >
+          <Link href="/investments/import" className={pill}>
+            Import trades
+          </Link>
+          <AddManualHoldingButton />
+        </RuledFooter>
+      </section>
 
-      {optionLegs.length > 0 && (
+      <BenchmarkComparison comparison={comparison} standing={standing} />
+
+      {/* With the desk off the legs are just holdings — they're already in the
+          table above, and there's no desk for a summary to point at. */}
+      {tradingDesk && optionLegs.length > 0 && (
         <div id="options" className="scroll-mt-28">
           <OptionsSummaryCard legs={optionLegs} quotes={quotes} />
         </div>
       )}
-
-      {dividendSummary && dividendSummary.payments.length > 0 && (
-        <div id="dividends" className="scroll-mt-28">
-          <DividendPanel summary={dividendSummary} calendar={dividendCalendar} />
-        </div>
-      )}
     </div>
-  );
-}
-
-/**
- * Jump strip for the desk's five sections. The Portfolio desk is a long scroll —
- * value, allocation, holdings, options, dividends — and "show me my option
- * positions" used to mean scrolling past everything above it. Anchors only: no
- * data moves and nothing re-fetches, and sections that aren't rendered (no
- * option legs, no dividends) are simply absent from the strip.
- */
-function SectionJump({ hasOptions, hasDividends }: { hasOptions: boolean; hasDividends: boolean }) {
-  const sections = [
-    { id: "value", label: "Value" },
-    { id: "allocation", label: "Allocation" },
-    { id: "holdings", label: "Holdings" },
-    ...(hasOptions ? [{ id: "options", label: "Options" }] : []),
-    ...(hasDividends ? [{ id: "dividends", label: "Dividends" }] : []),
-  ];
-  const key = sections.map((s) => s.id).join(",");
-  const [active, setActive] = useState("value");
-
-  useEffect(() => {
-    const els = key
-      .split(",")
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => el != null);
-    if (els.length === 0) return;
-    // The band runs from just under the sticky header to 55% down the viewport,
-    // so the section you're reading wins rather than whatever is at the bottom.
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const seen = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (seen[0]) setActive(seen[0].target.id);
-      },
-      { rootMargin: "-96px 0px -55% 0px" },
-    );
-    els.forEach((el) => obs.observe(el));
-    return () => obs.disconnect();
-  }, [key]);
-
-  return (
-    <nav
-      aria-label="Sections of this desk"
-      className="material sticky top-14 z-10 -mx-1 flex gap-1.5 overflow-x-auto rounded-full px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-    >
-      {sections.map((s) => (
-        <a
-          key={s.id}
-          href={`#${s.id}`}
-          aria-current={active === s.id ? "true" : undefined}
-          className={`shrink-0 rounded-full border px-3 py-1 text-xs transition-colors ${
-            active === s.id
-              ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
-              : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-          }`}
-        >
-          {s.label}
-        </a>
-      ))}
-    </nav>
   );
 }
 
@@ -1324,65 +1117,56 @@ function OptionsSummaryCard({
   const urgent = soonest != null && soonest <= 7;
 
   return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Options</span>
-        <span className="text-xs text-[var(--faint)]">
-          {structures.size} {structures.size === 1 ? "structure" : "structures"} · {legs.length}{" "}
-          {legs.length === 1 ? "leg" : "legs"}
-        </span>
-      </div>
+    <section className="space-y-4">
+      <SectionHead
+        title="Options"
+        action={
+          <span className="text-xs text-[var(--muted)]">
+            {structures.size} {structures.size === 1 ? "structure" : "structures"} · {legs.length}{" "}
+            {legs.length === 1 ? "leg" : "legs"}
+          </span>
+        }
+      />
 
-      <div className="px-6 py-5">
-        {urgent && (
-          <p className="mb-4 font-display text-lg leading-snug">
-            <span className="text-[var(--coral)]">
-              {expiringSoon} {expiringSoon === 1 ? "leg expires" : "legs expire"} in{" "}
-              {soonest === 0 ? "under a day" : `${soonest} ${soonest === 1 ? "day" : "days"}`}.
-            </span>{" "}
-            <span className="text-[var(--muted)]">Check them before the close.</span>
-          </p>
-        )}
+      {urgent && (
+        <Verdict>
+          <span className="text-[var(--coral)]">
+            {expiringSoon} {expiringSoon === 1 ? "leg expires" : "legs expire"} in{" "}
+            {soonest === 0 ? "under a day" : `${soonest} ${soonest === 1 ? "day" : "days"}`}.
+          </span>{" "}
+          <span className="text-[var(--muted)]">Check them before the close.</span>
+        </Verdict>
+      )}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div>
-            <p className="eyebrow">Net value</p>
-            <p className="mono mt-1.5 text-lg">{formatMoney(value, currency)}</p>
-            {value < 0 && <p className="mt-0.5 text-xs text-[var(--coral)]">net short — a liability</p>}
-          </div>
-          <div>
-            <p className="eyebrow">Open P&amp;L</p>
-            <p
-              className={`mono mt-1.5 text-lg ${
-                pnl == null
-                  ? "text-[var(--faint)]"
-                  : pnl >= 0
-                    ? "text-[var(--jade)]"
-                    : "text-[var(--coral)]"
-              }`}
-            >
-              {pnl == null
-                ? "—"
-                : `${pnl >= 0 ? "+" : "−"}${formatMoney(Math.abs(pnl), currency)}`}
-            </p>
-          </div>
-          <div>
-            <p className="eyebrow">Next expiry</p>
-            <p className={`mono mt-1.5 text-lg ${urgent ? "text-[var(--coral)]" : ""}`}>
-              {soonest == null ? "—" : soonest < 0 ? "expired" : `${soonest}d`}
-            </p>
-          </div>
-        </div>
+      <StatStrip className="border-t-0 pt-0">
+        <Stat
+          label="Net value"
+          value={formatMoney(value, currency)}
+          sub={
+            value < 0 ? (
+              <span className="text-[var(--coral)]">net short — a liability</span>
+            ) : undefined
+          }
+        />
+        <Stat
+          label="Open P&L"
+          tone={pnl == null ? "muted" : pnl >= 0 ? "jade" : "coral"}
+          value={
+            pnl == null ? "—" : `${pnl >= 0 ? "+" : "−"}${formatMoney(Math.abs(pnl), currency)}`
+          }
+        />
+        <Stat
+          label="Next expiry"
+          tone={urgent ? "coral" : "default"}
+          value={soonest == null ? "—" : soonest < 0 ? "expired" : `${soonest}d`}
+        />
+      </StatStrip>
 
-        <Link
-          href="/investments/options"
-          className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-xs text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-        >
-          Open the options desk
-          <ArrowUpRight size={12} />
-        </Link>
-      </div>
-    </Card>
+      <Link href="/investments/options" className={pill}>
+        Open the options desk
+        <ArrowUpRight size={14} />
+      </Link>
+    </section>
   );
 }
 
@@ -1416,7 +1200,7 @@ function GroupHeaderRow({
       <td colSpan={span} className="px-3 py-2">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="eyebrow">{section.label}</span>
-          <span className="text-[11px] text-[var(--faint)]">
+          <span className="text-[11px] text-[var(--muted)]">
             {n} {section.kind === "option" ? (n === 1 ? "structure" : "structures") : n === 1 ? "position" : "positions"}
           </span>
           <span className="mono ml-auto text-xs text-[var(--muted)]">
@@ -1431,7 +1215,7 @@ function GroupHeaderRow({
             {/* Cash is in the total but it isn't a bet — say so once, here,
                 rather than letting it pad the "invested" figure silently. */}
             {section.kind === "cash" && (
-              <span className="text-[var(--faint)]"> · not invested</span>
+              <span className="text-[var(--muted)]"> · not invested</span>
             )}
           </span>
         </div>
@@ -1475,7 +1259,7 @@ function HoldingRowView({
               onClick={() => setExpanded((v) => !v)}
               aria-expanded={expanded}
               aria-label={expanded ? `Collapse ${h.ticker}` : `Expand ${h.ticker}`}
-              className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
+              className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] transition hover:text-[var(--paper)]"
             >
               <ChevronDown
                 size={14}
@@ -1495,91 +1279,14 @@ function HoldingRowView({
                 {cleanSecurityName(h.securityName)}
               </span>
               {/* Quiet row actions — revealed on hover so 45 rows don't shout. */}
-              <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 md:inline-flex">
-                {isOptionable(h) && (
-                  <>
-                    <Link
-                      href={`/investments/options/chain?ticker=${encodeURIComponent(h.ticker as string)}`}
-                      title={`Option chain for ${h.ticker}`}
-                      className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                    >
-                      Chain
-                      <ArrowUpRight size={10} />
-                    </Link>
-                    <Link
-                      href={`/investments/options/vol?ticker=${encodeURIComponent(h.ticker as string)}`}
-                      title={`Fixed-strike vol for ${h.ticker}`}
-                      className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                    >
-                      Vol
-                      <ArrowUpRight size={10} />
-                    </Link>
-                  </>
-                )}
-                {h.ticker && !parseOccSymbol(h.ticker) && (
-                  <Link
-                    href={`/fundamentals?ticker=${encodeURIComponent(h.ticker)}`}
-                    title={`Fundamentals for ${h.ticker}`}
-                    className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                  >
-                    Fundamentals
-                    <ArrowUpRight size={10} />
-                  </Link>
-                )}
-              </span>
+              <HoldingDeskLinks h={h} />
               {h.manual && (
-                <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+                <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
                   {h.securityType ?? "manual"}
                 </span>
               )}
-              {h.manual && (
-                <span className="inline-flex items-center">
-                  <EditManualHoldingButton
-                    id={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                    isTickered={Boolean(h.ticker)}
-                    quantity={h.quantity}
-                    costBasis={h.costBasis}
-                    value={h.value}
-                    fromWallet={h.fromWallet}
-                  />
-                  {/* A wallet row would be re-created by the next sync, so it's
-                      hidden (a persisted rule) rather than deleted. */}
-                  {h.fromWallet ? (
-                    <HideWalletTokenButton
-                      id={h.id}
-                      name={h.securityName ?? h.ticker ?? "holding"}
-                    />
-                  ) : (
-                    <DeleteManualHoldingButton
-                      id={h.id}
-                      name={h.securityName ?? h.ticker ?? "holding"}
-                    />
-                  )}
-                </span>
-              )}
-              {!h.manual && (
-                <span className="inline-flex items-center gap-1.5">
-                  {h.hasOverride && (
-                    <span
-                      title="Cost basis manually corrected"
-                      className="rounded border border-[var(--brass-dim)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]"
-                    >
-                      adj
-                    </span>
-                  )}
-                  <EditCostBasisButton
-                    holdingId={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                    quantity={h.quantity}
-                    plaidCostBasis={h.plaidCostBasis ?? null}
-                    overrideTotal={h.overrideTotal ?? null}
-                    overrideUnit={h.overrideUnit ?? null}
-                    overrideAsOf={h.overrideAsOf ?? null}
-                    hasOverride={Boolean(h.hasOverride)}
-                  />
-                </span>
-              )}
+              {h.hasOverride && <AdjustedBadge />}
+              <HoldingEditButtons h={h} />
             </span>
             <SectorEditor
               sector={sector}
@@ -1607,8 +1314,119 @@ function HoldingRowView({
   );
 }
 
+/**
+ * A holding's links into the Trading desk: Chain and Vol for an equity or ETF,
+ * Fundamentals for any plain ticker. The table row and the sheet row used to
+ * each hand-write these; both render this now. Nothing renders with the desk
+ * off — every route it points at is gated behind the setting.
+ */
+function DeskLinks({
+  ticker,
+  optionable,
+  chainOnly = false,
+}: {
+  ticker: string | null;
+  optionable: boolean;
+  /** Option groups: the underlying's chain is the only link that makes sense. */
+  chainOnly?: boolean;
+}) {
+  const desk = useContext(TradingDeskContext);
+  if (!desk || !ticker) return null;
+  const sym = encodeURIComponent(ticker);
+  const links = [
+    ...(optionable
+      ? [
+          { href: `/investments/options/chain?ticker=${sym}`, label: "Chain", title: `Option chain for ${ticker}` },
+          ...(chainOnly
+            ? []
+            : [{ href: `/investments/options/chain?ticker=${sym}&mode=vol`, label: "Vol", title: `Fixed-strike vol for ${ticker}` }]),
+        ]
+      : []),
+    ...(!chainOnly && !parseOccSymbol(ticker)
+      ? [{ href: `/fundamentals?ticker=${sym}`, label: "Fundamentals", title: `Fundamentals for ${ticker}` }]
+      : []),
+  ];
+  return (
+    <>
+      {links.map((l) => (
+        <Link
+          key={l.label}
+          href={l.href}
+          title={l.title}
+          className="inline-flex items-center gap-0.5 text-[11px] text-[var(--muted)] transition-colors hover:text-[var(--brass)]"
+        >
+          {l.label}
+          <ArrowUpRight size={10} />
+        </Link>
+      ))}
+    </>
+  );
+}
+
+/** The table row's hover strip; the sheet row folds DeskLinks into its own. */
+function HoldingDeskLinks({ h }: { h: HoldingRow }) {
+  const desk = useContext(TradingDeskContext);
+  if (!desk || !h.ticker) return null;
+  return (
+    <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 md:inline-flex">
+      <DeskLinks ticker={h.ticker} optionable={isOptionable(h)} />
+    </span>
+  );
+}
+
+function AdjustedBadge() {
+  return (
+    <span
+      title="Cost basis manually corrected"
+      className="shrink-0 rounded border border-[var(--brass-dim)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]"
+    >
+      adj
+    </span>
+  );
+}
+
+/** Edit/remove for a manual holding, or the cost-basis correction for a Plaid one. */
+function HoldingEditButtons({ h }: { h: HoldingRow }) {
+  const name = h.securityName ?? h.ticker ?? "holding";
+  if (!h.manual) {
+    return (
+      <EditCostBasisButton
+        holdingId={h.id}
+        name={name}
+        quantity={h.quantity}
+        plaidCostBasis={h.plaidCostBasis ?? null}
+        overrideTotal={h.overrideTotal ?? null}
+        overrideUnit={h.overrideUnit ?? null}
+        overrideAsOf={h.overrideAsOf ?? null}
+        hasOverride={Boolean(h.hasOverride)}
+      />
+    );
+  }
+  return (
+    <span className="inline-flex items-center">
+      <EditManualHoldingButton
+        id={h.id}
+        name={name}
+        isTickered={Boolean(h.ticker)}
+        quantity={h.quantity}
+        costBasis={h.costBasis}
+        value={h.value}
+        fromWallet={h.fromWallet}
+      />
+      {/* A wallet row would be re-created by the next sync, so it's hidden (a
+          persisted rule) rather than deleted. */}
+      {h.fromWallet ? (
+        <HideWalletTokenButton id={h.id} name={name} />
+      ) : (
+        <DeleteManualHoldingButton id={h.id} name={name} />
+      )}
+    </span>
+  );
+}
+
 /** Shared "options →" chip used by the mobile holding cards. */
 function OptionsChip({ ticker }: { ticker: string }) {
+  if (!useContext(TradingDeskContext)) return null;
   return (
     <Link
       href={`/investments/options/chain?ticker=${encodeURIComponent(ticker)}`}
@@ -1622,7 +1440,7 @@ function OptionsChip({ ticker }: { ticker: string }) {
 }
 
 const signedColor = (n: number | null) =>
-  n == null ? "text-[var(--faint)]" : n >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]";
+  n == null ? "text-[var(--muted)]" : n >= 0 ? "text-[var(--jade)]" : "text-[var(--coral)]";
 const fmtPct = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
 const fmtSigned = (n: number | null, currency: string) =>
   n == null ? "—" : `${n >= 0 ? "+" : "−"}${formatMoney(Math.abs(n), currency)}`;
@@ -1846,7 +1664,7 @@ function OptionGroupRow({
         onClick={() => setExpanded((v) => !v)}
       >
         <td className="w-8 pl-2">
-          <span className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition group-hover:text-[var(--paper)]">
+          <span className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] transition group-hover:text-[var(--paper)]">
             <ChevronDown size={14} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
           </span>
         </td>
@@ -1865,15 +1683,12 @@ function OptionGroupRow({
                 liability
               </span>
             )}
-            <Link
-              href={`/investments/options/chain?ticker=${encodeURIComponent(underlying)}`}
+            <span
               onClick={(e) => e.stopPropagation()}
-              title={`Option chain for ${underlying}`}
-              className="hidden items-center gap-0.5 text-[11px] text-[var(--faint)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-[var(--brass)] md:inline-flex"
+              className="hidden items-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 md:inline-flex"
             >
-              Chain
-              <ArrowUpRight size={10} />
-            </Link>
+              <DeskLinks ticker={underlying} optionable chainOnly />
+            </span>
             {Number.isFinite(soonestDte) && (
               <span
                 className={`mono rounded px-1.5 py-0.5 text-[10px] ${
@@ -1881,7 +1696,7 @@ function OptionGroupRow({
                     ? "bg-[var(--coral)]/15 text-[var(--coral)]"
                     : groupRisk === "medium"
                       ? "bg-[var(--brass)]/15 text-[var(--brass)]"
-                      : "text-[var(--faint)]"
+                      : "text-[var(--muted)]"
                 }`}
                 title={`${soonestDte} days to soonest expiry`}
               >
@@ -2065,69 +1880,74 @@ function bandWidth(weight: number, maxWeight: number): number {
   return Math.max(1.5, Math.min(100, (Math.abs(weight) / maxWeight) * 100));
 }
 
-/** One position: a proportional band, an identity, today, and what it's worth. */
+/**
+ * The sheet's column template. Phones get identity + value; from md up it is the
+ * full ruled table — identity, weight bar, weight, value, today $, today %.
+ */
+const SHEET_GRID =
+  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-3 md:grid-cols-[1.25rem_minmax(220px,1.5fr)_minmax(110px,1.3fr)_3.25rem_8.5rem_7rem_4.75rem] md:gap-x-5";
+
+/** One position: identity, a bar scaled to the largest holding, worth, and today. */
 function SheetRow({
   bar,
+  weight,
   expanded,
   onToggle,
   toggleLabel,
   identity,
   meta,
-  day,
-  value,
+  m,
   panel,
 }: {
   bar: number;
+  weight: number;
   expanded: boolean;
   onToggle?: () => void;
   toggleLabel: string;
   identity: React.ReactNode;
   meta: React.ReactNode;
-  day: React.ReactNode;
-  value: React.ReactNode;
+  m: RowMetrics;
   panel?: React.ReactNode;
 }) {
   return (
-    <li className="border-b border-line/60 last:border-0">
-      {/* The band measures the row, not the row plus whatever it expands into,
-          so it lives on its own wrapper rather than the list item. */}
-      <div className="group relative transition-colors hover:bg-[var(--panel-2)]/40">
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-y-0 left-0"
-          style={{
-            width: `${bar}%`,
-            background:
-              "linear-gradient(90deg, color-mix(in srgb, var(--brass) 15%, transparent) 0%, color-mix(in srgb, var(--brass) 5%, transparent) 62%, transparent 100%)",
-          }}
-        />
-        <div className="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-3 sm:grid-cols-[1.25rem_minmax(0,1fr)_6rem_9.5rem] sm:gap-x-5 sm:px-4">
-          <div>
-            {onToggle && (
-              <button
-                onClick={onToggle}
-                aria-expanded={expanded}
-                aria-label={toggleLabel}
-                className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
-              >
-                <ChevronDown
-                  size={14}
-                  className={`transition-transform ${expanded ? "rotate-180" : ""}`}
-                />
-              </button>
-            )}
-          </div>
-
-          <div className="flex min-w-0 flex-col gap-1">
-            {identity}
-            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-[var(--faint)]">
-              {meta}
-            </div>
-          </div>
-
-          <div className="hidden text-right sm:block">{day}</div>
-          <div className="text-right">{value}</div>
+    <li className="border-b border-line">
+      <div className={`group min-h-[58px] py-2.5 ${SHEET_GRID}`}>
+        <div>
+          {onToggle && (
+            <button
+              onClick={onToggle}
+              aria-expanded={expanded}
+              aria-label={toggleLabel}
+              className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] transition hover:text-[var(--paper)]"
+            >
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+              />
+            </button>
+          )}
         </div>
+
+        <div className="flex min-w-0 flex-col gap-1">
+          {identity}
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-[var(--muted)]">
+            {meta}
+          </div>
+        </div>
+
+        <Bar pct={bar} className="hidden md:block" />
+        <span className="mono hidden text-xs text-[var(--muted)] md:block">
+          {weight.toFixed(1)}%
+        </span>
+        <div className="text-right">
+          <SheetValue m={m} />
+        </div>
+        <span className={`mono hidden text-right md:block ${signedColor(m.dayValue)}`}>
+          {fmtSigned(m.dayValue, m.currency)}
+        </span>
+        <span className={`mono hidden text-right md:block ${signedColor(m.day)}`}>
+          {fmtPct(m.day)}
+        </span>
       </div>
 
       {expanded && panel}
@@ -2135,28 +1955,11 @@ function SheetRow({
   );
 }
 
-/** Today's move for one row — the sheet's only coloured figures, besides P&L. */
-function SheetDay({ m }: { m: RowMetrics }) {
-  if (m.day == null && m.dayValue == null) {
-    return <span className="mono text-[13px] text-[var(--faint)]">—</span>;
-  }
-  return (
-    <>
-      <p className={`mono text-[13px] ${signedColor(m.day)}`}>{fmtPct(m.day)}</p>
-      {m.dayValue != null && (
-        <p className={`mono text-[11px] opacity-75 ${signedColor(m.dayValue)}`}>
-          {fmtSigned(m.dayValue, m.currency)}
-        </p>
-      )}
-    </>
-  );
-}
-
 /** What a position is worth, and what it has made — the row's terminal figure. */
 function SheetValue({ m }: { m: RowMetrics }) {
   return (
     <>
-      <p className="mono text-[15px] tabular text-[var(--paper)]">
+      <p className="mono tabular text-[var(--paper)]">
         {formatMoney(m.value, m.currency)}
       </p>
       {m.pnl != null ? (
@@ -2169,7 +1972,7 @@ function SheetValue({ m }: { m: RowMetrics }) {
           )}
         </p>
       ) : (
-        <p className="text-[11px] text-[var(--faint)]">no cost basis</p>
+        <p className="text-[11px] text-[var(--muted)]">no cost basis</p>
       )}
     </>
   );
@@ -2179,7 +1982,7 @@ function SheetValue({ m }: { m: RowMetrics }) {
 function SheetDayInline({ m }: { m: RowMetrics }) {
   if (m.day == null) return null;
   return (
-    <span className={`mono sm:hidden ${signedColor(m.day)}`}>{fmtPct(m.day)} today</span>
+    <span className={`mono md:hidden ${signedColor(m.day)}`}>{fmtPct(m.day)} today</span>
   );
 }
 
@@ -2201,12 +2004,14 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
   return (
     <SheetRow
       bar={bandWidth(m.weight, ctx.maxWeight)}
+      weight={m.weight}
+      m={m}
       expanded={expanded}
       onToggle={canExpand ? () => setExpanded((v) => !v) : undefined}
       toggleLabel={expanded ? `Collapse ${h.ticker}` : `Expand ${h.ticker}`}
       identity={
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="mono shrink-0 text-[15px] font-semibold tracking-tight text-[var(--brass)]">
+          <span className="mono min-w-12 shrink-0 font-medium text-[var(--paper)]">
             {h.ticker ?? "—"}
           </span>
           <span
@@ -2216,93 +2021,21 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
             {cleanSecurityName(h.securityName)}
           </span>
           {h.manual && (
-            <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+            <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
               {h.securityType ?? "manual"}
             </span>
           )}
-          {h.hasOverride && (
-            <span
-              title="Cost basis manually corrected"
-              className="shrink-0 rounded border border-[var(--brass-dim)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--brass)]"
-            >
-              adj
-            </span>
-          )}
+          {h.hasOverride && <AdjustedBadge />}
           {/* Quiet row actions — revealed on hover so 40 rows don't shout. */}
           <span className="hidden items-center gap-2.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100 md:inline-flex">
-            {isOptionable(h) && (
-              <>
-                <Link
-                  href={`/investments/options/chain?ticker=${encodeURIComponent(h.ticker as string)}`}
-                  title={`Option chain for ${h.ticker}`}
-                  className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                >
-                  Chain
-                  <ArrowUpRight size={10} />
-                </Link>
-                <Link
-                  href={`/investments/options/vol?ticker=${encodeURIComponent(h.ticker as string)}`}
-                  title={`Fixed-strike vol for ${h.ticker}`}
-                  className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-                >
-                  Vol
-                  <ArrowUpRight size={10} />
-                </Link>
-              </>
-            )}
-            {h.ticker && !parseOccSymbol(h.ticker) && (
-              <Link
-                href={`/fundamentals?ticker=${encodeURIComponent(h.ticker)}`}
-                title={`Fundamentals for ${h.ticker}`}
-                className="inline-flex items-center gap-0.5 text-[11px] text-[var(--faint)] transition-colors hover:text-[var(--brass)]"
-              >
-                Fundamentals
-                <ArrowUpRight size={10} />
-              </Link>
-            )}
-            {h.manual ? (
-              <span className="inline-flex items-center">
-                <EditManualHoldingButton
-                  id={h.id}
-                  name={h.securityName ?? h.ticker ?? "holding"}
-                  isTickered={Boolean(h.ticker)}
-                  quantity={h.quantity}
-                  costBasis={h.costBasis}
-                  value={h.value}
-                  fromWallet={h.fromWallet}
-                />
-                {/* A wallet row would be re-created by the next sync, so it's
-                    hidden (a persisted rule) rather than deleted. */}
-                {h.fromWallet ? (
-                  <HideWalletTokenButton
-                    id={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                  />
-                ) : (
-                  <DeleteManualHoldingButton
-                    id={h.id}
-                    name={h.securityName ?? h.ticker ?? "holding"}
-                  />
-                )}
-              </span>
-            ) : (
-              <EditCostBasisButton
-                holdingId={h.id}
-                name={h.securityName ?? h.ticker ?? "holding"}
-                quantity={h.quantity}
-                plaidCostBasis={h.plaidCostBasis ?? null}
-                overrideTotal={h.overrideTotal ?? null}
-                overrideUnit={h.overrideUnit ?? null}
-                overrideAsOf={h.overrideAsOf ?? null}
-                hasOverride={Boolean(h.hasOverride)}
-              />
-            )}
+            <DeskLinks ticker={h.ticker} optionable={isOptionable(h)} />
+            <HoldingEditButtons h={h} />
           </span>
         </div>
       }
       meta={
         <>
-          <span className="mono text-[var(--brass-dim)]">{m.weight.toFixed(1)}%</span>
+          <span className="mono md:hidden">{m.weight.toFixed(1)}%</span>
           {m.qty != null && (
             <span className="mono">
               {m.qty.toLocaleString()}
@@ -2319,8 +2052,6 @@ function SheetHoldingRow({ h, m, ctx }: { h: HoldingRow; m: RowMetrics; ctx: She
           />
         </>
       }
-      day={<SheetDay m={m} />}
-      value={<SheetValue m={m} />}
       panel={
         canExpand && (
           <div className="relative border-t border-line/60 bg-[var(--panel-2)]/40 px-4 py-5 sm:px-6">
@@ -2386,12 +2117,14 @@ function SheetOptionRow({
   return (
     <SheetRow
       bar={bandWidth(m.weight, ctx.maxWeight)}
+      weight={m.weight}
+      m={m}
       expanded={expanded}
       onToggle={() => setExpanded((v) => !v)}
       toggleLabel={expanded ? `Collapse ${underlying} options` : `Expand ${underlying} options`}
       identity={
         <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-          <span className="mono shrink-0 text-[15px] font-semibold tracking-tight text-[var(--brass)]">
+          <span className="mono min-w-12 shrink-0 font-medium text-[var(--paper)]">
             {underlying}
           </span>
           <span className="truncate text-[13px] text-[var(--muted)]">{summary}</span>
@@ -2414,19 +2147,14 @@ function SheetOptionRow({
               {f === "assignment" ? "Assign risk" : "Worthless risk"}
             </span>
           ))}
-          <Link
-            href={`/investments/options/chain?ticker=${encodeURIComponent(underlying)}`}
-            title={`Option chain for ${underlying}`}
-            className="hidden items-center gap-0.5 text-[11px] text-[var(--faint)] opacity-0 transition-opacity duration-150 hover:text-[var(--brass)] focus-within:opacity-100 group-hover:opacity-100 md:inline-flex"
-          >
-            Chain
-            <ArrowUpRight size={10} />
-          </Link>
+          <span className="hidden items-center opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 md:inline-flex">
+            <DeskLinks ticker={underlying} optionable chainOnly />
+          </span>
         </div>
       }
       meta={
         <>
-          <span className="mono text-[var(--brass-dim)]">{m.weight.toFixed(1)}%</span>
+          <span className="mono md:hidden">{m.weight.toFixed(1)}%</span>
           {Number.isFinite(soonestDte) && (
             <span
               className={`mono ${
@@ -2447,8 +2175,6 @@ function SheetOptionRow({
           {m.account && <span className="truncate">{m.account}</span>}
         </>
       }
-      day={<SheetDay m={m} />}
-      value={<SheetValue m={m} />}
       panel={
         <div className="relative border-t border-line/60 bg-[var(--panel-2)]/40 px-4 py-5 sm:px-6">
           <OptionStructuresPanel legs={legs} quotes={ctx.quotes} currency={m.currency} />
@@ -2478,9 +2204,9 @@ function SheetSection({
   const n = section.rows.length;
   return (
     <section>
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-line/60 bg-[var(--panel-2)]/50 px-4 py-2.5">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-line pb-2 pt-5">
         <span className="eyebrow">{section.label}</span>
-        <span className="text-[11px] text-[var(--faint)]">
+        <span className="text-[11px] text-[var(--muted)]">
           {n}{" "}
           {section.kind === "option"
             ? n === 1
@@ -2501,7 +2227,7 @@ function SheetSection({
           )}
           {/* Cash is in the total but it isn't a bet — say so once, here,
               rather than letting it pad the "invested" figure silently. */}
-          {section.kind === "cash" && <span className="text-[var(--faint)]"> · not invested</span>}
+          {section.kind === "cash" && <span className="text-[var(--muted)]"> · not invested</span>}
         </span>
       </div>
       <ul>
@@ -2532,22 +2258,15 @@ function ViewToggle({
   onChange: (v: HoldingsView) => void;
 }) {
   return (
-    <div className="flex items-center rounded-lg border border-line p-0.5 text-xs">
-      {(["sheet", "table"] as const).map((v) => (
-        <button
-          key={v}
-          onClick={() => onChange(v)}
-          aria-pressed={view === v}
-          className={`rounded-md px-2.5 py-1 transition ${
-            view === v
-              ? "bg-[var(--panel-2)] text-[var(--paper)]"
-              : "text-[var(--faint)] hover:text-[var(--muted)]"
-          }`}
-        >
-          {v === "sheet" ? "Sheet" : "Table"}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      label="Holdings view"
+      value={view}
+      onChange={onChange}
+      options={[
+        { value: "sheet", label: "Sheet" },
+        { value: "table", label: "Table" },
+      ]}
+    />
   );
 }
 
@@ -2586,7 +2305,7 @@ function SheetSort({
         onClick={() => onSort(sortKey)}
         aria-label={sortDir === "desc" ? "Sort ascending" : "Sort descending"}
         title={sortDir === "desc" ? "Largest first" : "Smallest first"}
-        className="grid h-6 w-6 place-items-center rounded text-[var(--faint)] transition hover:text-[var(--paper)]"
+        className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] transition hover:text-[var(--paper)]"
       >
         <ChevronDown size={13} className={sortDir === "asc" ? "rotate-180" : ""} />
       </button>
@@ -2607,6 +2326,13 @@ function HoldingsSheet({
   showAll,
   onShowAll,
   currency,
+  count,
+  total,
+  dayChange,
+  dayPct,
+  sortKey,
+  sortDir,
+  onSort,
   ctx,
   empty,
 }: {
@@ -2624,43 +2350,100 @@ function HoldingsSheet({
   showAll: boolean;
   onShowAll: (v: boolean) => void;
   currency: string;
+  /** Rows in the book (option legs count once per underlying). */
+  count: number;
+  total: number;
+  /** Null until at least one position has a live quote. */
+  dayChange: number | null;
+  dayPct: number | null;
+  sortKey: SortKey;
+  sortDir: "desc" | "asc";
+  onSort: (key: SortKey) => void;
   ctx: SheetCtx;
   empty: string | null;
 }) {
-  if (empty) {
-    return <p className="px-6 py-10 text-center text-sm text-[var(--muted)]">{empty}</p>;
-  }
-  return (
-    <div>
-      {sections.map((section) => (
-        <SheetSection key={section.kind} section={section} currency={currency} ctx={ctx} />
-      ))}
+  const head = (key: SortKey, label: string, cls: string) => (
+    <button
+      type="button"
+      onClick={() => onSort(key)}
+      aria-label={`Sort by ${label === "%" ? "today's percent change" : label.toLowerCase()}`}
+      className={`${cls} transition-colors hover:text-[var(--paper)] ${
+        sortKey === key ? "text-[var(--paper)]" : ""
+      }`}
+    >
+      {label}
+      {sortKey === key && <span aria-hidden> {sortDir === "desc" ? "↓" : "↑"}</span>}
+    </button>
+  );
 
-      {/* The long tail, folded. The money is counted in the line — only the
-          rows are hidden, and one click brings them back. */}
-      {tail.length > 0 && (
-        <button
-          onClick={() => onShowAll(true)}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left text-xs text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)]/40 hover:text-[var(--paper)]"
+  return (
+    <div className="overflow-x-auto">
+      <div className="md:min-w-[780px]">
+        <div
+          className={`${SHEET_GRID} !items-end border-b border-[var(--line-strong)] pb-2.5 text-xs text-[var(--muted)]`}
         >
-          <ChevronDown size={13} className="text-[var(--faint)]" />
-          <span>
-            {tail.length} positions under {TAIL_WEIGHT_PCT}% each
-          </span>
-          <span className="mono ml-auto text-[var(--faint)]">
-            {formatMoney(tailValue, currency)} · {tailWeight.toFixed(1)}%
-          </span>
-          <span className="text-[var(--brass)]">Show</span>
-        </button>
-      )}
-      {showAll && (
-        <button
-          onClick={() => onShowAll(false)}
-          className="w-full px-4 py-3 text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
-        >
-          Fold small positions again
-        </button>
-      )}
+          <h2 className="col-span-2 font-display text-lg tracking-tight text-[var(--paper)]">
+            Holdings
+            <span className="mono ml-2 text-xs font-normal text-[var(--muted)]">{count}</span>
+          </h2>
+          {head("weight", "Weight", "hidden text-left md:block")}
+          <span className="hidden md:block" />
+          {head("value", "Value", "text-right")}
+          {head("dayValue", "Today", "hidden text-right md:block")}
+          {head("day", "%", "hidden text-right md:block")}
+        </div>
+
+        {empty ? (
+          <p className="border-b border-line py-10 text-center text-sm text-[var(--muted)]">
+            {empty}
+          </p>
+        ) : (
+          <>
+            {sections.map((section) => (
+              <SheetSection key={section.kind} section={section} currency={currency} ctx={ctx} />
+            ))}
+
+            {/* The long tail, folded. The money is counted in the line — only the
+                rows are hidden, and one click brings them back. */}
+            {tail.length > 0 && (
+              <button
+                onClick={() => onShowAll(true)}
+                className="flex min-h-[52px] w-full items-center gap-3 border-b border-line text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+              >
+                <ChevronDown size={13} />
+                <span>
+                  {tail.length} positions under {TAIL_WEIGHT_PCT}% each
+                </span>
+                <span className="mono ml-auto">
+                  {formatMoney(tailValue, currency)} · {tailWeight.toFixed(1)}%
+                </span>
+                <span className="text-[var(--brass)]">Show</span>
+              </button>
+            )}
+            {showAll && (
+              <button
+                onClick={() => onShowAll(false)}
+                className="min-h-11 w-full border-b border-line text-left text-xs text-[var(--muted)] transition-colors hover:text-[var(--paper)]"
+              >
+                Fold small positions again
+              </button>
+            )}
+
+            <div className={`${SHEET_GRID} mono min-h-14`}>
+              <span className="col-span-2 font-sans text-[var(--muted)]">Total</span>
+              <span className="hidden md:block" />
+              <span className="hidden md:block" />
+              <span className="text-right">{formatMoney(total, currency)}</span>
+              <span className={`hidden text-right md:block ${signedColor(dayChange)}`}>
+                {fmtSigned(dayChange, currency)}
+              </span>
+              <span className={`hidden text-right md:block ${signedColor(dayPct)}`}>
+                {fmtPct(dayPct)}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -2728,95 +2511,85 @@ function GainBreakdownModal({
   const gainPositive = gain >= 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+    <Dialog
+      onClose={onClose}
+      label="Unrealized gain breakdown"
+      size="2xl"
+      className="flex max-h-[85vh] flex-col"
     >
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)] shadow-[var(--elev-3)]">
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div>
-            <p className="text-sm font-medium">Unrealized gain breakdown</p>
-            <p className="mt-0.5 text-xs text-[var(--muted)]">
-              Per-holding P&amp;L (current value − cost basis)
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-md p-1 text-[var(--faint)] transition hover:text-[var(--paper)]"
-          >
-            <X size={16} />
-          </button>
-        </div>
+      <DialogHeader
+        title="Unrealized gain breakdown"
+        description={<>Per-holding P&amp;L (current value − cost basis)</>}
+        onClose={onClose}
+      />
 
-        <div className="overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-[var(--panel)]">
-              <tr className="border-b border-line text-left">
-                {["Holding", "Value", "Cost basis", "P&L", "%"].map((h, i) => (
-                  <th
-                    key={h}
-                    className={`px-5 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ h, value, cost, pnl }) => {
-                const pct = pnl != null && cost ? (pnl / cost) * 100 : null;
-                const pos = (pnl ?? 0) >= 0;
-                const color = pos ? "text-[var(--jade)]" : "text-[var(--coral)]";
-                return (
-                  <tr key={h.id} className="border-b border-line/60 last:border-0">
-                    <td className="px-5 py-2.5">
-                      <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
-                      <span className="ml-2 text-[var(--muted)]">{cleanSecurityName(h.securityName)}</span>
-                    </td>
-                    <td className="mono px-5 py-2.5 text-right">
-                      {formatMoney(value, h.currency)}
-                    </td>
-                    <td className="mono px-5 py-2.5 text-right text-[var(--muted)]">
-                      {cost != null ? formatMoney(cost, h.currency) : "—"}
-                    </td>
-                    <td className={`mono px-5 py-2.5 text-right ${pnl != null ? color : "text-[var(--faint)]"}`}>
-                      {pnl != null
-                        ? `${pos ? "+" : "−"}${formatMoney(Math.abs(pnl), h.currency)}`
-                        : "—"}
-                    </td>
-                    <td className={`mono px-5 py-2.5 text-right ${pct != null ? color : "text-[var(--faint)]"}`}>
-                      {pct != null ? `${pos ? "+" : "−"}${Math.abs(pct).toFixed(1)}%` : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      <DialogBody className="p-0">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-[var(--panel)]">
+            <tr className="border-b border-line text-left">
+              {["Holding", "Value", "Cost basis", "P&L", "%"].map((h, i) => (
+                <th
+                  key={h}
+                  className={`px-5 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ h, value, cost, pnl }) => {
+              const pct = pnl != null && cost ? (pnl / cost) * 100 : null;
+              const pos = (pnl ?? 0) >= 0;
+              const color = pos ? "text-[var(--jade)]" : "text-[var(--coral)]";
+              return (
+                <tr key={h.id} className="border-b border-line/60 last:border-0">
+                  <td className="px-5 py-2.5">
+                    <span className="font-medium text-[var(--brass)]">{h.ticker ?? "—"}</span>
+                    <span className="ml-2 text-[var(--muted)]">{cleanSecurityName(h.securityName)}</span>
+                  </td>
+                  <td className="mono px-5 py-2.5 text-right">
+                    {formatMoney(value, h.currency)}
+                  </td>
+                  <td className="mono px-5 py-2.5 text-right text-[var(--muted)]">
+                    {cost != null ? formatMoney(cost, h.currency) : "—"}
+                  </td>
+                  <td className={`mono px-5 py-2.5 text-right ${pnl != null ? color : "text-[var(--muted)]"}`}>
+                    {pnl != null
+                      ? `${pos ? "+" : "−"}${formatMoney(Math.abs(pnl), h.currency)}`
+                      : "—"}
+                  </td>
+                  <td className={`mono px-5 py-2.5 text-right ${pct != null ? color : "text-[var(--muted)]"}`}>
+                    {pct != null ? `${pos ? "+" : "−"}${Math.abs(pct).toFixed(1)}%` : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </DialogBody>
 
-        <div className="border-t border-line px-5 py-4 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-[var(--muted)]">Total cost basis</span>
-            <span className="mono">{formatCurrency(totalCost)}</span>
-          </div>
-          <div className="mt-1.5 flex items-center justify-between">
-            <span className="text-[var(--muted)]">Unrealized gain</span>
-            <span className={`mono ${gainPositive ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
-              {gainPositive ? "+" : "−"}
-              {formatCurrency(Math.abs(gain))}
-            </span>
-          </div>
-          {uncostedValue > 0.005 && (
-            <p className="mt-3 border-t border-line/60 pt-3 text-xs text-[var(--muted)]">
-              {formatCurrency(uncostedValue)} sits in holdings without a cost basis — counted in
-              market value but excluded from unrealized gain (no basis to compare against). Add a
-              cost basis to include them.
-            </p>
-          )}
+      <div className="shrink-0 border-t border-line px-5 py-4 text-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-[var(--muted)]">Total cost basis</span>
+          <span className="mono">{formatCurrency(totalCost)}</span>
         </div>
+        <div className="mt-1.5 flex items-center justify-between">
+          <span className="text-[var(--muted)]">Unrealized gain</span>
+          <span className={`mono ${gainPositive ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
+            {gainPositive ? "+" : "−"}
+            {formatCurrency(Math.abs(gain))}
+          </span>
+        </div>
+        {uncostedValue > 0.005 && (
+          <p className="mt-3 border-t border-line/60 pt-3 text-xs text-[var(--muted)]">
+            {formatCurrency(uncostedValue)} sits in holdings without a cost basis — counted in
+            market value but excluded from unrealized gain (no basis to compare against). Add a
+            cost basis to include them.
+          </p>
+        )}
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -2910,7 +2683,7 @@ function SectorEditor({
         setVal("");
         setOpen(true);
       }}
-      className="inline-flex w-fit items-center gap-1 rounded-full border border-dashed border-line px-2 py-0.5 text-[11px] text-[var(--faint)] transition hover:text-[var(--muted)]"
+      className="inline-flex w-fit items-center gap-1 rounded-full border border-dashed border-line px-2 py-0.5 text-[11px] text-[var(--muted)] transition hover:text-[var(--muted)]"
     >
       <Tag size={9} /> sector
     </button>
@@ -2948,16 +2721,16 @@ function BenchmarkComparison({
   const gapFor = (r: ComparisonRow) => (benchmark === "SPY" ? r.deltaVsSpy : r.deltaVsQqq);
 
   return (
-    <Card className="p-0">
-      <div className="flex items-center justify-between border-b border-line px-6 py-4">
-        <span className="eyebrow">Return vs benchmarks</span>
-        <span className="text-xs text-[var(--faint)]">deposits excluded</span>
-      </div>
+    <section className="space-y-4">
+      <SectionHead
+        title="Return vs benchmarks"
+        action={<span className="text-xs text-[var(--muted)]">deposits excluded</span>}
+      />
 
       {/* The table already contained this sentence; it just never said it. */}
       {standing.state !== "unknown" && (
-        <div className="border-b border-line px-6 py-4">
-          <p className="font-display text-lg leading-snug">
+        <div>
+          <Verdict>
             <span
               className={
                 standing.state === "behind" ? "text-[var(--coral)]" : "text-[var(--jade)]"
@@ -2972,7 +2745,7 @@ function BenchmarkComparison({
                 ? `The gap widens the further back you look — a year out it is ${Math.abs(standing.gapPoints!).toFixed(1)} points.`
                 : "Measured against the index over the same days."}
             </span>
-          </p>
+          </Verdict>
           <p className="mt-1.5 text-xs text-[var(--muted)]">
             Your deposits are removed before comparing, so this measures the picks, not the
             paycheque.
@@ -2980,15 +2753,12 @@ function BenchmarkComparison({
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
+      <div className={ruled.scroll}>
+        <table className={`${ruled.table} min-w-[520px]`}>
           <thead>
-            <tr className="border-b border-line text-left">
+            <tr className={ruled.headRow}>
               {["Window", "You", "SPY", "QQQ", `Gap vs ${benchmark}`].map((h, i) => (
-                <th
-                  key={h}
-                  className={`px-6 py-2.5 eyebrow font-medium ${i >= 1 ? "text-right" : ""}`}
-                >
+                <th key={h} className={`${ruled.th} ${i >= 1 ? "text-right" : ""}`}>
                   {h}
                 </th>
               ))}
@@ -2998,7 +2768,7 @@ function BenchmarkComparison({
             {comparison.map((r) => {
               const pColor =
                 r.portfolioPct == null
-                  ? "text-[var(--faint)]"
+                  ? "text-[var(--muted)]"
                   : r.portfolioPct >= 0
                     ? "text-[var(--jade)]"
                     : "text-[var(--coral)]";
@@ -3007,20 +2777,20 @@ function BenchmarkComparison({
               // table visibly agree rather than making you find the row.
               const lead = r.window === standing.window;
               return (
-                <tr
-                  key={r.window}
-                  className={`border-b border-line/60 last:border-0 ${
-                    lead ? "bg-[var(--panel-2)]/50" : ""
-                  }`}
-                >
-                  <td className="px-6 py-2.5 text-[var(--muted)]">{WINDOW_LABEL[r.window]}</td>
-                  <td className={`mono px-6 py-2.5 text-right ${pColor}`}>{pct(r.portfolioPct)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--faint)]">{pct(r.spyPct)}</td>
-                  <td className="mono px-6 py-2.5 text-right text-[var(--faint)]">{pct(r.qqqPct)}</td>
+                <tr key={r.window} className={`${ruled.row} last:border-0`}>
                   <td
-                    className={`mono px-6 py-2.5 text-right ${
+                    className={`${ruled.td} ${lead ? "text-[var(--paper)]" : "text-[var(--muted)]"}`}
+                  >
+                    {WINDOW_LABEL[r.window]}
+                    {lead && <span className="ml-2 text-xs text-[var(--brass)]">headline</span>}
+                  </td>
+                  <td className={`${ruled.td} ${ruled.num} ${pColor}`}>{pct(r.portfolioPct)}</td>
+                  <td className={`${ruled.td} ${ruled.num} text-[var(--muted)]`}>{pct(r.spyPct)}</td>
+                  <td className={`${ruled.td} ${ruled.num} text-[var(--muted)]`}>{pct(r.qqqPct)}</td>
+                  <td
+                    className={`${ruled.td} ${ruled.num} ${
                       gap == null
-                        ? "text-[var(--faint)]"
+                        ? "text-[var(--muted)]"
                         : gap >= 0
                           ? "text-[var(--jade)]"
                           : "text-[var(--coral)]"
@@ -3034,7 +2804,7 @@ function BenchmarkComparison({
           </tbody>
         </table>
       </div>
-    </Card>
+    </section>
   );
 }
 
@@ -3067,7 +2837,7 @@ function HeaderCell({
         } ${align === "right" ? "flex-row-reverse" : ""}`}
       >
         {label}
-        <span className={active ? "text-[var(--brass)]" : "text-[var(--faint)]"}>
+        <span className={active ? "text-[var(--brass)]" : "text-[var(--muted)]"}>
           {active ? (dir === "desc" ? "↓" : "↑") : "↕"}
         </span>
       </button>
@@ -3091,7 +2861,7 @@ function MetricCells({
 }) {
   const numRight = "mono px-3 py-3.5 text-right";
   const dash = (key: string) => (
-    <td key={key} className={`${numRight} text-[var(--faint)]`}>
+    <td key={key} className={`${numRight} text-[var(--muted)]`}>
       —
     </td>
   );
@@ -3111,7 +2881,7 @@ function MetricCells({
                 {history && history.length > 1 ? (
                   <Sparkline data={history} />
                 ) : (
-                  <span className="text-[var(--faint)]">—</span>
+                  <span className="text-[var(--muted)]">—</span>
                 )}
               </td>
             );
@@ -3162,7 +2932,7 @@ function MetricCells({
 /** Signed currency cell (green/red), or a dash when there's no value. */
 function SignedCurrencyCell({ amount, currency }: { amount: number | null; currency: string }) {
   if (amount == null) {
-    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
+    return <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">—</td>;
   }
   const positive = amount >= 0;
   const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";
@@ -3238,7 +3008,7 @@ function ColumnsMenu({
             <span className="eyebrow">Columns</span>
             <button
               onClick={onReset}
-              className="text-[10px] uppercase tracking-wide text-[var(--faint)] transition hover:text-[var(--brass)]"
+              className="text-[10px] uppercase tracking-wide text-[var(--muted)] transition hover:text-[var(--brass)]"
             >
               Reset
             </button>
@@ -3286,7 +3056,7 @@ function PnlCell({
   currency: string;
 }) {
   if (pnl == null) {
-    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
+    return <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">—</td>;
   }
   const positive = pnl >= 0;
   const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";
@@ -3309,7 +3079,7 @@ function PnlCell({
 /** Day-change cell: green/red signed percent, or a dash when we have no quote. */
 function DayCell({ pct }: { pct: number | null }) {
   if (pct == null) {
-    return <td className="mono px-3 py-3.5 text-right text-[var(--faint)]">—</td>;
+    return <td className="mono px-3 py-3.5 text-right text-[var(--muted)]">—</td>;
   }
   const positive = pct >= 0;
   const color = positive ? "text-[var(--jade)]" : "text-[var(--coral)]";
@@ -3357,154 +3127,11 @@ function StatusBadge({ status }: { status: LiveStatus }) {
   );
 }
 
-/**
- * The desk's opening line: what the portfolio actually returned, against the
- * market, in points.
- *
- * This replaces a headline market value — a number that rises whenever you
- * deposit and therefore cannot answer "is this working?". The comparison it
- * shows was already being computed on every load and rendered only as a buried
- * table row.
- */
-function StandingHeader({
-  standing,
-  total,
-  cashValue,
-  positions,
-}: {
-  standing: ReturnType<typeof computeStanding>;
-  total: number;
-  cashValue: number;
-  positions: number;
-}) {
-  const unknown = standing.state === "unknown";
-  const behind = standing.state === "behind";
-  const tone = unknown
-    ? "text-[var(--muted)]"
-    : behind
-      ? "text-[var(--coral)]"
-      : "text-[var(--jade)]";
-
-  return (
-    <Card>
-      <p className="eyebrow">
-        Portfolio · {positions} {positions === 1 ? "position" : "positions"}
-        {standing.window ? ` · ${standing.windowLabel.toLowerCase()}` : ""}
-      </p>
-
-      {unknown ? (
-        <>
-          <p className="mt-2 font-display tabular text-4xl">{formatCurrency(total)}</p>
-          <p className="mt-2 max-w-xl text-sm text-[var(--muted)]">{standing.reason}</p>
-        </>
-      ) : (
-        <>
-          <p className={`mt-2 font-display tabular text-4xl ${tone}`}>
-            {standing.returnPct! >= 0 ? "+" : "−"}
-            {Math.abs(standing.returnPct!).toFixed(1)}%
-          </p>
-          <p className="mt-2 max-w-xl font-display text-lg leading-snug">
-            <span className={tone}>{standingHeadline(standing)}.</span>{" "}
-            <span className="text-[var(--muted)]">{standingDetail(standing)}</span>
-          </p>
-        </>
-      )}
-
-      <p className="mono mt-3 text-xs text-[var(--faint)]">
-        {formatCurrency(total)} market value
-        {cashValue > 0.005 && ` · ${formatCurrency(cashValue)} of it cash`}
-      </p>
-    </Card>
-  );
+/** "+$1,204.10" / "−$88.00" — same sign convention the tiles used; privacy mode masks the whole figure. */
+function signedCurrency(value: number): string {
+  return `${value >= 0 ? "+" : ""}${formatCurrency(value)}`;
 }
 
-/**
- * A stat that has nothing to say yet. Distinct from a zero on purpose — "we
- * haven't priced this" and "it didn't move" are different facts, and the tile
- * used to render both as +$0.00.
- */
-function PendingStat({ label, note }: { label: string; note: string }) {
-  return (
-    <Card>
-      <p className="eyebrow">{label}</p>
-      <p className="mt-2 font-display tabular text-3xl text-[var(--muted)]">—</p>
-      <p className="mono mt-1 text-xs text-[var(--faint)]">{note}</p>
-    </Card>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  big,
-  signed,
-  pct,
-  hint,
-  detail,
-  detailTitle,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  big?: boolean;
-  signed?: boolean;
-  pct?: number;
-  hint?: string;
-  detail?: string;
-  detailTitle?: string;
-  onClick?: () => void;
-}) {
-  const positive = value >= 0;
-  const color = signed ? (positive ? "text-[var(--jade)]" : "text-[var(--coral)]") : "";
-  const body = (
-    <>
-      <div className="flex items-center justify-between">
-        <p className="eyebrow">{label}</p>
-        {hint && onClick && (
-          <span className="text-[10px] text-[var(--faint)] transition-colors group-hover:text-[var(--brass)]">
-            {hint} →
-          </span>
-        )}
-      </div>
-      <p className={`mt-2 font-display tabular ${big ? "text-4xl" : "text-3xl"} ${color}`}>
-        {signed && positive ? "+" : ""}
-        {formatCurrency(value)}
-      </p>
-      {signed && pct !== undefined && (
-        <p className={`mono mt-1 text-sm ${color}`}>
-          {positive ? "+" : "−"}
-          {Math.abs(pct).toFixed(2)}%
-        </p>
-      )}
-      {detail && (
-        <p
-          className={`mt-1 text-xs text-[var(--muted)]${detailTitle ? " cursor-help" : ""}`}
-          title={detailTitle}
-        >
-          {detail}
-        </p>
-      )}
-    </>
-  );
-
-  if (onClick) {
-    return (
-      <Card
-        interactive
-        role="button"
-        tabIndex={0}
-        onClick={onClick}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onClick();
-          }
-        }}
-        className="group text-left hover:bg-[var(--panel-2)] focus:outline-none focus:ring-1 focus:ring-[var(--brass-dim)]"
-      >
-        {body}
-      </Card>
-    );
-  }
-  return <Card>{body}</Card>;
+function signedPct(pct: number): string {
+  return `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(2)}%`;
 }

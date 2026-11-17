@@ -62,7 +62,7 @@ CREATE TABLE "budget_rollovers" (
 CREATE TABLE "budgets" (
 	"id" text PRIMARY KEY NOT NULL,
 	"category_id" text NOT NULL,
-	"amount" real NOT NULL, "rollover" integer DEFAULT false NOT NULL,
+	"amount" real NOT NULL, "rollover" integer DEFAULT false NOT NULL, "fixed" integer DEFAULT false NOT NULL,
 	FOREIGN KEY ("category_id") REFERENCES "categories"("id") ON UPDATE no action ON DELETE cascade
 );
 CREATE TABLE "categories" (

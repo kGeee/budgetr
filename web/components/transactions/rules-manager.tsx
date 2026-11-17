@@ -2,17 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Pencil, Plus, Trash2, Wand2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Pencil, Trash2 } from "lucide-react";
+import { Mark, Verdict } from "@/components/ui/statement";
 import {
   createTagRule,
   deleteTagRule,
   updateTagRule,
   type TagRuleOptions,
 } from "@/lib/actions";
+import { CategoryDot } from "@/components/transactions/ledger-bits";
 import type { TagRuleRow } from "@/lib/queries";
 
-type Picker = { id: string; name: string };
+type Picker = { id: string; name: string; color?: string | null };
 type MatchType = "contains" | "exact" | "regex";
 
 const MATCH_LABELS: Record<MatchType, string> = {
@@ -57,6 +58,16 @@ function draftToOptions(d: Draft): TagRuleOptions {
 function fmtAmount(n: number): string {
   return `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
+
+const COUNT_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
+const countWord = (n: number) => COUNT_WORDS[n] ?? n.toLocaleString();
+const matchCount = (n: number) => `${n.toLocaleString()} ${n === 1 ? "match" : "matches"}`;
+
+// One column per part of a rule; the header and every row share the template.
+const GRID =
+  "grid grid-cols-[120px_minmax(160px,1.3fr)_minmax(110px,0.8fr)_minmax(130px,1fr)_minmax(130px,1fr)_84px_96px] items-center gap-4";
+const ICON_BTN =
+  "grid h-11 w-11 place-items-center rounded-full text-[var(--muted)] transition disabled:opacity-50";
 
 function conditionSummary(r: TagRuleRow): string[] {
   const bits: string[] = [];
@@ -134,113 +145,163 @@ export function RulesManager({
     });
   }
 
-  return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-line bg-[var(--panel)]">
-      <ul>
-        {rules.map((r) =>
-          editingId === r.id ? (
-            <li key={r.id} className="border-b border-line/60 last:border-0">
-              <DraftForm
-                draft={draft}
-                setDraft={setDraft}
-                accounts={accounts}
-                categories={categories}
-                pending={pending}
-                onSubmit={() => submitEdit(r.id)}
-                onCancel={reset}
-                submitLabel="Save"
-              />
-            </li>
-          ) : (
-            <li
-              key={r.id}
-              className={`flex items-center gap-3 border-b border-line/60 px-5 py-3.5 last:border-0 ${pending ? "opacity-60" : ""}`}
-            >
-              <Wand2 size={15} className="shrink-0 text-[var(--brass)]" />
-              <div className="min-w-0 flex-1 text-sm">
-                <span className="text-[var(--muted)]">
-                  {MATCH_LABELS[(r.matchType as MatchType) || "contains"]}
-                </span>{" "}
-                <span className={r.matchType === "regex" ? "mono font-medium" : "font-medium"}>
-                  {r.label || r.pattern}
-                </span>{" "}
-                <span className="text-[var(--muted)]">→</span>{" "}
-                <span className="rounded-full border border-line px-2 py-0.5 text-xs">
-                  #{r.tagName}
-                </span>
-                {r.categoryName && (
-                  <span className="ml-1 rounded-full border border-[var(--brass-dim)] px-2 py-0.5 text-xs text-[var(--brass)]">
-                    {r.categoryName}
-                  </span>
-                )}
-                {conditionSummary(r).length > 0 && (
-                  <span className="ml-1 text-xs text-[var(--muted)]">
-                    · {conditionSummary(r).join(" · ")}
-                  </span>
-                )}
-              </div>
-              <span className="mono shrink-0 text-xs text-[var(--muted)]">
-                {r.matches} match{r.matches === 1 ? "" : "es"}
-              </span>
-              <button
-                onClick={() => beginEdit(r)}
-                aria-label="Edit rule"
-                className="shrink-0 rounded-md p-1.5 text-[var(--faint)] transition hover:text-[var(--paper)]"
-              >
-                <Pencil size={14} />
-              </button>
-              <button
-                onClick={() => remove(r.id)}
-                aria-label="Delete rule"
-                className="shrink-0 rounded-md p-1.5 text-[var(--faint)] transition hover:text-[var(--coral)]"
-              >
-                <Trash2 size={14} />
-              </button>
-            </li>
-          ),
-        )}
-        {rules.length === 0 && !adding && (
-          <li className="px-5 py-6 text-sm text-[var(--muted)]">
-            No rules yet. Tag a transaction and choose “always tag this vendor”, or add one below.
-          </li>
-        )}
-      </ul>
+  const totalMatches = rules.reduce((sum, r) => sum + r.matches, 0);
+  const editing = rules.find((r) => r.id === editingId) ?? null;
+  const colorOf = (id: string | null) =>
+    (id && categories.find((c) => c.id === id)?.color) || null;
 
-      {adding ? (
-        <div className="border-t border-line">
-          <DraftForm
-            draft={draft}
-            setDraft={setDraft}
-            accounts={accounts}
-            categories={categories}
-            pending={pending}
-            onSubmit={submitAdd}
-            onCancel={reset}
-            submitLabel="Add"
-          />
+  const form = (kind: "add" | "edit") => (
+    <DraftForm
+      title={kind === "add" ? "New rule" : `Editing · ${editing?.label || editing?.pattern || ""}`}
+      note={kind === "edit" && editing ? matchCount(editing.matches) : undefined}
+      draft={draft}
+      setDraft={setDraft}
+      accounts={accounts}
+      categories={categories}
+      pending={pending}
+      onSubmit={kind === "add" ? submitAdd : () => editing && submitEdit(editing.id)}
+      onCancel={reset}
+      submitLabel={kind === "add" ? "Add rule" : "Save"}
+    />
+  );
+
+  return (
+    <div className="flex flex-col gap-7">
+      <div className="flex flex-wrap items-end justify-between gap-x-10 gap-y-4">
+        <div className="flex max-w-[640px] flex-col gap-2">
+          <Verdict>
+            {rules.length === 0 ? (
+              "No rules yet. Nothing is tagged as it arrives."
+            ) : (
+              <>
+                {countWord(rules.length)} {rules.length === 1 ? "rule reads" : "rules read"} each
+                transaction’s name as it arrives, with{" "}
+                <Mark tone={totalMatches > 0 ? "jade" : "muted"}>{matchCount(totalMatches)}</Mark>{" "}
+                between them so far.
+              </>
+            )}
+          </Verdict>
+          <p className="text-[13px] text-[var(--muted)]">
+            A rule always adds a tag. It can also set a category, and can be narrowed by amount or
+            account.
+          </p>
         </div>
-      ) : (
         <button
           onClick={() => {
             setEditingId(null);
             setDraft(EMPTY_DRAFT);
             setAdding(true);
           }}
-          className="flex w-full items-center gap-2 border-t border-line px-5 py-3.5 text-sm text-[var(--muted)] transition-colors hover:bg-[var(--panel-2)] hover:text-[var(--paper)]"
+          disabled={adding}
+          className="inline-flex min-h-11 items-center rounded-full bg-[var(--jade)] px-4.5 text-sm font-semibold text-[var(--on-jade)] transition hover:brightness-105 active:scale-[0.98] disabled:opacity-45"
         >
-          <Plus size={15} /> Add rule
+          Add rule
         </button>
-      )}
+      </div>
+
+      <section aria-label="Rules">
+        {/* A container, so the in-place form can match the visible width (and
+            stay put) when the table itself is scrolled sideways on a phone. */}
+        <div className="@container overflow-x-auto">
+          <div role="table" aria-label="Auto-tag rules" className="min-w-[820px]">
+            <div
+              role="row"
+              className={`${GRID} items-end border-b border-[var(--line-strong)] pb-2.5 text-xs text-[var(--muted)]`}
+            >
+              <span role="columnheader">When name</span>
+              <span role="columnheader">Pattern</span>
+              <span role="columnheader">Add tag</span>
+              <span role="columnheader">Set category</span>
+              <span role="columnheader">Only if</span>
+              <span role="columnheader" className="text-right">
+                Matches
+              </span>
+              <span role="columnheader">
+                <span className="sr-only">Actions</span>
+              </span>
+            </div>
+
+            {rules.map((r) => {
+              const isEditing = editingId === r.id;
+              const conditions = conditionSummary(r);
+              return (
+                <div key={r.id}>
+                  <div
+                    role="row"
+                    aria-current={isEditing ? "true" : undefined}
+                    className={`${GRID} min-h-14 text-sm ${
+                      isEditing ? "border-b border-[var(--line-strong)]" : "border-b border-line"
+                    } ${pending ? "opacity-60" : ""}`}
+                  >
+                    <span role="cell" className="text-[var(--muted)]">
+                      {MATCH_LABELS[(r.matchType as MatchType) || "contains"]}
+                    </span>
+                    <span role="cell" className="mono truncate" title={r.label || r.pattern}>
+                      {r.label || r.pattern}
+                    </span>
+                    <span role="cell" className="mono truncate text-[13px] text-[var(--brass)]">
+                      {r.tagName}
+                    </span>
+                    <span role="cell" className="flex min-w-0 items-center gap-2">
+                      {r.categoryName ? (
+                        <>
+                          <CategoryDot id={r.categoryId} color={colorOf(r.categoryId)} />
+                          <span className="truncate">{r.categoryName}</span>
+                        </>
+                      ) : (
+                        <span className="text-[var(--muted)]">—</span>
+                      )}
+                    </span>
+                    <span role="cell" className="truncate text-[13px] text-[var(--muted)]">
+                      {conditions.length > 0 ? conditions.join(" · ") : "—"}
+                    </span>
+                    <span role="cell" className="mono text-right">
+                      {matchCount(r.matches)}
+                    </span>
+                    <span role="cell" className="flex justify-end">
+                      <button
+                        onClick={() => (isEditing ? reset() : beginEdit(r))}
+                        aria-label={`Edit the ${r.label || r.pattern} rule`}
+                        aria-expanded={isEditing}
+                        className={`${ICON_BTN} hover:text-[var(--paper)] ${isEditing ? "text-[var(--paper)]" : ""}`}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        onClick={() => remove(r.id)}
+                        disabled={pending}
+                        aria-label={`Delete the ${r.label || r.pattern} rule`}
+                        className={`${ICON_BTN} hover:text-[var(--coral)]`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </span>
+                  </div>
+                  {/* The form opens in place, hanging off the row it edits. */}
+                  {isEditing && form("edit")}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {adding && form("add")}
+
+        <p className="mt-4 text-[13px] text-[var(--muted)]">
+          Rules also start from a transaction: tag it and choose “always tag this vendor”. Adding a
+          rule opens the same form as editing.
+        </p>
+      </section>
     </div>
   );
 }
 
-const SELECT_CLS =
-  "rounded-md border border-line bg-[var(--ink)] px-2 py-1.5 text-sm outline-none focus:border-[var(--brass-dim)]";
-const INPUT_CLS =
-  "rounded-md border border-line bg-[var(--ink)] px-2 py-1.5 text-sm outline-none focus:border-[var(--brass-dim)]";
+const FIELD_CLS =
+  "min-h-11 min-w-0 rounded-xl border border-line bg-[var(--ink)] px-3 text-sm text-[var(--paper)] outline-none transition-colors focus:border-[var(--brass-dim)]";
 
 function DraftForm({
+  title,
+  note,
   draft,
   setDraft,
   accounts,
@@ -250,6 +311,8 @@ function DraftForm({
   onCancel,
   submitLabel,
 }: {
+  title: string;
+  note?: string;
   draft: Draft;
   setDraft: (d: Draft) => void;
   accounts: Picker[];
@@ -260,62 +323,85 @@ function DraftForm({
   submitLabel: string;
 }) {
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") onSubmit();
+    if (e.key === "Escape") onCancel();
+  };
 
   return (
-    <div className={`space-y-3 px-5 py-4 ${pending ? "opacity-60" : ""}`}>
+    <div
+      role="group"
+      aria-label={title}
+      className={`sticky left-0 box-border flex w-full max-w-[100cqw] flex-col gap-3.5 rounded-b-[var(--radius)] border border-t-0 border-[var(--line-strong)] bg-[var(--panel)] px-5 pb-5 pt-4 ${pending ? "opacity-60" : ""}`}
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="eyebrow truncate">{title}</span>
+        {note && <span className="mono shrink-0 text-xs text-[var(--muted)]">{note}</span>}
+      </div>
+
       {/* Match line */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-[var(--muted)]">When name</span>
-        <select
-          value={draft.matchType}
-          onChange={(e) => set({ matchType: e.target.value as MatchType })}
-          className={SELECT_CLS}
-        >
-          <option value="contains">contains</option>
-          <option value="exact">is exactly</option>
-          <option value="regex">matches regex</option>
-        </select>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <label className="contents">
+          <span className="text-[var(--muted)]">When name</span>
+          <select
+            value={draft.matchType}
+            onChange={(e) => set({ matchType: e.target.value as MatchType })}
+            className={FIELD_CLS}
+          >
+            <option value="contains">contains</option>
+            <option value="exact">is exactly</option>
+            <option value="regex">matches regex</option>
+          </select>
+        </label>
         <input
           autoFocus
           value={draft.pattern}
           onChange={(e) => set({ pattern: e.target.value })}
+          onKeyDown={onKey}
           placeholder={draft.matchType === "regex" ? "^uber\\b" : "e.g. uber"}
-          className={`w-40 ${INPUT_CLS} ${draft.matchType === "regex" ? "mono" : ""}`}
+          aria-label="Pattern"
+          className={`${FIELD_CLS} mono flex-[1_1_180px] border-[var(--line-strong)]`}
         />
-        <span className="text-sm text-[var(--muted)]">tag it</span>
-        <input
-          value={draft.tag}
-          onChange={(e) => set({ tag: e.target.value })}
-          onKeyDown={(e) => e.key === "Enter" && onSubmit()}
-          placeholder="rideshare"
-          className={`w-32 ${INPUT_CLS}`}
-        />
+        <label className="contents">
+          <span className="text-[var(--muted)]">tag it</span>
+          <input
+            value={draft.tag}
+            onChange={(e) => set({ tag: e.target.value })}
+            onKeyDown={onKey}
+            placeholder="rideshare"
+            className={`${FIELD_CLS} mono flex-[1_1_140px] text-[var(--brass)]`}
+          />
+        </label>
       </div>
 
       {/* Conditions line */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs uppercase tracking-wide text-[var(--faint)]">only if</span>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-[var(--muted)]">Only if</span>
         <input
           type="number"
           step="any"
           value={draft.minAmount}
           onChange={(e) => set({ minAmount: e.target.value })}
+          onKeyDown={onKey}
           placeholder="min $"
-          className={`w-24 ${INPUT_CLS}`}
+          aria-label="Minimum amount"
+          className={`${FIELD_CLS} mono w-24`}
         />
-        <span className="text-sm text-[var(--muted)]">–</span>
         <input
           type="number"
           step="any"
           value={draft.maxAmount}
           onChange={(e) => set({ maxAmount: e.target.value })}
+          onKeyDown={onKey}
           placeholder="max $"
-          className={`w-24 ${INPUT_CLS}`}
+          aria-label="Maximum amount"
+          className={`${FIELD_CLS} mono w-24`}
         />
         <select
           value={draft.accountId}
           onChange={(e) => set({ accountId: e.target.value })}
-          className={SELECT_CLS}
+          aria-label="Account"
+          className={`${FIELD_CLS} flex-[1_1_150px]`}
         >
           <option value="">any account</option>
           {accounts.map((a) => (
@@ -324,11 +410,12 @@ function DraftForm({
             </option>
           ))}
         </select>
-        <span className="text-xs uppercase tracking-wide text-[var(--faint)]">also set</span>
+        <span className="text-[var(--muted)]">and set</span>
         <select
           value={draft.categoryId}
           onChange={(e) => set({ categoryId: e.target.value })}
-          className={SELECT_CLS}
+          aria-label="Category"
+          className={`${FIELD_CLS} flex-[1_1_150px]`}
         >
           <option value="">no category</option>
           {categories.map((c) => (
@@ -337,18 +424,19 @@ function DraftForm({
             </option>
           ))}
         </select>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Button size="sm" onClick={onSubmit} disabled={pending}>
-          <Check size={14} /> {submitLabel}
-        </Button>
+        <span className="grow" />
+        <button
+          onClick={onSubmit}
+          disabled={pending}
+          className="inline-flex min-h-11 items-center rounded-full bg-[var(--jade)] px-5 text-sm font-semibold text-[var(--on-jade)] transition hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
+        >
+          {submitLabel}
+        </button>
         <button
           onClick={onCancel}
-          aria-label="Cancel"
-          className="rounded-md p-1.5 text-[var(--faint)] hover:text-[var(--paper)]"
+          className="inline-flex min-h-11 items-center rounded-full border border-line px-4 text-sm text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--paper)]"
         >
-          <X size={16} />
+          Cancel
         </button>
       </div>
     </div>

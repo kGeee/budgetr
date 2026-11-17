@@ -11,6 +11,7 @@
 import { useState, useTransition } from "react";
 import { CheckCircle2, Eye, EyeOff, KeyRound, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SettingRow } from "@/app/(app)/settings/setting-row";
 import { saveApiKeys, verifyKeys, type ApiKeysInput } from "@/lib/actions-onboarding";
 
 type Status = { type: "idle" | "ok" | "error"; msg?: string };
@@ -19,7 +20,13 @@ export function ApiKeysForm({
   initial,
   saveLabel = "Save keys",
   onSaved,
+  rows = false,
 }: {
+  /**
+   * Settings lays each key out as a ruled row (label left, field right); the
+   * onboarding wizard and the Plaid setup modal keep the stacked form.
+   */
+  rows?: boolean;
   initial: { hasPlaidKeys: boolean; env: string; hasFinnhub: boolean; clientIdHint: string | null };
   saveLabel?: string;
   /** Called after a successful save (wizard advances; settings just refreshes). */
@@ -77,9 +84,12 @@ export function ApiKeysForm({
       }
     });
 
+  // One component for both layouts, so the fields themselves are written once.
+  const Field = rows ? RowField : StackField;
+
   return (
-    <div className="space-y-4">
-      <Field label="Plaid client ID">
+    <div className={rows ? undefined : "space-y-4"}>
+      <Field label="Plaid client ID" hint="Identifies your Plaid application.">
         <input
           type="text"
           value={clientId}
@@ -91,7 +101,7 @@ export function ApiKeysForm({
         />
       </Field>
 
-      <Field label="Plaid secret">
+      <Field label="Plaid secret" hint="Write-only — the saved value is never shown.">
         <div className="relative">
           <input
             type={showSecret ? "text" : "password"}
@@ -113,7 +123,7 @@ export function ApiKeysForm({
         </div>
       </Field>
 
-      <Field label="Environment">
+      <Field label="Environment" hint="Which Plaid environment the keys belong to.">
         <div className="inline-flex rounded-lg border border-line p-0.5">
           {(["sandbox", "production"] as const).map((e) => (
             <button
@@ -134,7 +144,7 @@ export function ApiKeysForm({
         </p>
       </Field>
 
-      <Field label="Finnhub API key" optional>
+      <Field label="Finnhub API key" optional hint="Adds live stock prices.">
         <input
           type="password"
           value={finnhub}
@@ -148,7 +158,7 @@ export function ApiKeysForm({
 
       {status.type !== "idle" && (
         <p
-          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+          className={`${rows ? "my-4 " : ""}flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
             status.type === "ok"
               ? "border-[color-mix(in_srgb,var(--jade)_40%,transparent)] bg-[color-mix(in_srgb,var(--jade)_8%,transparent)] text-[var(--jade)]"
               : "border-[color-mix(in_srgb,var(--coral)_40%,transparent)] bg-[color-mix(in_srgb,var(--coral)_8%,transparent)] text-[var(--coral)]"
@@ -159,35 +169,72 @@ export function ApiKeysForm({
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-3 pt-1">
-        <Button variant="primary" onClick={save} disabled={pending}>
-          {pending ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
-          {saveLabel}
-        </Button>
-        <Button variant="outline" onClick={test} disabled={pending}>
-          Test connection
-        </Button>
-      </div>
+      {rows ? (
+        // Settings: the reassurance on the left, the two actions on the right.
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3.5">
+          <span className="text-[13px] text-[var(--muted)]">
+            Keys are encrypted on this device and never shown again in full.
+          </span>
+          <span className="flex flex-wrap gap-2">
+            <Button variant="secondary" className="h-11" onClick={test} disabled={pending}>
+              Test connection
+            </Button>
+            <Button variant="primary" className="h-11" onClick={save} disabled={pending}>
+              {pending ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
+              {saveLabel}
+            </Button>
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <Button variant="primary" onClick={save} disabled={pending}>
+            {pending ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
+            {saveLabel}
+          </Button>
+          <Button variant="outline" onClick={test} disabled={pending}>
+            Test connection
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
-function Field({
-  label,
-  optional,
-  children,
-}: {
+type FieldProps = {
   label: string;
   optional?: boolean;
+  /** One line on what the key is for — shown in the row layout only. */
+  hint?: string;
   children: React.ReactNode;
-}) {
+};
+
+function StackField({ label, optional, children }: FieldProps) {
   return (
     <label className="block">
       <span className="eyebrow mb-1.5 flex items-center gap-1.5">
         {label}
-        {optional && <span className="text-[9px] normal-case text-[var(--faint)]">· optional</span>}
+        {optional && <span className="text-[9px] normal-case text-[var(--muted)]">· optional</span>}
       </span>
       {children}
+    </label>
+  );
+}
+
+function RowField({ label, optional, hint, children }: FieldProps) {
+  return (
+    <label className="block">
+      <SettingRow
+        align="start"
+        title={
+          <>
+            {label}
+            {optional && <span className="font-normal text-[var(--muted)]"> · optional</span>}
+          </>
+        }
+        control={<div className="w-80 max-w-full">{children}</div>}
+      >
+        {hint}
+      </SettingRow>
     </label>
   );
 }

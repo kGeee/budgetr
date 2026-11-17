@@ -17,7 +17,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Sparkles, X } from "lucide-react";
-import { PlaidSetupModal, type PlaidSetupInitial } from "@/components/plaid-setup-modal";
+import { PlaidSetupModal, type PlaidSetupInitial } from "@/components/onboarding/plaid-setup-modal";
 import { primaryCtaHref } from "@/lib/site";
 
 const DISMISS_KEY = "budgetr:demo-banner-dismissed";

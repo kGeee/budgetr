@@ -1,15 +1,18 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { Sidebar, MobileNav } from "@/components/sidebar";
+import { Sidebar, MobileNav, type SidebarStatus } from "@/components/sidebar";
 import { SyncButton } from "@/components/sync-button";
+import { CommandPalette } from "@/components/command-palette";
+import { Topbar } from "@/components/topbar";
+import { getDataFreshness } from "@/lib/data-freshness";
 import { RegisterSW } from "@/components/register-sw";
 import { ScaleInit, ObfuscationToggle } from "@/components/obfuscation";
-import { CurrencyInit, CurrencySwitcher } from "@/components/currency-switcher";
+import { CurrencyInit } from "@/components/currency-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { THEME_COOKIE, themeFromCookie } from "@/lib/theme";
 import { DemoBanner } from "@/components/demo-banner";
-import { TrialBanner } from "@/components/trial-banner";
-import { LicenseGate } from "@/components/license-gate";
+import { TrialBanner } from "@/components/license/trial-banner";
+import { LicenseGate } from "@/components/license/license-gate";
 import { DownloadLink } from "@/components/marketing/marketing-shell";
 import { ensureFirstRunDemo } from "@/lib/demo-data";
 import { getEntitlement } from "@/lib/license";
@@ -20,10 +23,8 @@ import {
   countUnreviewed,
   getAccounts,
   getDisplayCurrencyRates,
-  getPendingSummary,
 } from "@/lib/queries";
-import { getIncludePending } from "@/lib/pending";
-import { PendingToggle } from "@/components/pending-toggle";
+import { isTradingDeskEnabled } from "@/lib/trading-desk";
 import { OBF_COOKIE, hiddenFromCookie, setHidden } from "@/lib/scale";
 import {
   CURRENCY_COOKIE,
@@ -79,10 +80,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // actually accumulates, and shows nothing when it's empty.
   const reviewCount = countUnreviewed();
 
-  // Whether pending charges count toward spending, plus what's in flight — the
-  // header toggle shows itself only when it would change a number.
-  const countPending = getIncludePending();
-  const pendingSummary = getPendingSummary();
+  const tradingDesk = isTradingDeskEnabled();
+
+  // The sidebar's foot line: whether the data behind every figure is current.
+  // Same classification the Home banner uses, said in one line on every page.
+  const status = sidebarStatus(webDemo);
 
   // Demo banner (shown while exploring the bundled sample data). Precompute the
   // Plaid config so its "set up my accounts" modal can resume at the right step.
@@ -102,8 +104,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <ScaleInit hidden={obfHidden} />
       <CurrencyInit currency={displayCurrency} rates={ratesMap} />
       <RegisterSW />
+      <CommandPalette tradingDesk={tradingDesk} webDemo={webDemo} />
       <div className="mx-auto flex min-h-dvh max-w-[1500px]">
-        <Sidebar accounts={accounts} reviewCount={reviewCount} webDemo={webDemo} />
+        <Sidebar
+          accounts={accounts}
+          reviewCount={reviewCount}
+          webDemo={webDemo}
+          tradingDesk={tradingDesk}
+          status={status}
+        />
         <div className="flex min-w-0 flex-1 flex-col">
           {entitlement?.status === "trial" && (
             <TrialBanner daysLeft={entitlement.trialDaysLeft} />
@@ -111,26 +120,43 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {demoInitial && <DemoBanner initial={demoInitial} webDemo={webDemo} />}
           {/* pt uses the iOS safe-area inset so the notch/status bar never
               covers the controls in standalone (Add to Home Screen) mode. */}
-          <header className="material sticky top-0 z-20 flex items-center gap-2 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-4 sm:px-8">
-            <MobileNav accounts={accounts} reviewCount={reviewCount} webDemo={webDemo} />
+          <header className="material sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:gap-x-7 sm:px-8 lg:px-10">
+            <MobileNav
+              accounts={accounts}
+              reviewCount={reviewCount}
+              webDemo={webDemo}
+              tradingDesk={tradingDesk}
+            />
+            <Topbar tradingDesk={tradingDesk} reviewCount={reviewCount} />
+            {/* Only the controls you reach for mid-task. Display currency and
+                counting pending charges are set-once preferences — Settings. */}
             <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-              <PendingToggle
-                on={countPending}
-                count={pendingSummary.count}
-                amount={pendingSummary.amount}
-              />
-              <CurrencySwitcher current={displayCurrency} />
               <ThemeToggle initialTheme={theme} />
               <ObfuscationToggle initialHidden={obfHidden} />
               {/* Read-only demo: no live Sync — offer the download instead. */}
               {webDemo ? <DownloadLink label="Download" className="!px-3 !py-1.5" /> : <SyncButton />}
             </div>
           </header>
-          <main className="flex-1 px-5 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 lg:pt-10">
+          <main className="flex-1 px-5 pt-5pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 lg:pt-6">
             {children}
           </main>
         </div>
       </div>
     </>
   );
+}
+
+function sidebarStatus(webDemo: boolean): SidebarStatus {
+  if (webDemo) return { tone: "ok", label: "Read-only demo" };
+  const f = getDataFreshness();
+  const days = (n: number) => (n <= 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`);
+  if (f.state === "broken") return { tone: "bad", label: "A connection needs attention" };
+  if (f.state === "stale" && Number.isFinite(f.daysSinceLatest)) {
+    return { tone: "warn", label: `No new transactions in ${f.daysSinceLatest} days` };
+  }
+  if (f.connections.total === 0) return { tone: "ok", label: "Stays on this machine" };
+  const synced = Number.isFinite(f.connections.daysSinceAnySync)
+    ? ` · synced ${days(f.connections.daysSinceAnySync)}`
+    : "";
+  return { tone: "ok", label: `All connections healthy${synced}` };
 }

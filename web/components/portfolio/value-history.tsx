@@ -5,6 +5,7 @@ import { BenchmarkLineChart, ValueAreaChart } from "@/components/charts";
 import type { BenchmarkKey } from "@/lib/benchmark";
 import type { PricePoint } from "@/lib/yahoo";
 import { formatCurrency } from "@/lib/utils";
+import { Segmented } from "@/components/portfolio/ruled";
 
 export type ValuePoint = { date: string; value: number };
 
@@ -55,7 +56,10 @@ export function ValueHistory({
   kind = "networth",
   height,
   benchmarks,
+  caption,
 }: {
+  /** A quiet line naming the chart, shown left of the range controls. */
+  caption?: string;
   data: ValuePoint[];
   /**
    * Time-weighted return index (base 100) for the benchmark overlay's portfolio
@@ -148,55 +152,39 @@ export function ValueHistory({
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        {filtered.length > 1 ? (
-          <span className={`mono text-xs ${up ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
-            {up ? "+" : "−"}
-            {formatCurrency(Math.abs(change))} ({Math.abs(pct).toFixed(1)}%)
-            <span className="ml-1 text-[var(--faint)]">
-              {active === "ALL" ? "all time" : `past ${active}`}
+        <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
+          {caption && <span>{caption}</span>}
+          {filtered.length > 1 && (
+            <span className={`mono ${up ? "text-[var(--jade)]" : "text-[var(--coral)]"}`}>
+              {up ? "+" : "−"}
+              {formatCurrency(Math.abs(change))} ({Math.abs(pct).toFixed(1)}%)
+              <span className="ml-1 text-[var(--muted)]">
+                {active === "ALL" ? "all time" : `past ${active}`}
+              </span>
             </span>
-          </span>
-        ) : (
-          <span />
-        )}
+          )}
+        </span>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {hasBenchmarks && (
-            <div className="flex gap-1 rounded-lg border border-line bg-[var(--panel-2)] p-0.5">
-              {(["value", "vs"] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  aria-pressed={mode === m}
-                  className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                    mode === m
-                      ? "bg-[var(--panel)] text-[var(--paper)]"
-                      : "text-[var(--muted)] hover:text-[var(--paper)]"
-                  }`}
-                >
-                  {m === "value" ? "Value" : "vs SPY/QQQ"}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="Compare"
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: "value", label: "Value" },
+                { value: "vs", label: "vs SPY/QQQ" },
+              ]}
+            />
           )}
 
           {windows.length > 1 && (
-            <div className="flex gap-1 rounded-lg border border-line bg-[var(--panel-2)] p-0.5">
-              {windows.map((w) => (
-                <button
-                  key={w}
-                  onClick={() => setWin(w)}
-                  aria-pressed={active === w}
-                  className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                    active === w
-                      ? "bg-[var(--panel)] text-[var(--paper)]"
-                      : "text-[var(--muted)] hover:text-[var(--paper)]"
-                  }`}
-                >
-                  {w === "ALL" ? "All" : w}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="Range"
+              value={active}
+              onChange={setWin}
+              options={windows.map((w) => ({ value: w, label: w === "ALL" ? "All" : w }))}
+            />
           )}
         </div>
       </div>

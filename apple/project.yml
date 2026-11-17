@@ -112,6 +112,7 @@ targets:
       - path: Budgetr/Sync/CompanionModel.swift
       - path: Budgetr/Sync/Outbox.swift
       - path: Budgetr/Sync/Receipt.swift
+      - path: Budgetr/Domain/CategorySpend.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app.tests

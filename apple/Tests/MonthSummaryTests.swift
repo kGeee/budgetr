@@ -176,6 +176,22 @@ final class CategoryMappingTests: XCTestCase {
         XCTAssertTrue(CategoryMapping.countsTowardCashflow(plaidPrimary: "FOOD_AND_DRINK"))
     }
 
+    func testTransferGroupAndReimbursableAreNotSpend() {
+        // Web skips group = 'transfer'; Reimbursable is seeded in that group.
+        XCTAssertFalse(CategoryMapping.countsTowardSpend(
+            resolvedGroup: "transfer",
+            plaidPrimary: nil
+        ))
+        XCTAssertFalse(CategoryMapping.countsTowardSpend(
+            resolvedGroup: nil,
+            plaidPrimary: "TRANSFER_OUT"
+        ))
+        XCTAssertTrue(CategoryMapping.countsTowardSpend(
+            resolvedGroup: "spending",
+            plaidPrimary: "TRANSFER_OUT"
+        ))
+    }
+
     func testHumanisedNames() {
         XCTAssertEqual(CategoryMapping.humanise("FOOD_AND_DRINK"), "Food and drink")
         XCTAssertEqual(CategoryMapping.humanise("RENT"), "Rent")

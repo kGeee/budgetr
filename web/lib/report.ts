@@ -1,13 +1,13 @@
 /**
  * Period report assembly.
  *
- * `buildReportData(period, currency)` gathers the same aggregates the /review
+ * `buildReportData(period, currency)` gathers the same aggregates the /spending
  * page shows — totals, top vendors, category breakdown + shifts, biggest
  * purchases, the month-by-month bar, and the net-worth series — into one plain,
  * fully serializable object. Every stored figure is in the ledger's USD storage
  * currency, so we convert each to the chosen display currency here (via
  * lib/rates.ts) rather than at format time, so the object is self-contained and
- * can be rendered by both the printable /report route and the email HTML string
+ * can be rendered by both the printable /spending?report=1 view and the email HTML string
  * (renderReportHtml) without any module-scoped currency state.
  */
 
@@ -68,10 +68,10 @@ const iso = (d: Date) => format(d, "yyyy-MM-dd");
 /**
  * Resolve a period key to inclusive [start, end] bounds plus the immediately
  * preceding equal-length window (for category-shift deltas), a human label, and
- * the calendar year the month-by-month bar should chart. Mirrors the same
- * resolution used by app/review/page.tsx.
+ * the calendar year the month-by-month bar should chart. Shared with the
+ * /spending page so the on-screen views and the printed report agree.
  */
-function resolvePeriod(period: ReportPeriod, now: Date) {
+export function resolvePeriod(period: ReportPeriod, now: Date) {
   switch (period) {
     case "last-month": {
       const m = subMonths(now, 1);
@@ -299,7 +299,7 @@ export function formatReportMoney(
 // ── Email HTML ────────────────────────────────────────────────────────────────
 // A single self-contained HTML string shared by the email 'send' stub and the
 // route handler. Inline styles only (email clients strip <style>/external CSS),
-// no charts — a clean textual digest of the same numbers the /report page shows.
+// no charts — a clean textual digest of the same numbers the printable report shows.
 
 const esc = (s: string) =>
   s

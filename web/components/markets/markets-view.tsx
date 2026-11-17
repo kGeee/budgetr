@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AlertTriangle, ArrowUpRight, Plus, RefreshCw, Search, Settings2, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, RefreshCw, Search, Settings2, X } from "lucide-react";
 import { CandleChart } from "@/components/markets/candle-chart";
 import { HullSettingsPanel } from "@/components/markets/hull-settings-panel";
+import { pill, Segmented } from "@/components/portfolio/ruled";
+import { Mark, SectionHead, Verdict } from "@/components/ui/statement";
+import { cn } from "@/lib/utils";
 import { hullSuite, hullTrend, type Bar, type HullPoint, type HullTrend } from "@/lib/hull";
 import { TIMEFRAMES, sourceFor, type MarketsPrefs, type SymbolSources } from "@/lib/markets-prefs";
 import {
@@ -267,89 +270,130 @@ export function MarketsView({
 
   const active = TIMEFRAMES.find((t) => t.range === prefs.range && t.interval === prefs.interval);
 
+  // The sentence under the figure: what changed most recently, then who is
+  // on the wrong side of the band. Both read straight off `rows`.
+  const read = useMemo(() => {
+    const readable = rows.filter((r) => r.trend.direction != null);
+    let freshest: Row | null = null;
+    for (const r of readable) {
+      if (r.trend.barsSince == null) continue;
+      if (!freshest || r.trend.barsSince < (freshest.trend.barsSince ?? Infinity)) freshest = r;
+    }
+    return {
+      readable: readable.length,
+      freshest,
+      down: readable.filter((r) => r.trend.direction === "down").map((r) => r.symbol),
+    };
+  }, [rows]);
+
   return (
-    <div className="space-y-4">
-      {/* ── toolbar ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav
-          aria-label="Timeframe"
-          className="-mx-1 flex gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-          {TIMEFRAMES.map((t) => {
-            const on = active?.label === t.label;
-            return (
-              <button
-                key={t.label}
-                type="button"
-                aria-pressed={on}
-                title={`${t.range} of ${t.interval} bars`}
-                onClick={() => updatePrefs({ ...prefs, range: t.range, interval: t.interval })}
-                className={`shrink-0 rounded-full border px-3 py-1 font-mono text-xs transition ${
-                  on
-                    ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
-                    : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-                }`}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </nav>
+    <div className="space-y-9">
+      {/* ── the read, and the controls that change it ─────────────────── */}
+      <section
+        aria-label="Watchlist read"
+        className="flex flex-wrap items-end justify-between gap-x-10 gap-y-5"
+      >
+        <div className="flex min-w-0 flex-1 basis-[380px] flex-col gap-3.5">
+          <p className="eyebrow">Watchlist trend</p>
+          <p className="display-1 font-display text-5xl tabular sm:text-6xl">
+            {tally.up} of {rows.length}
+            <span className="text-2xl tracking-normal text-[var(--muted)]"> trending up</span>
+          </p>
+          <Verdict>
+            {rows.length === 0 ? (
+              <span className="text-[var(--muted)]">
+                Nothing on the desk yet. Positions you hold appear here automatically.
+              </span>
+            ) : read.freshest == null ? (
+              <span className="text-[var(--muted)]">
+                Not enough bars at this timeframe for a Hull read.
+              </span>
+            ) : (
+              <>
+                <Mark tone={read.freshest.trend.direction === "up" ? "jade" : "coral"}>
+                  {read.freshest.symbol} turned {read.freshest.trend.direction}{" "}
+                  {read.freshest.trend.barsSince === 0
+                    ? "on the latest bar"
+                    : `${read.freshest.trend.barsSince} ${
+                        read.freshest.trend.barsSince === 1 ? "bar" : "bars"
+                      } ago`}
+                  .
+                </Mark>{" "}
+                {read.down.length === 0
+                  ? "Nothing is under its Hull band."
+                  : read.down.length === read.readable
+                    ? "Every name is under its Hull band."
+                    : read.down.length === 1
+                      ? `${read.down[0]} is the only name under its Hull band.`
+                      : read.down.length <= 3
+                        ? `${read.down.slice(0, -1).join(", ")} and ${
+                            read.down[read.down.length - 1]
+                          } are the only names under their Hull band.`
+                        : `${read.down.length} names are under their Hull band.`}
+                {tally.fresh > 0 && (
+                  <span className="text-[var(--muted)]">
+                    {" "}
+                    {tally.fresh} flipped within {FRESH_FLIP_BARS} bars.
+                  </span>
+                )}
+              </>
+            )}
+          </Verdict>
+        </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-full border border-line bg-[var(--panel)] p-0.5">
-            {([1, 2, 3] as const).map((c) => (
-              <button
-                key={c}
-                type="button"
-                aria-pressed={prefs.columns === c}
-                title={`${c} chart${c > 1 ? "s" : ""} per row`}
-                onClick={() => updatePrefs({ ...prefs, columns: c })}
-                className={`rounded-full px-2.5 py-1 font-mono text-xs transition ${
-                  prefs.columns === c ? "bg-[var(--panel-2)] text-[var(--paper)]" : "text-[var(--muted)]"
-                }`}
-              >
-                {c}×
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => void load(symbols, prefs.range, prefs.interval, true)}
-            title="Refresh bars"
-            className="rounded-full border border-line p-1.5 text-[var(--muted)] transition hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-          >
-            <RefreshCw size={14} className={loading ? "animate-spin" : undefined} />
-          </button>
-
+        <div className="flex max-w-full flex-wrap items-center gap-2">
+          <Segmented
+            label="Timeframe"
+            className="max-w-full overflow-x-auto"
+            value={active?.label ?? ""}
+            options={TIMEFRAMES.map((t) => ({ value: t.label, label: t.label }))}
+            onChange={(label) => {
+              const t = TIMEFRAMES.find((x) => x.label === label);
+              if (t) updatePrefs({ ...prefs, range: t.range, interval: t.interval });
+            }}
+          />
+          <Segmented
+            label="Charts per row"
+            value={String(prefs.columns) as "1" | "2" | "3"}
+            options={[
+              { value: "1", label: "1×" },
+              { value: "2", label: "2×" },
+              { value: "3", label: "3×" },
+            ]}
+            onChange={(c) => updatePrefs({ ...prefs, columns: Number(c) as 1 | 2 | 3 })}
+          />
           <button
             type="button"
             onClick={() => setShowSettings((v) => !v)}
             aria-expanded={showSettings}
-            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition ${
-              showSettings
-                ? "border-[var(--brass-dim)] bg-[var(--panel-2)] text-[var(--paper)]"
-                : "border-line text-[var(--muted)] hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
-            }`}
+            className={cn(pill, "mono text-xs", showSettings && "bg-[var(--panel-2)]")}
           >
             <Settings2 size={14} />
             Hull {prefs.hull.mode.toUpperCase()} {Math.trunc(prefs.hull.length * prefs.hull.lengthMult)}
           </button>
+          <button
+            type="button"
+            onClick={() => void load(symbols, prefs.range, prefs.interval, true)}
+            aria-label="Refresh bars"
+            title="Refresh bars"
+            className="grid h-10 w-10 place-items-center rounded-full border border-line text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+          >
+            <RefreshCw size={15} className={loading ? "animate-spin" : undefined} />
+          </button>
         </div>
-      </div>
+      </section>
 
       {showSettings && <HullSettingsPanel prefs={prefs} onChange={updatePrefs} />}
 
       {/* The desk holds these but can't chart them. Says so once, up top, rather
-          than leaving the user to notice N blank cards further down. */}
+          than leaving the user to notice N blank charts further down. */}
       {unresolved.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[var(--radius)] border border-[var(--brass-dim)] bg-[var(--panel)] px-3.5 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-y border-[var(--brass-dim)] py-2.5">
           <AlertTriangle size={14} className="shrink-0 text-[var(--brass)]" />
-          <p className="text-xs text-[var(--muted)]">
+          <p className="text-[13px] text-[var(--muted)]">
             No market data for{" "}
             {unresolved.length === 1 ? (
-              <span className="font-mono text-[var(--paper)]">{unresolved[0].symbol}</span>
+              <span className="mono text-[var(--paper)]">{unresolved[0].symbol}</span>
             ) : (
               <span className="text-[var(--paper)]">{unresolved.length} symbols</span>
             )}
@@ -360,7 +404,7 @@ export function MarketsView({
               <a
                 key={r.symbol}
                 href={`#chart-${r.symbol}`}
-                className="rounded-full border border-line px-2 py-0.5 font-mono text-[10px] text-[var(--muted)] transition hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
+                className="mono rounded-full border border-line px-2 py-0.5 text-[11px] text-[var(--muted)] transition-colors hover:border-[var(--brass-dim)] hover:text-[var(--paper)]"
               >
                 {r.symbol}
               </a>
@@ -369,93 +413,87 @@ export function MarketsView({
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[268px_minmax(0,1fr)]">
-        {/* ── watchlist rail ───────────────────────────────────────────── */}
-        <aside className="flex flex-col gap-3 self-start rounded-[var(--radius)] border border-line bg-[var(--panel)] p-3 lg:sticky lg:top-4">
-          <div className="flex items-baseline justify-between gap-2 px-1">
-            <span className="eyebrow">Watchlist</span>
-            <span className="font-mono text-[10px] text-[var(--muted)]">
-              <span style={{ color: "var(--jade)" }}>{tally.up}▲</span>{" "}
-              <span style={{ color: "var(--coral)" }}>{tally.down}▼</span>
-              {tally.fresh > 0 && (
-                <span className="ml-1.5 text-[var(--brass)]">{tally.fresh} new</span>
+      <div
+        className={cn(
+          "grid gap-x-12 gap-y-9",
+          // One chart per row keeps the render's 2:3 split; denser grids hand
+          // the charts the room instead.
+          prefs.columns === 1
+            ? "lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
+            : "lg:grid-cols-[minmax(300px,1fr)_minmax(0,3fr)]",
+        )}
+      >
+        {/* ── watchlist ────────────────────────────────────────────────── */}
+        <section aria-label="Watchlist" className="flex min-w-0 flex-col self-start lg:sticky lg:top-4">
+          <SectionHead
+            title="Watchlist"
+            count={rows.length}
+            className="items-center"
+            action={
+              <Segmented
+                label="Sort"
+                value={sort}
+                options={[
+                  { value: "list", label: "Order" },
+                  { value: "flip", label: "Flips" },
+                  { value: "change", label: "Change" },
+                ]}
+                onChange={setSort}
+              />
+            }
+          />
+          <div className="overflow-x-auto">
+            <ul className="min-w-[360px]">
+              {railRows.map((r) => (
+                <RailRow key={r.symbol} row={r} onRemove={() => remove(r.symbol)} />
+              ))}
+              {railRows.length === 0 && (
+                <li className="border-b border-line py-6 text-center text-[13px] text-[var(--muted)]">
+                  No symbols yet.
+                </li>
               )}
-            </span>
+            </ul>
           </div>
-
-          <div className="flex gap-1 px-1">
-            {(
-              [
-                { id: "list", label: "Order" },
-                { id: "flip", label: "Flips" },
-                { id: "change", label: "Change" },
-              ] as const
-            ).map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                aria-pressed={sort === s.id}
-                onClick={() => setSort(s.id)}
-                className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
-                  sort === s.id
-                    ? "border-[var(--brass-dim)] text-[var(--paper)]"
-                    : "border-transparent text-[var(--muted)] hover:text-[var(--paper)]"
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-
-          <ul className="flex flex-col">
-            {railRows.map((r) => (
-              <RailRow key={r.symbol} row={r} onRemove={() => remove(r.symbol)} />
-            ))}
-            {railRows.length === 0 && (
-              <li className="px-1 py-6 text-center text-xs text-[var(--faint)]">
-                No symbols yet.
-              </li>
-            )}
-          </ul>
 
           <form
             onSubmit={(e) => {
               e.preventDefault();
               add(draft);
             }}
-            className="flex items-center gap-1.5 border-t border-line pt-3"
+            className="flex gap-2 pt-3.5"
           >
-            <input
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                setAddError(null);
-                setAddSuggestions([]);
-              }}
-              placeholder="Add ticker"
-              aria-label="Add a ticker to the watchlist"
-              autoCapitalize="characters"
-              autoComplete="off"
-              className="min-w-0 flex-1 rounded-lg border border-line bg-[var(--ink)] px-2.5 py-1.5 font-mono text-xs uppercase text-[var(--paper)] outline-none placeholder:normal-case placeholder:text-[var(--faint)] focus:border-[var(--brass-dim)]"
-            />
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-[var(--muted)]">
+              Add a ticker to the watchlist
+              <input
+                value={draft}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  setAddError(null);
+                  setAddSuggestions([]);
+                }}
+                placeholder="Symbol or company name"
+                autoCapitalize="characters"
+                autoComplete="off"
+                className="mono min-h-10 w-full rounded-xl border border-line bg-[var(--panel)] px-3.5 text-sm uppercase text-[var(--paper)] outline-none placeholder:font-sans placeholder:normal-case placeholder:text-[var(--muted)] focus:border-[var(--brass-dim)]"
+              />
+            </label>
             <button
               type="submit"
               disabled={pending || !draft.trim()}
-              className="rounded-lg border border-line p-1.5 text-[var(--muted)] transition hover:border-[var(--brass-dim)] hover:text-[var(--paper)] disabled:opacity-40"
-              aria-label="Add"
+              className={cn(pill, "self-end")}
             >
-              <Plus size={14} />
+              Add
             </button>
           </form>
-          {addError && <p className="px-1 text-[10px] text-[var(--coral)]">{addError}</p>}
+          {addError && <p className="pt-2 text-xs text-[var(--coral)]">{addError}</p>}
           {addSuggestions.length > 0 && (
-            <ul className="flex flex-col gap-0.5">
+            <ul className="flex flex-col pt-1">
               {addSuggestions.map((m) => (
-                <li key={m.symbol}>
+                <li key={m.symbol} className="border-b border-line">
                   <button
                     type="button"
                     onClick={() => add(m.symbol)}
-                    className="w-full rounded-lg px-1.5 py-1 text-left transition hover:bg-[var(--panel-2)]"
+                    className="w-full py-2 text-left transition-colors hover:bg-[var(--panel)]"
                   >
                     <SymbolMatchLabel match={m} />
                   </button>
@@ -463,20 +501,24 @@ export function MarketsView({
               ))}
             </ul>
           )}
-        </aside>
+          <p className="pt-2.5 text-xs text-[var(--muted)]">
+            The chip reads direction, bars since the Hull flip, and the move since.
+          </p>
+        </section>
 
-        {/* ── chart grid ───────────────────────────────────────────────── */}
+        {/* ── charts ───────────────────────────────────────────────────── */}
         <div
-          className={`grid gap-4 ${
+          className={cn(
+            "grid min-w-0 gap-x-10 gap-y-9 self-start",
             prefs.columns === 1
               ? "grid-cols-1"
               : prefs.columns === 2
                 ? "grid-cols-1 xl:grid-cols-2"
-                : "grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3"
-          }`}
+                : "grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3",
+          )}
         >
           {rows.map((r) => (
-            <ChartCard
+            <ChartSection
               key={r.symbol}
               row={r}
               prefs={prefs}
@@ -487,11 +529,11 @@ export function MarketsView({
             />
           ))}
           {rows.length === 0 && (
-            <div className="rounded-[var(--radius)] border border-dashed border-line p-12 text-center">
+            <div className="border-y border-line py-12 text-center">
               <p className="text-sm text-[var(--muted)]">Nothing on the desk.</p>
-              <p className="mt-1 text-xs text-[var(--faint)]">
-                Positions you hold appear here automatically. Add a ticker on the left to chart
-                one you don&apos;t.
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Positions you hold appear here automatically. Add a ticker to the watchlist to
+                chart one you don&apos;t.
               </p>
             </div>
           )}
@@ -501,85 +543,93 @@ export function MarketsView({
   );
 }
 
-/** The trend column: direction, age, and what the move is worth since the flip. */
-function TrendChip({ trend, compact = false }: { trend: HullTrend; compact?: boolean }) {
+const SIGNED: Record<"up" | "down" | "none", string> = {
+  up: "text-[var(--jade)]",
+  down: "text-[var(--coral)]",
+  none: "text-[var(--muted)]",
+};
+
+function signTone(v: number | null): string {
+  return SIGNED[v == null ? "none" : v >= 0 ? "up" : "down"];
+}
+
+/** The trend column: direction, bars since the flip, and the move since. */
+function TrendChip({ trend }: { trend: HullTrend }) {
   if (!trend.direction) {
-    return <span className="font-mono text-[10px] text-[var(--faint)]">no read</span>;
+    return <span className="mono text-[11px] text-[var(--muted)]">no read</span>;
   }
   const up = trend.direction === "up";
   const fresh = trend.barsSince != null && trend.barsSince <= FRESH_FLIP_BARS;
-  const color = up ? "var(--jade)" : "var(--coral)";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-mono text-[10px] ${
-        fresh ? "ring-1" : ""
-      }`}
-      style={{
-        color,
-        background: fresh ? "color-mix(in srgb, currentColor 12%, transparent)" : undefined,
-      }}
-      title={
-        `Hull turned ${trend.direction} ${trend.barsSince} bar${trend.barsSince === 1 ? "" : "s"} ago` +
-        (trend.flipPrice != null ? ` at ${fmtNum(trend.flipPrice)}` : "") +
-        (trend.changeSinceFlip != null ? ` · ${fmtPct(trend.changeSinceFlip)} since` : "")
-      }
-    >
-      {up ? "▲" : "▼"}
-      {trend.barsSince != null && <span>{trend.barsSince}</span>}
-      {!compact && trend.changeSinceFlip != null && (
-        <span className="text-[var(--muted)]">{fmtPct(trend.changeSinceFlip)}</span>
+      className={cn(
+        "mono inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px]",
+        up
+          ? "border-[var(--jade)] text-[var(--jade)]"
+          : "border-[var(--coral)] text-[var(--coral)]",
+        fresh &&
+          (up
+            ? "bg-[color-mix(in_srgb,var(--jade)_14%,transparent)]"
+            : "bg-[color-mix(in_srgb,var(--coral)_14%,transparent)]"),
       )}
+      title={trendSentence(trend)}
+    >
+      {up ? "↑" : "↓"}
+      {trend.barsSince != null && <> {trend.barsSince}</>}
+      {trend.changeSinceFlip != null && <> · {fmtPct(trend.changeSinceFlip)}</>}
     </span>
   );
 }
 
-function RailRow({ row, onRemove }: { row: Row; onRemove: () => void }) {
-  const up = (row.dayChange ?? 0) >= 0;
+/** "Hull turned up 14 bars ago at 220.60 · +3.90% since" */
+function trendSentence(trend: HullTrend): string {
+  if (!trend.direction) return "No Hull read at this timeframe";
   return (
-    <li className="group flex items-center gap-2 rounded-lg px-1.5 py-1.5 transition hover:bg-[var(--panel-2)]">
+    `Hull turned ${trend.direction} ${trend.barsSince} bar${trend.barsSince === 1 ? "" : "s"} ago` +
+    (trend.flipPrice != null ? ` at ${fmtNum(trend.flipPrice)}` : "") +
+    (trend.changeSinceFlip != null ? ` · ${fmtPct(trend.changeSinceFlip)} since` : "")
+  );
+}
+
+function RailRow({ row, onRemove }: { row: Row; onRemove: () => void }) {
+  return (
+    <li className="group mono flex min-h-[52px] items-center gap-1 border-b border-line text-[13px] transition-colors hover:bg-[var(--panel)]">
       <a
         href={`#chart-${row.symbol}`}
-        className="min-w-0 flex-1"
+        className="grid min-w-0 flex-1 grid-cols-[minmax(90px,1fr)_90px_70px_132px] items-center gap-3 self-stretch pl-2"
         title={row.source !== row.symbol ? `${row.symbol} charted from ${row.source}` : undefined}
       >
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate font-mono text-xs text-[var(--paper)]">
-            {row.symbol}
-            {row.source !== row.symbol && (
-              <span className="ml-1 text-[9px] text-[var(--faint)]">↝{row.source}</span>
-            )}
-          </span>
-          <span className="shrink-0 font-mono text-xs tabular text-[var(--paper)]">
-            {fmtNum(row.last)}
-          </span>
-        </div>
-        <div className="mt-0.5 flex items-center justify-between gap-2">
-          {row.missing ? (
-            <span className="font-mono text-[10px] text-[var(--brass)]">no data</span>
-          ) : (
-            <TrendChip trend={row.trend} compact />
+        <span className="truncate font-medium text-[var(--paper)]">
+          {row.symbol}
+          {row.source !== row.symbol && (
+            <span className="ml-1 text-[11px] font-normal text-[var(--muted)]">↝{row.source}</span>
           )}
-          <span
-            className="shrink-0 font-mono text-[10px] tabular"
-            style={{ color: row.dayChange == null ? "var(--faint)" : up ? "var(--jade)" : "var(--coral)" }}
-          >
-            {fmtPct(row.dayChange)}
-          </span>
-        </div>
+        </span>
+        <span className="tabular text-right text-[var(--paper)]">{fmtNum(row.last)}</span>
+        <span className={cn("tabular text-right", signTone(row.dayChange))}>
+          {fmtPct(row.dayChange)}
+        </span>
+        <span className="flex justify-end">
+          {row.missing ? (
+            <span className="text-[11px] text-[var(--brass)]">no data</span>
+          ) : (
+            <TrendChip trend={row.trend} />
+          )}
+        </span>
       </a>
       <button
         type="button"
         onClick={onRemove}
         aria-label={`Remove ${row.symbol}`}
-        className="shrink-0 rounded p-0.5 text-[var(--faint)] opacity-0 transition hover:text-[var(--coral)] focus:opacity-100 group-hover:opacity-100"
+        className="shrink-0 rounded p-1 text-[var(--muted)] opacity-0 transition hover:text-[var(--coral)] focus:opacity-100 group-hover:opacity-100"
       >
-        <X size={12} />
+        <X size={13} />
       </button>
     </li>
   );
 }
 
-function ChartCard({
+function ChartSection({
   row,
   prefs,
   height,
@@ -594,78 +644,88 @@ function ChartCard({
   onRetarget: (symbol: string, source: string) => Promise<string | null>;
   onClearSource: () => void;
 }) {
-  const up = (row.dayChange ?? 0) >= 0;
   const redirected = row.source !== row.symbol;
+  const listing = [row.meta?.exchangeName, row.meta?.currency].filter(Boolean).join(" · ");
   return (
     <section
       id={`chart-${row.symbol}`}
-      className={`scroll-mt-4 overflow-hidden rounded-[var(--radius)] border bg-[var(--panel)] ${
-        row.missing ? "border-[var(--brass-dim)]" : "border-line"
-      }`}
+      aria-label={`${row.symbol} chart`}
+      className="flex min-w-0 scroll-mt-4 flex-col gap-3"
     >
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-line px-4 py-2.5">
-        <h2 className="font-display text-lg leading-none">{row.symbol}</h2>
-        {redirected && (
-          <button
-            type="button"
-            onClick={onClearSource}
-            title={`Charted from ${row.source} — click to undo`}
-            className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[10px] text-[var(--muted)] transition hover:border-[var(--coral)] hover:text-[var(--paper)]"
-          >
-            via {row.source} ×
-          </button>
+      <header
+        className={cn(
+          "flex min-h-[34px] flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-2.5",
+          row.missing ? "border-[var(--brass-dim)]" : "border-[var(--line-strong)]",
         )}
-        <span className="font-mono text-sm tabular text-[var(--paper)]">{fmtNum(row.last)}</span>
-        <span
-          className="font-mono text-xs tabular"
-          style={{ color: row.dayChange == null ? "var(--faint)" : up ? "var(--jade)" : "var(--coral)" }}
-        >
-          {fmtPct(row.dayChange)}
-        </span>
-        {!row.missing && <TrendChip trend={row.trend} />}
-        <span className="ml-auto flex items-center gap-2.5">
-          {row.meta?.exchangeName && (
-            <span className="hidden text-[10px] text-[var(--faint)] sm:inline">
-              {row.meta.exchangeName}
-              {row.meta.currency ? ` · ${row.meta.currency}` : ""}
+      >
+        <h2 className="font-display text-lg tracking-tight">
+          {row.symbol}
+          {listing && (
+            <span className="ml-2 font-sans text-xs font-normal tracking-normal text-[var(--muted)]">
+              {listing}
             </span>
           )}
-          <Link
-            href={`/investments/options/chain?ticker=${encodeURIComponent(row.symbol)}`}
-            className="flex items-center gap-0.5 text-[10px] text-[var(--muted)] transition hover:text-[var(--paper)]"
-          >
-            Chain <ArrowUpRight size={10} />
-          </Link>
-          <Link
-            href={`/fundamentals?ticker=${encodeURIComponent(row.symbol)}`}
-            className="flex items-center gap-0.5 text-[10px] text-[var(--muted)] transition hover:text-[var(--paper)]"
-          >
-            Financials <ArrowUpRight size={10} />
-          </Link>
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={`Remove ${row.symbol}`}
-            className="rounded p-0.5 text-[var(--faint)] transition hover:text-[var(--coral)]"
-          >
-            <X size={13} />
-          </button>
+        </h2>
+        <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          {redirected && (
+            <button
+              type="button"
+              onClick={onClearSource}
+              title={`Charted from ${row.source} — click to undo`}
+              className="mono rounded-full border border-line px-2 py-0.5 text-[11px] text-[var(--muted)] transition-colors hover:border-[var(--coral)] hover:text-[var(--paper)]"
+            >
+              via {row.source} ×
+            </button>
+          )}
+          {!row.missing && <TrendChip trend={row.trend} />}
+          <span className="mono tabular">
+            {fmtNum(row.last)}
+            <span className={signTone(row.dayChange)}> {fmtPct(row.dayChange)}</span>
+          </span>
         </span>
       </header>
 
       {row.missing ? (
         <SourceFinder row={row} height={height} onRetarget={onRetarget} onRemove={onRemove} />
       ) : (
-        <CandleChart
-          bars={row.bars}
-          points={row.points}
-          showBand={prefs.showBand}
-          colorCandles={prefs.colorCandles}
-          showVolume={prefs.showVolume}
-          interval={prefs.interval}
-          height={height}
-        />
+        <div className="border-b border-line">
+          <CandleChart
+            bars={row.bars}
+            points={row.points}
+            showBand={prefs.showBand}
+            colorCandles={prefs.colorCandles}
+            showVolume={prefs.showVolume}
+            interval={prefs.interval}
+            height={height}
+          />
+        </div>
       )}
+
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs text-[var(--muted)]">
+        <span>{row.missing ? "No bars under this source." : trendSentence(row.trend)}</span>
+        <span className="flex items-center gap-3.5">
+          <Link
+            href={`/investments/options/chain?ticker=${encodeURIComponent(row.symbol)}`}
+            className="flex items-center gap-0.5 transition-colors hover:text-[var(--paper)]"
+          >
+            Chain <ArrowUpRight size={11} />
+          </Link>
+          <Link
+            href={`/fundamentals?ticker=${encodeURIComponent(row.symbol)}`}
+            className="flex items-center gap-0.5 transition-colors hover:text-[var(--paper)]"
+          >
+            Financials <ArrowUpRight size={11} />
+          </Link>
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={`Remove ${row.symbol}`}
+            className="flex items-center gap-0.5 transition-colors hover:text-[var(--coral)]"
+          >
+            Remove <X size={11} />
+          </button>
+        </span>
+      </div>
     </section>
   );
 }
@@ -674,12 +734,12 @@ function ChartCard({
 function SymbolMatchLabel({ match }: { match: SymbolMatch }) {
   return (
     <>
-      <span className="font-mono text-xs text-[var(--paper)]">{match.symbol}</span>
+      <span className="mono text-xs text-[var(--paper)]">{match.symbol}</span>
       {match.name && (
-        <span className="ml-1.5 text-[10px] text-[var(--muted)]">{match.name}</span>
+        <span className="ml-1.5 text-[11px] text-[var(--muted)]">{match.name}</span>
       )}
       {(match.exchange || match.type) && (
-        <span className="ml-1.5 text-[10px] text-[var(--faint)]">
+        <span className="ml-1.5 text-[11px] text-[var(--muted)]">
           {[match.exchange, match.type].filter(Boolean).join(" · ")}
         </span>
       )}
@@ -753,11 +813,11 @@ function SourceFinder({
   const candidates = (matches ?? []).filter((m) => m.symbol !== row.source);
 
   return (
-    <div className="flex flex-col gap-3 overflow-y-auto p-4" style={{ height }}>
+    <div className="flex flex-col gap-3 overflow-y-auto border-b border-line pb-4" style={{ height }}>
       <div>
         <p className="text-sm text-[var(--paper)]">
           Couldn&apos;t find market data for{" "}
-          <span className="font-mono">{row.source}</span>.
+          <span className="mono">{row.source}</span>.
         </p>
         <p className="mt-1 text-xs text-[var(--muted)]">
           {row.held
@@ -779,7 +839,7 @@ function SourceFinder({
           placeholder="Symbol or company name"
           aria-label={`Find a data source for ${row.symbol}`}
           autoComplete="off"
-          className="min-w-0 flex-1 rounded-lg border border-line bg-[var(--ink)] px-2.5 py-1.5 font-mono text-xs text-[var(--paper)] outline-none placeholder:font-sans placeholder:text-[var(--faint)] focus:border-[var(--brass-dim)]"
+          className="min-w-0 flex-1 rounded-lg border border-line bg-[var(--panel)] px-3 py-2 mono text-xs text-[var(--paper)] outline-none placeholder:font-sans placeholder:text-[var(--muted)] focus:border-[var(--brass-dim)]"
         />
         <button
           type="submit"
@@ -793,18 +853,18 @@ function SourceFinder({
 
       {error && <p className="text-[11px] text-[var(--coral)]">{error}</p>}
 
-      <ul className="flex flex-col gap-0.5">
+      <ul className="flex flex-col">
         {candidates.map((m) => (
           <li key={m.symbol}>
             <button
               type="button"
               disabled={applying != null}
               onClick={() => apply(m.symbol)}
-              className="w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-[var(--panel-2)] disabled:opacity-50"
+              className="w-full border-b border-line py-2 text-left transition-colors hover:bg-[var(--panel)] disabled:opacity-50"
             >
               <SymbolMatchLabel match={m} />
               {applying === m.symbol && (
-                <span className="ml-1.5 text-[10px] text-[var(--brass)]">checking…</span>
+                <span className="ml-1.5 text-[11px] text-[var(--brass)]">checking…</span>
               )}
             </button>
           </li>
@@ -812,9 +872,9 @@ function SourceFinder({
       </ul>
 
       {matches != null && candidates.length === 0 && !searching && (
-        <p className="text-xs text-[var(--faint)]">
+        <p className="text-xs text-[var(--muted)]">
           Nothing matched “{query}”. Try the company name, or the ticker with its exchange suffix
-          (e.g. <span className="font-mono">BMW.DE</span>).
+          (e.g. <span className="mono">BMW.DE</span>).
         </p>
       )}
 

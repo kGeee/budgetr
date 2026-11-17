@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { AlertTriangle, Clock, PlugZap } from "lucide-react";
+import { Clock, PlugZap } from "lucide-react";
 import type { ConnectionHealth, ConnectionSummary } from "@/lib/connection-health";
 import { describeAge } from "@/lib/connection-health";
 
 /**
- * Connection health, shown three ways. All server components — none of this
+ * Connection health, shown two ways (the per-institution list is the
+ * Connections rows on Accounts). All server components — none of this
  * needs state, and the chip renders inside list rows where an extra client
  * bundle per row is exactly the kind of cost the vendor page just paid for.
  */
@@ -33,7 +34,27 @@ const LABEL = {
   error: () => "Disconnected",
 } as const;
 
-/** Inline state pill for an institution row. */
+const STATE_WORD = {
+  live: "Live",
+  stale: "Stale",
+  error: "Disconnected",
+} as const;
+
+/**
+ * State for a ruled connection row: a dot and one word, no pill. The dot is
+ * decoration — the word carries the state for anyone not reading colour.
+ */
+export function ConnectionState({ health }: { health: ConnectionHealth }) {
+  const tone = TONE[health.state];
+  return (
+    <span title={health.message} className={`inline-flex shrink-0 items-center gap-2 text-xs ${tone.text}`}>
+      <span aria-hidden className="h-[7px] w-[7px] rounded-full bg-current" />
+      {STATE_WORD[health.state]}
+    </span>
+  );
+}
+
+/** Inline state pill, for places a row has no room for a column. */
 export function ConnectionChip({ health }: { health: ConnectionHealth }) {
   const tone = TONE[health.state];
   return (
@@ -96,47 +117,12 @@ export function ConnectionAlert({
         </span>
       </p>
       <Link
-        href="/settings#connections"
+        // Straight to the failing link's Connections row, where Reconnect and Disconnect live.
+        href={`/accounts#conn-${worst.itemId}`}
         className={`shrink-0 rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-[var(--panel-2)] ${tone.border} ${tone.text}`}
       >
         {broken ? "Reconnect" : "Review"}
       </Link>
     </div>
-  );
-}
-
-/** Full per-institution list, for Settings. */
-export function ConnectionList({ summary }: { summary: ConnectionSummary }) {
-  if (summary.total === 0) {
-    return (
-      <p className="text-sm text-[var(--muted)]">
-        No institutions linked yet. Use “Connect account” on the Accounts page.
-      </p>
-    );
-  }
-
-  return (
-    <ul className="divide-y divide-[var(--line)] overflow-hidden rounded-[var(--radius)] border border-line">
-      {summary.all.map((c) => (
-        <li key={c.itemId} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-2 truncate text-sm font-medium">
-              {c.state === "error" && (
-                <AlertTriangle size={13} className="shrink-0 text-[var(--coral)]" />
-              )}
-              {c.institutionName}
-            </p>
-            <p
-              className={`mt-0.5 text-xs ${
-                c.state === "error" ? "text-[var(--coral)]" : "text-[var(--muted)]"
-              }`}
-            >
-              {c.accountCount} {c.accountCount === 1 ? "account" : "accounts"} · {c.message}
-            </p>
-          </div>
-          <ConnectionChip health={c} />
-        </li>
-      ))}
-    </ul>
   );
 }

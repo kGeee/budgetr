@@ -42,7 +42,7 @@ struct DashboardView: View {
             budgets: Array(budgets)
         )
 
-        BScreen("Spending", eyebrow: m.eyebrow, trailing: {
+        BScreen("Home", eyebrow: m.eyebrow, trailing: {
             if !transactions.isEmpty {
                 IconChip(systemName: "building.columns", label: "Accounts") { showingAccounts = true }
             }
@@ -325,7 +325,9 @@ private struct SpendingModel {
         let idx = CategoryIndex(categories: categories)
         let styles = CategoryStyles(categories: categories)
 
-        let entries = transactions.map {
+        // Transfers (and Reimbursable, which lives in the transfer group) are
+        // dropped so month spent and "where it went" match the web app.
+        let entries = transactions.filter { $0.amount <= 0 || idx.countsTowardSpend($0) }.map {
             MonthSummary.Entry(amount: $0.amount, date: $0.date ?? "", categoryId: idx.resolvedId(for: $0), pending: $0.pending)
         }
         let month = MonthSummary.monthKey(of: now, calendar: calendar)
@@ -384,7 +386,7 @@ private struct SpendingModel {
             uniquingKeysWith: { a, _ in a }
         )
         var grouped: [String: [CDTransaction]] = [:]
-        for t in transactions where (t.date ?? "").hasPrefix(month) && t.amount > 0 {
+        for t in transactions where (t.date ?? "").hasPrefix(month) && t.amount > 0 && idx.countsTowardSpend(t) {
             grouped[idx.resolvedId(for: t) ?? "__none__", default: []].append(t)
         }
         self.rows = grouped.map { id, txns in
