@@ -38,7 +38,7 @@ export interface DesktopReadModel {
   netWorthCents: number;
   netWorthSpark: Array<{ d: number; cents: number }>;
   accounts: Array<{ id: string; name: string; kind: AccountKind; cents: number }>;
-  budgets: Array<{ category: string; spentCents: number; limitCents: number }>;
+  budgets: Array<{ category: string; spentCents: number; limitCents: number; fixed?: boolean }>;
   transactions: Array<{
     id: string;
     ts: number;
@@ -62,6 +62,7 @@ export interface DesktopReadModel {
   spendByDay?: Array<{ d: number; cents: number }>;
   // Budgeted categories only, budget month only. Optional.
   budgetSpendByDay?: Array<{ d: number; cents: number }>;
+  flexibleSpendByDay?: Array<{ d: number; cents: number }>;
   // Active categories in display order. Optional.
   categories?: Array<{ id: string; name: string; icon?: string | null; group: 'income' | 'spending' | 'transfer' }>;
   // Optional shared-expense detail (contract v2). Absent on installs that have
@@ -221,7 +222,13 @@ export function buildSummary(model: DesktopReadModel): Summary {
     .map((b) => {
       const spentCents = cents(b.spentCents, `budget ${b.category} spent`);
       const limitCents = cents(b.limitCents, `budget ${b.category} limit`);
-      return { category: b.category, spentCents, limitCents, state: computeBudgetState(spentCents, limitCents) };
+      return {
+        category: b.category,
+        spentCents,
+        limitCents,
+        state: computeBudgetState(spentCents, limitCents),
+        ...(b.fixed ? { fixed: true } : {}),
+      };
     });
 
   const recent = [...model.transactions]
@@ -268,6 +275,11 @@ export function buildSummary(model: DesktopReadModel): Summary {
     ...(model.investments ? { investments: buildInvestments(model.investments) } : {}),
     ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
     ...(model.budgetSpendByDay ? { budgetSpendByDay: buildSpark(model.budgetSpendByDay, 'budgetSpendByDay') } : {}),
+    // Only meaningful beside a fixed budget; dropped otherwise so a ledger with
+    // nothing flagged publishes byte-for-byte what it did before.
+    ...(model.flexibleSpendByDay && model.budgets.some((b) => b.fixed)
+      ? { flexibleSpendByDay: buildSpark(model.flexibleSpendByDay, 'flexibleSpendByDay') }
+      : {}),
     // Sorted and bounded like everything else, so an unchanged desktop state
     // still produces byte-identical JSON and never churns the relay blob.
     ...(model.people

@@ -16,8 +16,10 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   getAccounts,
+  getBudgetSpendByCategoryDay,
   getBudgetSpendByDay,
   getBudgetsWithSpend,
+  getEnvelopeBudgets,
   getCategories,
   getDailySpend,
   getHoldings,
@@ -104,9 +106,31 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
 
   // Only categories with an actual budget become BudgetSummaries — the phone's
   // Budgets screen is bars-with-limits, not the full category list.
+  // Which budgets the user has marked as fixed costs. The flag rides along so
+  // the phone judges pace on flexible spending only, the way the desktop does.
+  const fixedIds = new Set(
+    getEnvelopeBudgets()
+      .filter((b) => b.fixed)
+      .map((b) => b.categoryId),
+  );
   const budgets = getBudgetsWithSpend()
     .filter((b) => b.budget != null && b.budget > 0)
-    .map((b) => ({ category: b.categoryId, spentCents: cents(b.spent), limitCents: cents(b.budget) }));
+    .map((b) => ({
+      category: b.categoryId,
+      spentCents: cents(b.spent),
+      limitCents: cents(b.budget),
+      ...(fixedIds.has(b.categoryId) ? { fixed: true } : {}),
+    }));
+  const hasFixed = budgets.some((b) => "fixed" in b);
+
+  // The pace series with fixed budgets left out, summed per day.
+  const flexibleByDay = new Map<string, number>();
+  if (hasFixed) {
+    for (const r of getBudgetSpendByCategoryDay()) {
+      if (fixedIds.has(r.categoryId)) continue;
+      flexibleByDay.set(r.date, (flexibleByDay.get(r.date) ?? 0) + r.spent);
+    }
+  }
 
   const transactions = getRecentTransactions(40).map((t) => ({
     id: t.id,
@@ -227,6 +251,13 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
     spendByDay: getDailySpend(92).map((r) => ({ d: dayToUnix(r.date), cents: cents(r.spent) })),
     // What the desktop's Budgets pace line plots: budgeted categories only.
     budgetSpendByDay: getBudgetSpendByDay().map((r) => ({ d: dayToUnix(r.date), cents: cents(r.spent) })),
+    ...(hasFixed
+      ? {
+          flexibleSpendByDay: [...flexibleByDay.entries()]
+            .sort(([a], [b]) => (a < b ? -1 : 1))
+            .map(([date, spent]) => ({ d: dayToUnix(date), cents: cents(spent) })),
+        }
+      : {}),
     // ── Shared expenses (contract v2) ────────────────────────────────
     // Balances are netted here, on the desktop, and the phone renders the
     // result — it never has the ledger to recompute one from.

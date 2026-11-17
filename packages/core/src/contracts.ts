@@ -57,6 +57,10 @@ export interface Summary {
   // desktop's Budgets pace line plots, so an unbudgeted category (rent with no
   // envelope) never counts against the budget on the phone either. Optional.
   budgetSpendByDay?: SparkPoint[];
+  // The same series with fixed budgets left out — what the desktop's "Flexible
+  // pace" line plots. Present only when at least one budget is fixed; without
+  // it the phone paces against budgetSpendByDay as before.
+  flexibleSpendByDay?: SparkPoint[];
   // Active categories in the desktop's display order; ≤ MAX_CATEGORIES.
   categories?: CategoryInfo[];
   // ── v2: shared expenses ──────────────────────────────────────────
@@ -163,6 +167,10 @@ export interface BudgetSummary {
   spentCents: number;
   limitCents: number;
   state: BudgetState; // desktop computes; phone never recomputes pace
+  // A fixed cost (rent, a loan payment): lands in one charge, so it is judged
+  // as paid-or-not rather than against an even pace. Present only when true —
+  // an older phone ignores it, an older desktop never sends it.
+  fixed?: boolean;
 }
 
 export interface TxnSummary {

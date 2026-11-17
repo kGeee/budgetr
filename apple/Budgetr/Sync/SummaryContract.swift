@@ -82,6 +82,9 @@ struct Summary: Codable, Equatable {
     /// Budget month, budgeted categories only — what the desktop's Budgets
     /// pace line plots. Absent from older Macs.
     var budgetSpendByDay: [SparkPoint]? = nil
+    /// The same series without fixed budgets — the Mac's "Flexible pace" line.
+    /// Present only when at least one budget is marked fixed.
+    var flexibleSpendByDay: [SparkPoint]? = nil
     // v2 — shared expenses. Absent on installs that have never split a bill.
     let people: [Person]?
     /// Most recent first.
@@ -163,6 +166,10 @@ struct Summary: Codable, Equatable {
         let limitCents: Int
         /// ok | warn | over — the Mac decides; the phone never recomputes pace.
         let state: String
+        /// A fixed cost (rent, a loan): judged as paid-or-not, never on pace.
+        /// Sent only when true; absent from a Mac older than 0.15.
+        var fixed: Bool? = nil
+        var isFixed: Bool { fixed ?? false }
     }
 
     struct Txn: Codable, Equatable, Identifiable {

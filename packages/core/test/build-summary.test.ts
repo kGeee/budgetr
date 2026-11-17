@@ -233,3 +233,36 @@ describe('investments extension', () => {
     expect(Object.keys(st[1]!).sort()).toEqual(['cents', 'detail', 'expiry', 'id', 'label', 'underlying']);
   });
 });
+
+describe('fixed budgets', () => {
+  const days = [
+    { d: 1_749_000_000, cents: 245_000 },
+    { d: 1_749_086_400, cents: 4_000 },
+  ];
+
+  it('publishes nothing new when no budget is fixed', () => {
+    const plain = buildSummary(baseModel({ budgetSpendByDay: days }));
+    const offered = buildSummary(baseModel({ budgetSpendByDay: days, flexibleSpendByDay: days }));
+    // A flexible series with no fixed budget beside it is meaningless, so the
+    // wire stays byte-identical to a desktop that predates the flag.
+    expect(JSON.stringify(offered)).toBe(JSON.stringify(plain));
+    expect(plain.budgets.every((b) => !('fixed' in b))).toBe(true);
+    expect(plain.flexibleSpendByDay).toBeUndefined();
+  });
+
+  it('marks the fixed budget and carries the flexible series', () => {
+    const s = buildSummary(
+      baseModel({
+        budgets: [
+          { category: 'cat_rent', spentCents: 245_000, limitCents: 280_000, fixed: true },
+          { category: 'cat_dining', spentCents: 4_000, limitCents: 50_000 },
+        ],
+        budgetSpendByDay: days,
+        flexibleSpendByDay: [{ d: 1_749_086_400, cents: 4_000 }],
+      }),
+    );
+    expect(s.budgets.find((b) => b.category === 'cat_rent')?.fixed).toBe(true);
+    expect('fixed' in s.budgets.find((b) => b.category === 'cat_dining')!).toBe(false);
+    expect(s.flexibleSpendByDay).toEqual([{ d: 1_749_086_400, cents: 4_000 }]);
+  });
+});

@@ -126,6 +126,92 @@ enum CompanionModel {
         return totals(series, month: month)
     }
 
+    // ── Fixed and flexible ───────────────────────────────────────────
+    // A fixed cost (rent) lands in one charge on the 1st, so holding it to an
+    // even daily burn reads as "ahead of pace" all month. Once the Mac marks
+    // any budget fixed, pace is judged on the rest — the same split, and the
+    // same sentence, as the desktop's Budgets page (web/lib/budget-verdict.ts).
+
+    struct BudgetPosition: Equatable {
+        let fixedSpent: Int
+        let fixedLimit: Int
+        let flexibleSpent: Int
+        let flexibleLimit: Int
+
+        var totalSpent: Int { fixedSpent + flexibleSpent }
+        var totalLimit: Int { fixedLimit + flexibleLimit }
+        /// Left across every budget — the hero figure.
+        var left: Int { totalLimit - totalSpent }
+        /// Only narrow to flexible when something flexible is left to judge; a
+        /// month of nothing but fixed budgets reads as the whole month.
+        var judgesFlexible: Bool { fixedLimit > 0 && flexibleLimit > 0 }
+        var paceSpent: Int { judgesFlexible ? flexibleSpent : totalSpent }
+        var paceLimit: Int { judgesFlexible ? flexibleLimit : totalLimit }
+    }
+
+    static func budgetPosition(_ s: Summary) -> BudgetPosition {
+        var fs = 0, fl = 0, xs = 0, xl = 0
+        for b in s.budgets {
+            if b.isFixed { fs += b.spentCents; fl += b.limitCents } else { xs += b.spentCents; xl += b.limitCents }
+        }
+        return BudgetPosition(fixedSpent: fs, fixedLimit: fl, flexibleSpent: xs, flexibleLimit: xl)
+    }
+
+    /// The daily series the pace line should plot: flexible budgets only when
+    /// the Mac sends that split, otherwise every budgeted category as before.
+    static func paceTotals(_ s: Summary, month: Month) -> Totals? {
+        if budgetPosition(s).judgesFlexible, let flexible = s.flexibleSpendByDay {
+            return totals(flexible, month: month)
+        }
+        return budgetTotals(s, month: month)
+    }
+
+    struct PaceVerdict: Equatable {
+        enum Tone { case ok, warn, over }
+        let tone: Tone
+        /// Words before the figure.
+        let lead: String
+        /// The amount the sentence turns on, in cents.
+        let cents: Int
+        /// Words after the figure, including the full stop.
+        let tail: String
+    }
+
+    /// The sentence under "Left to spend". Mirrors `budgetVerdict` on the web,
+    /// in cents, so the phone and the Mac never give different readings.
+    static func paceVerdict(_ p: BudgetPosition, dayOfMonth: Int, daysInMonth: Int) -> PaceVerdict? {
+        guard p.totalLimit > 0 else { return nil }
+        let subject = p.judgesFlexible ? "Flexible spending" : "Spending"
+        let total = max(1, daysInMonth)
+        let day = min(total, max(1, dayOfMonth))
+        let left = total - day
+        let days = "\(left) day\(left == 1 ? "" : "s")"
+        let over = p.paceSpent - p.paceLimit
+
+        if over > 0 {
+            return PaceVerdict(
+                tone: .over,
+                lead: p.judgesFlexible ? "Flexible spending is" : "You are",
+                cents: over,
+                tail: left > 0 ? "over budget with \(days) left." : "over budget."
+            )
+        }
+        if left == 0 {
+            return PaceVerdict(
+                tone: .ok,
+                lead: p.judgesFlexible ? "Flexible spending closed" : "The month closed",
+                cents: -over,
+                tail: "under budget."
+            )
+        }
+        // Integer cents: expected = limit × day / total, rounded to the cent.
+        let expected = Int((Double(p.paceLimit) * Double(day) / Double(total)).rounded())
+        let gap = expected - p.paceSpent
+        return gap >= 0
+            ? PaceVerdict(tone: .ok, lead: "\(subject) is", cents: gap, tail: "under an even pace, with \(days) left.")
+            : PaceVerdict(tone: .warn, lead: "\(subject) is", cents: -gap, tail: "ahead of an even pace, with \(days) left.")
+    }
+
     // ── What counts as spend ─────────────────────────────────────────
     // The Mac's rule, applied to the tape: a transaction is spend when its
     // (effective) category is in the spending group. Card payments ("AMERICAN

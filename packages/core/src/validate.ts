@@ -135,6 +135,7 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
     reqInt(b.spentCents, `${path}.spentCents`);
     reqInt(b.limitCents, `${path}.limitCents`);
     req(typeof b.state === 'string' && BUDGET_STATES.has(b.state), `${path}.state`, 'unknown budget state');
+    if (b.fixed !== undefined) req(typeof b.fixed === 'boolean', `${path}.fixed`, 'must be a boolean');
   });
 
   reqArr(s.recent, '$.recent');
@@ -181,6 +182,7 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
 
   if (s.spendByDay !== undefined) validateSpark(s.spendByDay, '$.spendByDay');
   if (s.budgetSpendByDay !== undefined) validateSpark(s.budgetSpendByDay, '$.budgetSpendByDay');
+  if (s.flexibleSpendByDay !== undefined) validateSpark(s.flexibleSpendByDay, '$.flexibleSpendByDay');
 
   if (s.categories !== undefined) {
     reqArr(s.categories, '$.categories');
