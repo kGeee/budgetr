@@ -228,7 +228,7 @@ private struct CompanionTabs: View {
 
     private var items: [FloatingTabBar<CompanionTab>.Item] {
         [
-            .init(tab: .spending, title: "Spending", symbol: "square.grid.2x2"),
+            .init(tab: .spending, title: "Today", symbol: "house"),
             .init(tab: .activity, title: "Activity", symbol: "arrow.left.arrow.right"),
             // Badged while the Mac has spotted a payback waiting to be confirmed.
             .init(tab: .shared, title: "Shared", symbol: "person.2", badge: companion.summary?.settleSuggestions?.count ?? 0),

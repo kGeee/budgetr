@@ -36,7 +36,7 @@ struct CompanionSharedView: View {
         let s = companion.summary
         let people = companion.knownPeople
 
-        BScreen("Shared", eyebrow: people.isEmpty ? "Split bills" : "Split bills · \(people.count) \(people.count == 1 ? "person" : "people")", trailing: {
+        BScreen("Shared", eyebrow: "Split bills", trailing: {
             if s != nil { addMenu }
         }) {
             CompanionStatusLine()
@@ -82,7 +82,7 @@ struct CompanionSharedView: View {
         }
     }
 
-    /// The ＋ in the header: the two things you can add from the phone.
+    /// The ＋ in the header: the things you can add from the phone.
     private var addMenu: some View {
         Menu {
             Button { sheet = .split(txnId: nil, personId: nil) } label: {
@@ -100,11 +100,11 @@ struct CompanionSharedView: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(T.onJade)
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .background(Circle().fill(T.jade))
-                .shadow(color: T.jade.opacity(0.35), radius: 8, y: 2)
+                .contentShape(Circle())
         }
         .accessibilityLabel("Add to Shared")
     }
@@ -115,103 +115,134 @@ struct CompanionSharedView: View {
         let bills = s.shared ?? []
         let byId = Dictionary(people.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
-        BalanceHero(people: people).rise(0)
-
-        statTiles(bills: bills, people: people).rise(1)
-
-        if !companion.pending.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: "Sending to your Mac", detail: "\(companion.pending.count)")
-                VStack(spacing: 8) {
-                    ForEach(companion.pending) { op in
-                        PendingOpRow(op: op, summary: s, people: companion.knownPeople) {
-                            Haptics.warning()
-                            withAnimation(M.settle) { companion.discard(op) }
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                }
-            }
-        }
-
         // A suggestion already confirmed from here stops asking.
         let confirming = Set(companion.pending.compactMap { op -> String? in
             if case .recordSettlement(let o) = op { return o.txnId } else { return nil }
         })
         let suggestions = (s.settleSuggestions ?? []).filter { !confirming.contains($0.txnId) }
+        let waiting = Set(suggestions.map(\.personId))
+
+        let owed = people.reduce(0) { $0 + max(0, $1.cents) }
+        let owe = people.reduce(0) { $0 + max(0, -$1.cents) }
+        let net = owed - owe
+
+        StatementHero(eyebrow: "Owed to you", cents: owed, color: owed > 0 ? T.paper : T.muted, verdict: {
+            VerdictText(verdict(people: people, suggestions: suggestions, byId: byId))
+        }, footer: {
+            if owe > 0 {
+                Text("net \(net >= 0 ? "+" : "−")\(abs(net).dollars.money())")
+                    .font(F.mono(12))
+                    .foregroundStyle(T.muted)
+            }
+        })
+        .rise(0)
+
+        statCells(bills: bills, people: people).rise(1)
+
         if !suggestions.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: "Looks like a payback", detail: "\(suggestions.count)")
-                VStack(spacing: 8) {
-                    ForEach(suggestions) { sg in
-                        SuggestionRow(suggestion: sg, person: byId[sg.personId]) {
-                            if let p = byId[sg.personId] { sheet = .person(p) }
-                        } onConfirm: {
-                            Task {
-                                await companion.submit(.recordSettlement(.init(
-                                    id: CompanionOp.newId(), ts: CompanionOp.now(),
-                                    personId: sg.personId, cents: sg.cents, txnId: sg.txnId
-                                )))
-                            }
+            StatementSection(title: "Looks like a payback", count: suggestions.count, countColor: T.brass) {
+                ForEach(suggestions) { sg in
+                    SuggestionRow(suggestion: sg, person: byId[sg.personId]) {
+                        if let p = byId[sg.personId] { sheet = .person(p) }
+                    } onConfirm: {
+                        Task {
+                            await companion.submit(.recordSettlement(.init(
+                                id: CompanionOp.newId(), ts: CompanionOp.now(),
+                                personId: sg.personId, cents: sg.cents, txnId: sg.txnId
+                            )))
                         }
                     }
                 }
             }
+            .padding(.top, 6)
             .rise(2)
         }
 
         if !people.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: "People", detail: "\(people.count)")
-                Card(padding: 0) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(sortedPeople(people).enumerated()), id: \.element.id) { i, p in
-                            Button {
-                                Haptics.tap()
-                                sheet = .person(p)
-                            } label: {
-                                PersonRow(person: p)
-                                    .padding(.horizontal, 14)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.pressScale)
-                            .overlay(alignment: .top) { if i > 0 { Hairline().padding(.leading, 66) } }
-                        }
+            StatementSection(title: "People", count: people.count) {
+                ForEach(sortedPeople(people)) { p in
+                    PersonRow(person: p, waiting: waiting.contains(p.id), venmoNote: sharedVenmoNote(for: p, in: bills)) {
+                        Haptics.tap()
+                        sheet = .person(p)
                     }
                 }
             }
+            .padding(.top, 6)
             .rise(3)
         }
 
         if !bills.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(
-                    title: "Recent splits",
-                    detail: "\(bills.count)",
-                    action: bills.count > 4 ? (showingAllBills ? "Fewer" : "All \(bills.count) ›", { withAnimation(M.settle) { showingAllBills.toggle() } }) : nil
-                )
-                VStack(spacing: 10) {
-                    ForEach(Array((showingAllBills ? bills : Array(bills.prefix(4))).enumerated()), id: \.element.id) { i, b in
-                        Button {
-                            Haptics.tap()
-                            sheet = .bill(b)
-                        } label: {
-                            BillCard(bill: b, people: byId)
-                        }
-                        .buttonStyle(.pressScale)
-                        .rise(5 + i)
+            StatementSection(
+                title: "Recent splits",
+                action: bills.count > 4 ? (showingAllBills ? "Fewer" : "All \(bills.count) ›", { withAnimation(M.settle) { showingAllBills.toggle() } }) : nil
+            ) {
+                ForEach(showingAllBills ? bills : Array(bills.prefix(4))) { b in
+                    Button {
+                        Haptics.tap()
+                        sheet = .bill(b)
+                    } label: {
+                        BillRow(bill: b)
                     }
+                    .buttonStyle(.pressScale)
                 }
             }
+            .padding(.top, 6)
             .rise(4)
         }
 
-        Text("Fronted shares sit outside your spending, so a dinner you paid for four counts only your plate. Edits made here are applied by your Mac on its next sync.")
-            .font(F.body(11.5))
-            .foregroundStyle(T.faint)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 4)
+        if !companion.pending.isEmpty {
+            StatementSection(title: "Sending to your Mac", count: companion.pending.count, countColor: T.brass) {
+                ForEach(companion.pending) { op in
+                    PendingOpRow(op: op, summary: s, people: companion.knownPeople) {
+                        Haptics.warning()
+                        withAnimation(M.settle) { companion.discard(op) }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.top, 6)
+        }
+
+        Text("Fronted shares sit outside your spending. Edits apply when your Mac next syncs.")
+            .font(F.body(12))
+            .foregroundStyle(T.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The hero's sentence, built only from what the Mac published: how many
+    /// people owe, whether a payback is waiting, and what you owe.
+    private func verdict(people: [Summary.Person], suggestions: [Summary.SettleSuggestion], byId: [String: Summary.Person]) -> Text {
+        let owers = people.filter { $0.cents > 0 }
+        let owe = people.reduce(0) { $0 + max(0, -$1.cents) }
+        if owers.isEmpty && owe == 0 && suggestions.isEmpty { return Text("You're all square.") }
+
+        var t: Text
+        switch owers.count {
+        case 0: t = Text("No one owes you")
+        case 1: t = Text("\(owers[0].givenName) owes you")
+        default: t = Text("\(Self.spelled(owers.count)) people owe you")
+        }
+        if suggestions.count == 1 {
+            let who = byId[suggestions[0].personId]?.givenName ?? "Someone"
+            t = t + Text(". ") + Text("\(who) looks paid").foregroundStyle(T.jade) + Text("; ")
+        } else if suggestions.count > 1 {
+            t = t + Text(". ") + Text("\(Self.spelled(suggestions.count)) paybacks look paid").foregroundStyle(T.jade) + Text("; ")
+        } else {
+            t = t + Text("; ")
+        }
+        if owe > 0 {
+            t = t + Text("you owe ") + Text(owe.dollars.money()).foregroundStyle(T.coral) + Text(".")
+        } else {
+            t = t + Text("you owe no one.")
+        }
+        return t
+    }
+
+    /// "Two", "Three" … a sentence reads better than a digit; past twelve it doesn't.
+    private static func spelled(_ n: Int) -> String {
+        let words = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"]
+        return n >= 0 && n < words.count ? words[n] : "\(n)"
     }
 
     /// Who owes the most first, then who you owe, then the settled.
@@ -224,18 +255,30 @@ struct CompanionSharedView: View {
         }
     }
 
-    private func statTiles(bills: [Summary.SharedExpense], people: [Summary.Person]) -> some View {
+    /// This month, in one ruled strip.
+    private func statCells(bills: [Summary.SharedExpense], people: [Summary.Person]) -> some View {
         let month = CompanionModel.Month()
         let thisMonth = bills.filter { $0.ts >= month.startSec }
         let fronted = thisMonth.reduce(0) { $0 + ($1.cents - $1.myCents) }
         let mine = thisMonth.reduce(0) { $0 + $1.myCents }
         let open = people.reduce(0) { $0 + $1.openCount }
-        return HStack(spacing: 8) {
-            StatTile(label: "Fronted", value: fronted.dollars.moneyCompact(), tint: T.brass, note: "for others")
-            StatTile(label: "Your share", value: mine.dollars.moneyCompact(), note: "of \(thisMonth.count) bill\(thisMonth.count == 1 ? "" : "s")")
-            StatTile(label: "Open", value: "\(open)", note: "unsettled")
-        }
+        return StatCells(cells: [
+            .init(label: "Fronted", value: fronted.dollars.moneyCompact(), note: "for others", valueColor: T.brass),
+            .init(label: "Your share", value: mine.dollars.moneyCompact(), note: "of \(thisMonth.count) bill\(thisMonth.count == 1 ? "" : "s")"),
+            .init(label: "Open", value: "\(open)", note: "unsettled"),
+        ])
     }
+}
+
+extension Summary.Person {
+    /// "Maya Chen" → "Maya".
+    var givenName: String { name.split(separator: " ").first.map(String.init) ?? name }
+}
+
+/// "Ippudo, Airbnb · Big Sur" — what a Venmo request is for, in their terms.
+private func sharedVenmoNote(for person: Summary.Person, in bills: [Summary.SharedExpense]) -> String {
+    let names = bills.filter { b in b.shares.contains { $0.personId == person.id } }.prefix(3).map(\.merchant)
+    return names.isEmpty ? "Shared bills" : names.joined(separator: ", ")
 }
 
 /// The waiting state, without depending on the Spending screen's private one.
@@ -257,70 +300,17 @@ private struct AwaitingSummaryPlaceholder: View {
     }
 }
 
-// ── Balance ──────────────────────────────────────────────────────────
-
-/// What you're owed, said big; what you owe, said beside it; and who makes up
-/// the total, as one bar in each person's colour.
-private struct BalanceHero: View {
-    let people: [Summary.Person]
-
-    var body: some View {
-        let owed = people.reduce(0) { $0 + max(0, $1.cents) }
-        let owe = people.reduce(0) { $0 + max(0, -$1.cents) }
-        let net = owed - owe
-        let owers = people.filter { $0.cents > 0 }.sorted { $0.cents > $1.cents }
-
-        VStack(alignment: .leading, spacing: 10) {
-            Text("OWED TO YOU").font(F.mono(10)).tracking(1.2).foregroundStyle(T.muted)
-            AnimatedMoney(value: owed.dollars, font: F.display(44), color: owed > 0 ? T.paper : T.muted)
-            HStack(spacing: 10) {
-                if owe > 0 {
-                    Label {
-                        Text("you owe \(owe.dollars.money())")
-                    } icon: {
-                        Circle().fill(T.coral).frame(width: 6, height: 6)
-                    }
-                    .foregroundStyle(T.coral)
-                }
-                Text(net == 0 ? "all square" : "net \(net > 0 ? "+" : "−")\(abs(net).dollars.money())")
-                    .foregroundStyle(T.faint)
-            }
-            .font(F.mono(12))
-
-            if owers.count > 0 && owed > 0 {
-                StackedBar(slices: owers.map {
-                    MixSlice(id: $0.id, name: $0.name, value: $0.cents.dollars, color: PersonAvatar.color(for: $0))
-                }, height: 10)
-                .padding(.top, 6)
-                // The three biggest, named — the bar alone says "who", not "how much".
-                HStack(spacing: 14) {
-                    ForEach(owers.prefix(3)) { p in
-                        HStack(spacing: 6) {
-                            Circle().fill(PersonAvatar.color(for: p)).frame(width: 7, height: 7)
-                            Text(p.name.split(separator: " ").first.map(String.init) ?? p.name)
-                                .font(F.body(11.5)).foregroundStyle(T.muted)
-                            Text(p.cents.dollars.moneyCompact()).font(F.mono(11)).foregroundStyle(T.paper)
-                        }
-                    }
-                    if owers.count > 3 {
-                        Text("+\(owers.count - 3)").font(F.mono(11)).foregroundStyle(T.faint)
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .heroGlow(owed > 0 ? T.jade : T.brass)
-    }
-}
-
 // ── People ───────────────────────────────────────────────────────────
 
-/// A person's initials in their colour — the Mac assigns it, so they look the
+/// A person's initials on their colour — the Mac assigns it, so they look the
 /// same in both apps.
 struct PersonAvatar: View {
     let name: String
     var color: Color
     var size: CGFloat = 36
+
+    /// You, wherever you appear beside other people.
+    static let me = T.brass
 
     init(person: Summary.Person, size: CGFloat = 36) {
         name = person.name
@@ -340,76 +330,104 @@ struct PersonAvatar: View {
         return T.chart[Int(h % UInt32(T.chart.count - 1))]
     }
 
-    private var initials: String {
-        // Two letters don't fit an avatar small enough to stack.
-        let parts = name.split(separator: " ").prefix(size < 28 ? 1 : 2).compactMap(\.first)
+    /// "Sam Lee" → "SL"; "You" stays "You".
+    static func initials(_ name: String, limit: Int = 2) -> String {
+        if name == "You" && limit > 1 { return "You" }
+        let parts = name.split(separator: " ").prefix(limit).compactMap(\.first)
         return parts.isEmpty ? "?" : String(parts).uppercased()
     }
 
     var body: some View {
         ZStack {
-            Circle().fill(LinearGradient(colors: [color.opacity(0.32), color.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Circle().strokeBorder(color.opacity(0.45), lineWidth: 1)
-            Text(initials)
-                .font(F.semibold(size * 0.36))
-                .foregroundStyle(color)
+            Circle().fill(color)
+            // Two letters don't fit an avatar small enough to stack.
+            Text(Self.initials(name, limit: size < 28 ? 1 : 2))
+                .font(F.semibold(size * 0.34))
+                .foregroundStyle(T.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.horizontal, 2)
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 }
 
+/// A person as a small coloured tag — who is on a receipt line.
+struct PersonTag: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(F.semibold(10))
+            .foregroundStyle(T.ink)
+            .lineLimit(1)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 26, minHeight: 22)
+            .background(Capsule().fill(color))
+    }
+}
+
+/// One person on the canvas: who, where they stand, and the request button
+/// when they owe you.
 private struct PersonRow: View {
     let person: Summary.Person
+    let waiting: Bool
+    let venmoNote: String
+    let open: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            PersonAvatar(person: person, size: 40)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(person.name).font(F.medium(14.5)).foregroundStyle(T.paper).lineLimit(1)
-                Text(subtitle).font(F.body(11.5)).foregroundStyle(T.faint).lineLimit(1)
+        RuledRow(minHeight: 60) {
+            HStack(spacing: 12) {
+                Button(action: open) {
+                    HStack(spacing: 12) {
+                        PersonAvatar(person: person, size: 34)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(person.name).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                            standing
+                                .font(F.mono(12))
+                                .foregroundStyle(T.muted)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: 60)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.pressScale)
+                .accessibilityElement(children: .combine)
+
+                if person.cents > 0 {
+                    VenmoRequestButton(person: person, cents: person.cents, note: venmoNote, compact: true, label: "Request on Venmo")
+                        .fixedSize()
+                }
             }
-            Spacer(minLength: 8)
-            BalanceLabel(cents: person.cents)
-            Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(T.faint)
         }
-        .padding(.vertical, 11)
-        .accessibilityElement(children: .combine)
     }
 
-    private var subtitle: String {
-        var parts: [String] = []
-        if person.openCount > 0 { parts.append("\(person.openCount) open bill\(person.openCount == 1 ? "" : "s")") }
-        if let t = person.lastSettledAt {
-            parts.append("settled \(CompanionFormat.ago(Date(timeIntervalSince1970: TimeInterval(t))))")
+    /// "owes $47.33 · payback waiting" / "you owe $4.00" / "settled".
+    private var standing: Text {
+        var t: Text
+        if person.cents > 0 {
+            t = Text("owes \(person.cents.dollars.money())")
+        } else if person.cents < 0 {
+            t = Text("you owe \(abs(person.cents).dollars.money())").foregroundStyle(T.coral)
+        } else {
+            t = Text("settled")
+        }
+        if waiting {
+            t = t + Text(" · payback waiting").foregroundStyle(T.jade)
         } else if person.openCount > 0 {
-            parts.append("never settled")
+            t = t + Text(" · \(person.openCount) open")
         }
-        return parts.isEmpty ? "nothing open" : parts.joined(separator: " · ")
+        return t
     }
 }
 
-/// "owes you $12.40" / "you owe $4" / "settled", coloured by direction.
-private struct BalanceLabel: View {
-    let cents: Int
-    var large = false
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 1) {
-            if cents == 0 {
-                Text("settled").font(F.mono(large ? 14 : 12.5)).foregroundStyle(T.muted)
-            } else {
-                Text(abs(cents).dollars.money())
-                    .font(F.monoSemibold(large ? 16 : 13.5))
-                    .foregroundStyle(cents > 0 ? T.jade : T.coral)
-                Text(cents > 0 ? "owes you" : "you owe")
-                    .font(F.body(10))
-                    .foregroundStyle(T.faint)
-            }
-        }
-    }
-}
-
+/// A payback the Mac spotted: who paid how much, where it matched, and the
+/// button that settles it.
 private struct SuggestionRow: View {
     let suggestion: Summary.SettleSuggestion
     let person: Summary.Person?
@@ -417,53 +435,40 @@ private struct SuggestionRow: View {
     let onConfirm: () -> Void
 
     var body: some View {
-        Button {
-            Haptics.tap()
-            action()
-        } label: {
-            HStack(spacing: 11) {
-                ZStack(alignment: .bottomTrailing) {
-                    if let person {
-                        PersonAvatar(person: person, size: 36)
-                    } else {
-                        PersonAvatar(name: "?", color: T.muted, size: 36)
+        RuledRow(minHeight: 64) {
+            HStack(spacing: 12) {
+                Button {
+                    Haptics.tap()
+                    action()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        (Text("\(person?.givenName ?? "Someone") paid you ").font(F.medium(15))
+                            + Text(suggestion.cents.dollars.money()).font(F.mono(14)).foregroundStyle(T.jade))
+                            .foregroundStyle(T.paper)
+                            .lineLimit(2)
+                        Text(suggestion.detail).font(F.body(12)).foregroundStyle(T.muted).lineLimit(2)
                     }
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 7.5, weight: .heavy))
-                        .foregroundStyle(T.onJade)
-                        .frame(width: 15, height: 15)
-                        .background(Circle().fill(T.jade))
-                        .overlay(Circle().strokeBorder(T.ink, lineWidth: 1.5))
-                        .offset(x: 3, y: 3)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("\(person?.name.split(separator: " ").first.map(String.init) ?? "Someone") paid you \(suggestion.cents.dollars.money())")
-                        .font(F.medium(13.5)).foregroundStyle(T.paper).lineLimit(1)
-                    Text(suggestion.detail).font(F.body(11.5)).foregroundStyle(T.muted).lineLimit(1)
-                }
-                Spacer(minLength: 6)
+                .buttonStyle(.pressScale)
+                .accessibilityElement(children: .combine)
+
                 Button {
                     onConfirm()
                 } label: {
                     Text("Confirm")
-                        .font(F.semibold(12.5))
+                        .font(F.semibold(15))
                         .foregroundStyle(T.onJade)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: 44)
                         .background(Capsule().fill(T.jade))
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.pressScale)
                 .accessibilityLabel("Confirm payback")
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(LinearGradient(colors: [T.jade.opacity(0.1), T.panel.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
-            )
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(T.jade.opacity(0.3), lineWidth: 0.75))
         }
-        .buttonStyle(.pressScale)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -471,7 +476,7 @@ private struct SuggestionRow: View {
 
 /// The slices of one bill, you first, in each person's colour.
 private func billSlices(_ bill: Summary.SharedExpense, _ people: [String: Summary.Person]) -> [MixSlice] {
-    var slices = [MixSlice(id: "__me", name: "You", value: bill.myCents.dollars, color: T.paper.opacity(0.8))]
+    var slices = [MixSlice(id: "__me", name: "You", value: bill.myCents.dollars, color: PersonAvatar.me)]
     for (i, sh) in bill.shares.enumerated() where sh.cents > 0 {
         let p = people[sh.personId]
         slices.append(MixSlice(
@@ -484,74 +489,54 @@ private func billSlices(_ bill: Summary.SharedExpense, _ people: [String: Summar
     return slices
 }
 
-private struct BillCard: View {
-    let bill: Summary.SharedExpense
-    let people: [String: Summary.Person]
+/// How a bill was divided, as far as its shares can say: the Mac marks an
+/// itemised split; equal parts (give or take the odd cents) read as even.
+private func splitKind(_ bill: Summary.SharedExpense) -> String {
+    if bill.itemized == true { return "BY ITEM" }
+    let parts = bill.shares.map(\.cents) + (bill.myCents > 0 ? [bill.myCents] : [])
+    guard let lo = parts.min(), let hi = parts.max() else { return "EVENLY" }
+    return hi - lo <= parts.count ? "EVENLY" : "CUSTOM"
+}
+
+/// EVENLY / BY ITEM — a small outlined tag beside a merchant.
+private struct SplitTag: View {
+    let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        Text(text)
+            .font(F.semibold(10))
+            .tracking(0.8)
+            .foregroundStyle(T.brass)
+            .lineLimit(1)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(T.brassDim, lineWidth: 1))
+            .fixedSize()
+    }
+}
+
+private struct BillRow: View {
+    let bill: Summary.SharedExpense
+
+    var body: some View {
+        RuledRow(minHeight: 60) {
             HStack(spacing: 12) {
-                MerchantAvatar(name: bill.merchant, icon: "Users", size: 38)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(bill.merchant).font(F.medium(14)).foregroundStyle(T.paper).lineLimit(1)
-                        if bill.itemized == true { ItemizedChip() }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(bill.merchant).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                        SplitTag(text: splitKind(bill))
                     }
-                    Text([CompanionFormat.day(bill.ts), bill.note].compactMap { $0 }.joined(separator: " · "))
-                        .font(F.body(11.5)).foregroundStyle(T.faint).lineLimit(1)
+                    Text("\(CompanionFormat.day(bill.ts)) · yours \(bill.myCents.dollars.money()) · fronted \((bill.cents - bill.myCents).dollars.money())")
+                        .font(F.body(12)).foregroundStyle(T.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 6)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(bill.cents.dollars.money()).font(F.mono(13.5)).foregroundStyle(T.paper)
-                    Text("yours \(bill.myCents.dollars.money())").font(F.mono(10)).foregroundStyle(T.brass)
-                }
+                Text(bill.cents.dollars.money()).font(F.mono(14)).foregroundStyle(T.paper)
             }
-            StackedBar(slices: billSlices(bill, people), height: 6)
-            HStack(spacing: 8) {
-                AvatarStack(people: bill.shares.compactMap { people[$0.personId] })
-                Text(namesLine).font(F.body(11)).foregroundStyle(T.muted).lineLimit(1)
-                Spacer(minLength: 4)
-                Text("fronted \((bill.cents - bill.myCents).dollars.moneyCompact())")
-                    .font(F.mono(10)).foregroundStyle(T.faint)
-            }
+            .padding(.vertical, 8)
         }
-        .padding(14)
-        .background(CardSurface(radius: T.radiusSmall + 2))
-        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-    }
-
-    private var namesLine: String {
-        let names = bill.shares.compactMap { people[$0.personId]?.name.split(separator: " ").first.map(String.init) }
-        if names.isEmpty { return "split" }
-        return "with " + (names.count <= 2 ? names.joined(separator: " & ") : "\(names[0]), \(names[1]) +\(names.count - 2)")
-    }
-}
-
-private struct AvatarStack: View {
-    let people: [Summary.Person]
-
-    var body: some View {
-        HStack(spacing: -7) {
-            ForEach(Array(people.prefix(4).enumerated()), id: \.offset) { _, p in
-                PersonAvatar(person: p, size: 22)
-                    .background(Circle().fill(T.panel))
-                    .overlay(Circle().strokeBorder(T.panel, lineWidth: 1.5))
-            }
-        }
-    }
-}
-
-private struct ItemizedChip: View {
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "list.bullet.rectangle").font(.system(size: 8, weight: .semibold))
-            Text("BY ITEM").font(F.semibold(8.5)).tracking(0.6)
-        }
-        .foregroundStyle(T.blue)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
-        .background(Capsule().fill(T.blue.opacity(0.13)))
     }
 }
 
@@ -568,32 +553,31 @@ private struct PersonSheet: View {
     var body: some View {
         let bills = (summary.shared ?? []).filter { b in b.shares.contains { $0.personId == person.id } }
         let suggestions = (summary.settleSuggestions ?? []).filter { $0.personId == person.id }
-        let tint = person.cents > 0 ? T.jade : person.cents < 0 ? T.coral : T.muted
         let theirTotal = bills.reduce(0) { acc, b in acc + b.shares.filter { $0.personId == person.id }.reduce(0) { $0 + $1.cents } }
 
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 14) {
-                    PersonAvatar(person: person, size: 56)
-                    VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 12) {
+                    PersonAvatar(person: person, size: 44)
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(person.name).font(F.display(24)).foregroundStyle(T.paper)
                         Text(person.openCount > 0 ? "\(person.openCount) open bill\(person.openCount == 1 ? "" : "s")" : "nothing open")
-                            .font(F.body(12)).foregroundStyle(T.faint)
+                            .font(F.body(13)).foregroundStyle(T.muted)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(person.cents > 0 ? "OWES YOU" : person.cents < 0 ? "YOU OWE" : "BALANCE")
-                        .font(F.mono(10)).tracking(1.2).foregroundStyle(T.muted)
-                    AnimatedMoney(value: Double(abs(person.cents)) / 100, font: F.display(40), color: person.cents == 0 ? T.muted : T.paper)
-                    Text(person.cents == 0 ? "You're all square." : person.lastSettledAt.map { "Last settled \(CompanionFormat.ago(Date(timeIntervalSince1970: TimeInterval($0))))." } ?? "Never settled up.")
-                        .font(F.body(12)).foregroundStyle(tint == T.muted ? T.faint : tint)
+                StatementHero(
+                    eyebrow: person.cents > 0 ? "Owes you" : person.cents < 0 ? "You owe" : "Balance",
+                    cents: abs(person.cents),
+                    color: person.cents == 0 ? T.muted : T.paper,
+                    size: 44
+                ) {
+                    VerdictText(standing)
                 }
                 .padding(.top, 22)
-                .heroGlow(tint)
 
                 if person.cents > 0 {
-                    VenmoRequestButton(person: person, cents: person.cents, note: venmoNote(bills))
+                    VenmoRequestButton(person: person, cents: person.cents, note: sharedVenmoNote(for: person, in: bills))
                         .padding(.top, 18)
                 }
 
@@ -610,58 +594,62 @@ private struct PersonSheet: View {
                 .padding(.top, person.cents > 0 ? 10 : 18)
 
                 if !suggestions.isEmpty {
-                    Eyebrow("Spotted paybacks").padding(.top, 24).padding(.bottom, 8)
-                    VStack(spacing: 8) {
+                    StatementSection(title: "Spotted paybacks", count: suggestions.count, countColor: T.brass) {
                         ForEach(suggestions) { sg in
-                            NoticeBanner(
-                                symbol: "checkmark.circle.fill",
-                                text: "\(sg.cents.dollars.money()) · \(sg.detail)",
-                                tint: T.jade,
-                                badge: CompanionFormat.day(sg.ts),
-                                chevron: false
-                            )
+                            RuledRow {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(sg.detail).font(F.medium(14)).foregroundStyle(T.paper)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Text(CompanionFormat.day(sg.ts)).font(F.body(12)).foregroundStyle(T.muted)
+                                    }
+                                    Spacer(minLength: 6)
+                                    Text(sg.cents.dollars.money()).font(F.mono(14)).foregroundStyle(T.jade)
+                                }
+                                .padding(.vertical, 8)
+                            }
+                            .accessibilityElement(children: .combine)
                         }
                     }
+                    .padding(.top, 26)
                     Text("Confirm it from the Shared tab and the balance updates once your Mac applies it.")
-                        .font(F.body(11)).foregroundStyle(T.faint).padding(.top, 6)
+                        .font(F.body(12)).foregroundStyle(T.muted).padding(.top, 8)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                HStack {
-                    Eyebrow("Bills together")
-                    Spacer()
-                    if theirTotal > 0 {
-                        Text("their shares \(theirTotal.dollars.money())").font(F.mono(10.5)).foregroundStyle(T.faint)
+                StatementSection(title: "Bills together", count: bills.isEmpty ? nil : bills.count) {
+                    if bills.isEmpty {
+                        Text("No recent bills with \(person.givenName).")
+                            .font(F.body(13)).foregroundStyle(T.muted).padding(.vertical, 14)
+                    } else {
+                        ForEach(bills) { b in
+                            let theirs = b.shares.filter { $0.personId == person.id }.reduce(0) { $0 + $1.cents }
+                            RuledRow(minHeight: 56) {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(b.merchant).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                                        Text("\(CompanionFormat.day(b.ts)) · bill \(b.cents.dollars.money()) · \(Int((Double(theirs) / Double(max(1, b.cents)) * 100).rounded()))% share")
+                                            .font(F.body(12)).foregroundStyle(T.muted).lineLimit(1)
+                                    }
+                                    Spacer(minLength: 6)
+                                    Text(theirs.dollars.money()).font(F.mono(14)).foregroundStyle(T.paper)
+                                }
+                                .padding(.vertical, 8)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                        if theirTotal > 0 {
+                            HStack {
+                                Text("Their shares").font(F.medium(14)).foregroundStyle(T.paper)
+                                Spacer()
+                                Text(theirTotal.dollars.money()).font(F.mono(14)).foregroundStyle(T.paper)
+                            }
+                            .frame(minHeight: 44)
+                            .accessibilityElement(children: .combine)
+                        }
                     }
                 }
                 .padding(.top, 26)
-                .padding(.bottom, 6)
-
-                if bills.isEmpty {
-                    Text("No recent bills with \(person.name.split(separator: " ").first.map(String.init) ?? person.name).")
-                        .font(F.body(12.5)).foregroundStyle(T.faint).padding(.vertical, 10)
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(bills.enumerated()), id: \.element.id) { i, b in
-                            let theirs = b.shares.filter { $0.personId == person.id }.reduce(0) { $0 + $1.cents }
-                            HStack(spacing: 12) {
-                                MerchantAvatar(name: b.merchant, icon: "Users", size: 34)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(b.merchant).font(F.medium(13.5)).foregroundStyle(T.paper).lineLimit(1)
-                                    Text("\(CompanionFormat.day(b.ts)) · bill \(b.cents.dollars.money())")
-                                        .font(F.body(11)).foregroundStyle(T.faint).lineLimit(1)
-                                }
-                                Spacer(minLength: 6)
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(theirs.dollars.money()).font(F.mono(13)).foregroundStyle(T.paper)
-                                    Text("\(Int((Double(theirs) / Double(max(1, b.cents)) * 100).rounded()))% share")
-                                        .font(F.mono(9.5)).foregroundStyle(T.faint)
-                                }
-                            }
-                            .padding(.vertical, 10)
-                            .overlay(alignment: .top) { if i > 0 { Hairline().padding(.leading, 46) } }
-                        }
-                    }
-                }
             }
             .padding(22)
         }
@@ -669,61 +657,53 @@ private struct PersonSheet: View {
         .sheet(item: $entry) { which in SharedSheetView(which: which, summary: summary) }
     }
 
-    /// "Ippudo, Airbnb · Big Sur" — what the request is for, in their terms.
-    private func venmoNote(_ bills: [Summary.SharedExpense]) -> String {
-        let names = bills.prefix(3).map(\.merchant)
-        return names.isEmpty ? "Shared bills" : names.joined(separator: ", ")
+    private var standing: String {
+        if person.cents == 0 { return "You're all square." }
+        if let t = person.lastSettledAt {
+            return "Last settled \(CompanionFormat.ago(Date(timeIntervalSince1970: TimeInterval(t))))."
+        }
+        return "Never settled up."
     }
 }
 
-/// One bill: who had what, as a ring and a list.
+/// One bill: who had what, as a bar and ruled rows.
 private struct BillSheet: View {
     let bill: Summary.SharedExpense
     let summary: Summary
 
     var body: some View {
         let people = Dictionary((summary.people ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let slices = billSlices(bill, people)
         let mine = bill.cents > 0 ? Double(bill.myCents) / Double(bill.cents) : 0
 
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    MerchantAvatar(name: bill.merchant, icon: "Users", size: 44)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(bill.merchant).font(F.display(21)).foregroundStyle(T.paper).lineLimit(1)
-                            if bill.itemized == true { ItemizedChip() }
-                        }
-                        Text(CompanionFormat.weekday(bill.ts)).font(F.body(12)).foregroundStyle(T.faint)
-                    }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(bill.merchant).font(F.display(24)).foregroundStyle(T.paper).lineLimit(1)
+                    SplitTag(text: splitKind(bill))
                 }
+                Text(CompanionFormat.weekday(bill.ts)).font(F.body(13)).foregroundStyle(T.muted).padding(.top, 2)
 
-                HStack(alignment: .center, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("THE BILL").font(F.mono(10)).tracking(1.2).foregroundStyle(T.muted)
-                        AnimatedMoney(value: bill.cents.dollars, font: F.display(36))
-                        Text("you fronted \((bill.cents - bill.myCents).dollars.money())")
-                            .font(F.mono(11.5)).foregroundStyle(T.brass)
-                    }
-                    Spacer(minLength: 0)
-                    MixDonut(slices: slices, size: 104)
-                }
-                .padding(.top, 20)
-
-                if let note = bill.note {
-                    HStack(spacing: 8) {
-                        Image(systemName: "text.quote").font(.system(size: 11)).foregroundStyle(T.faint)
+                StatementHero(eyebrow: "The bill", cents: bill.cents, size: 44, verdict: {
+                    VerdictText(
+                        Text("You fronted ")
+                            + Text((bill.cents - bill.myCents).dollars.money()).foregroundStyle(T.brass)
+                            + Text(" of it; ")
+                            + Text(bill.myCents.dollars.money())
+                            + Text(" was yours.")
+                    )
+                }, footer: {
+                    StackedBar(slices: billSlices(bill, people), height: 6).padding(.top, 4)
+                    if let note = bill.note {
                         Text(note).font(F.body(13)).foregroundStyle(T.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.top, 14)
-                }
+                })
+                .padding(.top, 22)
 
-                Eyebrow("Who had what").padding(.top, 24).padding(.bottom, 6)
-                VStack(spacing: 0) {
-                    shareRow(avatar: AnyView(PersonAvatar(name: "You", color: T.paper, size: 34)),
+                StatementSection(title: "Who had what", count: bill.shares.count + 1) {
+                    shareRow(avatar: AnyView(PersonAvatar(name: "You", color: PersonAvatar.me, size: 34)),
                              name: "You", detail: "your share · counts as your spend",
-                             cents: bill.myCents, fraction: mine, color: T.paper.opacity(0.8), first: true)
+                             cents: bill.myCents, fraction: mine)
                     ForEach(Array(bill.shares.enumerated()), id: \.offset) { _, sh in
                         let p = people[sh.personId]
                         shareRow(
@@ -732,39 +712,38 @@ private struct BillSheet: View {
                             detail: "fronted · held outside your spending",
                             cents: sh.cents,
                             fraction: bill.cents > 0 ? Double(sh.cents) / Double(bill.cents) : 0,
-                            color: p.map(PersonAvatar.color(for:)) ?? T.muted,
-                            first: false,
                             person: p
                         )
                     }
                 }
+                .padding(.top, 26)
             }
             .padding(22)
         }
         .bSheet()
     }
 
-    private func shareRow(avatar: AnyView, name: String, detail: String, cents: Int, fraction: Double, color: Color, first: Bool, person: Summary.Person? = nil) -> some View {
-        VStack(spacing: 8) {
+    private func shareRow(avatar: AnyView, name: String, detail: String, cents: Int, fraction: Double, person: Summary.Person? = nil) -> some View {
+        RuledRow(minHeight: 60) {
             HStack(spacing: 12) {
                 avatar
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name).font(F.medium(14)).foregroundStyle(T.paper)
-                    Text(detail).font(F.body(10.5)).foregroundStyle(T.faint)
+                    Text(name).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                    Text(detail).font(F.body(12)).foregroundStyle(T.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+                Spacer(minLength: 6)
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(cents.dollars.money()).font(F.mono(13.5)).foregroundStyle(T.paper)
-                    Text(CompanionFormat.percent(fraction)).font(F.mono(9.5)).foregroundStyle(T.faint)
+                    Text(cents.dollars.money()).font(F.mono(14)).foregroundStyle(T.paper)
+                    Text(CompanionFormat.percent(fraction)).font(F.mono(11)).foregroundStyle(T.muted)
                 }
                 if let person, cents > 0 {
                     VenmoRequestButton(person: person, cents: cents, note: bill.note.map { "\(bill.merchant) — \($0)" } ?? bill.merchant, compact: true)
+                        .fixedSize()
                 }
             }
-            SlimMeter(fraction: fraction, color: color, height: 3).padding(.leading, 46)
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 10)
-        .overlay(alignment: .top) { if !first { Hairline().padding(.leading, 46) } }
     }
 }
 

@@ -156,6 +156,9 @@ struct VenmoRequestButton: View {
     let cents: Int
     let note: String
     var compact = false
+    /// Overrides the compact button's wording — "Request on Venmo" in a row
+    /// with room for it.
+    var label: String?
 
     @Environment(\.openURL) private var openURL
     @State private var askingHandle = false
@@ -174,17 +177,23 @@ struct VenmoRequestButton: View {
                 askingHandle = true
             }
         } label: {
+            // Compact is the outlined pill a ruled row carries; the full-width
+            // one stays Venmo's own blue.
             HStack(spacing: 6) {
-                Text("V").font(.system(size: compact ? 11 : 13, weight: .black, design: .rounded)).italic()
-                Text(compact ? "Request" : "Request \(cents.dollars.money()) on Venmo")
-                    .font(F.semibold(compact ? 12 : 14))
+                if label == nil {
+                    Text("V").font(.system(size: compact ? 12 : 13, weight: .black, design: .rounded)).italic()
+                        .foregroundStyle(compact ? Self.venmoBlue : .white)
+                }
+                Text(label ?? (compact ? "Request" : "Request \(cents.dollars.money()) on Venmo"))
+                    .font(compact ? F.body(13) : F.semibold(14))
                     .lineLimit(1)
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, compact ? 10 : 16)
-            .padding(.vertical, compact ? 6 : 12)
-            .frame(maxWidth: compact ? nil : .infinity)
-            .background(Capsule().fill(Self.venmoBlue))
+            .foregroundStyle(compact ? T.paper : .white)
+            .padding(.horizontal, compact ? 14 : 16)
+            .frame(maxWidth: compact ? nil : .infinity, minHeight: 44)
+            .background(Capsule().fill(compact ? Color.clear : Self.venmoBlue))
+            .overlay(Capsule().strokeBorder(compact ? T.lineStrong : Color.clear, lineWidth: 1))
+            .contentShape(Capsule())
         }
         .buttonStyle(.pressScale)
         .accessibilityLabel("Request \(cents.dollars.money()) from \(person.name) on Venmo")

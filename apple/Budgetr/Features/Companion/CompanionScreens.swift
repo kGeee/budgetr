@@ -222,7 +222,7 @@ private struct TxnRow: View {
                     }
                 }
                 .font(F.body(11.5))
-                .foregroundStyle(T.faint)
+                .foregroundStyle(T.muted)
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -249,7 +249,207 @@ private struct TxnRow: View {
     }
 }
 
-// ── Spending ─────────────────────────────────────────────────────────
+// ── Statement pieces ─────────────────────────────────────────────────
+// Local to the companion screens: the rows and small derivations the four
+// statements share. Layout only — every figure is the Summary's.
+
+/// The word a fixed budget wears instead of a pace: whether the bill has gone
+/// out. Same thresholds as `budgetStatus` in web/lib/budget-verdict.ts.
+private enum FixedStatus {
+    static func word(_ b: Summary.Budget) -> String {
+        if b.spentCents > b.limitCents { return "over" }
+        if b.spentCents <= 0 { return "not yet paid" }
+        return Double(b.spentCents) >= Double(b.limitCents) * 0.8 ? "paid" : "part paid"
+    }
+}
+
+/// Today's move across the positions the Mac priced, backed out of their basis
+/// points — the same arithmetic PositionDetailView uses for one holding.
+private enum PortfolioDay {
+    struct Move {
+        let cents: Int
+        let pct: Double
+        /// Positions that carried a day move, of all positions.
+        let priced: Int
+    }
+
+    static func move(_ s: Summary) -> Move? {
+        var now = 0.0, before = 0.0, priced = 0
+        for p in s.positions {
+            guard let bp = p.dayBp else { continue }
+            let r = Double(bp) / 10_000
+            guard 1 + r > 0 else { continue }
+            now += Double(p.cents)
+            before += Double(p.cents) / (1 + r)
+            priced += 1
+        }
+        guard before > 0 else { return nil }
+        return Move(cents: Int((now - before).rounded()), pct: (now - before) / before * 100, priced: priced)
+    }
+
+    static func percent(_ v: Double) -> String {
+        "\(v >= 0 ? "+" : "−")\(String(format: "%.2f", abs(v)))%"
+    }
+}
+
+/// A category keeps one dot colour across the companion: spending categories
+/// take the chart palette in the Mac's order, income is jade, transfers quiet.
+private func categoryDotColors(_ s: Summary) -> [String: Color] {
+    var out: [String: Color] = [:]
+    var i = 0
+    for c in s.categories ?? [] where out[c.id] == nil {
+        switch c.group {
+        case "income": out[c.id] = T.jade
+        case "transfer": out[c.id] = T.muted
+        default:
+            out[c.id] = T.chart[i % (T.chart.count - 1)]
+            i += 1
+        }
+    }
+    return out
+}
+
+private func budgetOrder(_ budgets: [Summary.Budget]) -> [Summary.Budget] {
+    let rank = ["over": 0, "warn": 1, "ok": 2]
+    return budgets.sorted {
+        let a = rank[$0.state] ?? 3, b = rank[$1.state] ?? 3
+        if a != b { return a < b }
+        return Double($0.spentCents) / Double(max(1, $0.limitCents)) > Double($1.spentCents) / Double(max(1, $1.limitCents))
+    }
+}
+
+/// A budget as the category sheet wants it — the Mac's own month total.
+private func spendRow(_ b: Summary.Budget, _ index: [String: Summary.Category]) -> CompanionModel.CategorySpend {
+    CompanionModel.CategorySpend(
+        id: b.category, name: CompanionModel.name(b.category, index), icon: index[b.category]?.icon,
+        cents: b.spentCents, budget: b, partial: false
+    )
+}
+
+private extension View {
+    /// Equal-width tap targets laid over a `StatCells` strip, one per cell; nil
+    /// leaves that cell inert. (StatCells itself has no actions.)
+    func cellTaps(_ taps: [(label: String, run: () -> Void)?]) -> some View {
+        overlay {
+            HStack(spacing: 0) {
+                ForEach(taps.indices, id: \.self) { i in
+                    if let tap = taps[i] {
+                        Button {
+                            Haptics.tap()
+                            tap.run()
+                        } label: {
+                            Color.clear.contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(tap.label)
+                    } else {
+                        Color.clear.allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One budget: name, a figure, and a bar. A flexible budget's bar carries the
+/// today tick; a fixed one is brass, says whether it's paid, and has no pace.
+private struct BudgetLine: View {
+    enum Figure { case left, spentOfLimit }
+
+    let budget: Summary.Budget
+    let name: String
+    /// Share of the month gone, 0–1.
+    let elapsed: Double
+    var figure: Figure = .spentOfLimit
+    let action: () -> Void
+
+    private var over: Bool { budget.spentCents > budget.limitCents }
+    private var used: Double { budget.limitCents > 0 ? Double(budget.spentCents) / Double(budget.limitCents) : 0 }
+    private var color: Color {
+        if budget.isFixed { return over ? T.coral : T.brass }
+        return CompanionFormat.stateColor(budget.state)
+    }
+
+    private var word: String? {
+        if budget.isFixed { return FixedStatus.word(budget) }
+        switch budget.state {
+        case "over": return "over"
+        case "warn": return "ahead of pace"
+        default: return nil
+        }
+    }
+
+    private var leftText: String {
+        over ? "\((budget.spentCents - budget.limitCents).dollars.money()) over"
+             : "\((budget.limitCents - budget.spentCents).dollars.money()) left"
+    }
+
+    var body: some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            RuledRow {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(name).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                        if let word {
+                            Text(word)
+                                .font(F.body(12))
+                                .foregroundStyle(over ? T.coral : word == "not yet paid" ? T.muted : T.brass)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                        }
+                        Spacer(minLength: 6)
+                        figureText.font(F.mono(13)).lineLimit(1).layoutPriority(2)
+                    }
+                    TickBar(fraction: used, color: color, tick: budget.isFixed ? nil : elapsed)
+                }
+                .padding(.vertical, 9)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name), \(budget.spentCents.dollars.money()) of \(budget.limitCents.dollars.money()), \(leftText)\(word.map { ", \($0)" } ?? "")")
+        .accessibilityHint("Opens this month's transactions")
+    }
+
+    private var figureText: Text {
+        switch figure {
+        case .left:
+            if over { return Text(leftText).foregroundStyle(T.coral) }
+            return Text((budget.limitCents - budget.spentCents).dollars.money()).foregroundStyle(T.paper)
+                + Text(" left").foregroundStyle(T.muted)
+        case .spentOfLimit:
+            return Text(budget.spentCents.dollars.money()).foregroundStyle(over ? T.coral : T.paper)
+                + Text(" / \(budget.limitCents.dollars.moneyWhole())").foregroundStyle(T.muted)
+        }
+    }
+}
+
+/// A label on the left, a mono figure on the right, an optional quiet note.
+private struct FigureRow<Note: View>: View {
+    let label: String
+    let value: String
+    @ViewBuilder var note: Note
+
+    var body: some View {
+        RuledRow {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(label).font(F.medium(15)).foregroundStyle(T.paper)
+                    note
+                }
+                Spacer(minLength: 8)
+                Text(value).font(F.mono(14)).foregroundStyle(T.paper).contentTransition(.numericText())
+            }
+            .padding(.vertical, 8)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// ── Today ────────────────────────────────────────────────────────────
 
 struct CompanionSpendingView: View {
     @EnvironmentObject private var companion: CompanionStore
@@ -258,12 +458,13 @@ struct CompanionSpendingView: View {
     @State private var openCategory: CompanionModel.CategorySpend?
     @State private var showingWallet = false
     @State private var showingAll = false
+    @State private var showingAllBudgets = false
 
     var body: some View {
         let month = CompanionModel.Month()
         let s = companion.summary
 
-        BScreen("Spending", eyebrow: eyebrow(month), trailing: {
+        BScreen("Today", eyebrow: Date().pageEyebrow, trailing: {
             if let s {
                 IconChip(systemName: "wallet.pass", badge: !s.alerts.isEmpty, label: "Net worth and accounts") {
                     showingWallet = true
@@ -286,21 +487,15 @@ struct CompanionSpendingView: View {
         }
     }
 
-    private func eyebrow(_ month: CompanionModel.Month) -> String {
-        var parts = ["\(month.label) · day \(month.dayOfMonth) of \(month.daysInMonth)"]
-        if companion.lastSyncAt != nil { parts.append("synced \(CompanionFormat.ago(companion.lastSyncAt))") }
-        return parts.joined(separator: " · ")
-    }
-
     @ViewBuilder
     private func content(_ s: Summary, month: CompanionModel.Month) -> some View {
         let totals = CompanionModel.totals(s.spendByDay ?? [], month: month)
         let rows = CompanionModel.categorySpend(s, month: month)
-        let limit = CompanionModel.budgetLimit(s)
-        let budgeted = CompanionModel.budgetedSpent(s)
-        let left = limit - budgeted
+        let pos = CompanionModel.budgetPosition(s)
+        let index = CompanionModel.categoryIndex(s)
+        let elapsed = Double(month.dayOfMonth) / Double(max(1, month.daysInMonth))
 
-        SpendingHero(totals: totals, limit: limit, budgeted: budgeted, month: month).rise(0)
+        hero(s, pos: pos, totals: totals, month: month, elapsed: elapsed).rise(0)
 
         // The worst alert, stated. A dot on an icon is not how you tell someone
         // a bank connection has been dead for weeks.
@@ -309,133 +504,335 @@ struct CompanionSpendingView: View {
                 Haptics.tap()
                 showingWallet = true
             } label: {
-                NoticeBanner(
-                    symbol: "exclamationmark.triangle.fill",
-                    text: first.text,
-                    badge: s.alerts.count > 1 ? "+\(s.alerts.count - 1)" : nil
-                )
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(T.coral)
+                    Text(first.text)
+                        .font(F.body(14))
+                        .foregroundStyle(T.paper)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 6)
+                    if s.alerts.count > 1 {
+                        Text("+\(s.alerts.count - 1)").font(F.mono(12)).foregroundStyle(T.coral)
+                    }
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(T.muted)
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.pressScale)
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens net worth and accounts")
             .rise(0)
         }
 
-        HStack(spacing: 8) {
-            Button {
-                Haptics.tap()
-                showingWallet = true
-            } label: {
-                StatTile(label: "Net worth", value: s.netWorth.cents.dollars.moneyCompact(), note: "\(s.accounts.count) accounts ›")
+        StatCells(cells: moneyCells(s, totals: totals, month: month))
+            .cellTaps([("Open net worth and accounts", { showingWallet = true }), nil])
+            .rise(1)
+
+        needsYou(s)
+
+        if !s.budgets.isEmpty {
+            let ordered = budgetOrder(s.budgets.filter { !$0.isFixed }) + budgetOrder(s.budgets.filter(\.isFixed))
+            StatementSection(
+                title: "Budgets",
+                action: ordered.count > 3
+                    ? (showingAllBudgets ? "Fewer" : "All \(ordered.count)", { withAnimation(M.settle) { showingAllBudgets.toggle() } })
+                    : nil
+            ) {
+                ForEach(showingAllBudgets ? ordered : Array(ordered.prefix(3)), id: \.category) { b in
+                    BudgetLine(budget: b, name: CompanionModel.name(b.category, index), elapsed: elapsed, figure: .left) {
+                        openCategory = spendRow(b, index)
+                    }
+                }
             }
-            .buttonStyle(.pressScale)
-            StatTile(
-                label: left < 0 ? "Over budget" : "Left",
-                value: limit > 0 ? abs(left).dollars.moneyCompact() : "—",
-                tint: left < 0 ? T.coral : T.jade,
-                note: limit > 0 ? "of \(limit.dollars.moneyCompact())" : "no budgets set"
-            )
-            StatTile(
-                label: "Per day",
-                value: (totals.spentCents.dollars / Double(max(1, month.dayOfMonth))).moneyCompact(),
-                note: "average"
-            )
+            .rise(2)
         }
-        .rise(1)
 
-        chartCard(totals: totals, pace: CompanionModel.budgetTotals(s, month: month), rows: rows, limit: limit, month: month).rise(2)
+        monthSection(s, totals: totals, rows: rows, pos: pos, month: month).rise(3)
 
-        TopMerchants(summary: s, month: month).rise(3)
+        TopMerchants(summary: s, month: month).rise(4)
 
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(
-                title: "Categories",
-                detail: "\(rows.count)",
-                action: rows.count > 6 ? (showingAll ? "Fewer" : "All \(rows.count) ›", { withAnimation(M.settle) { showingAll.toggle() } }) : nil
-            )
+        StatementSection(
+            title: "Categories",
+            count: rows.count,
+            action: rows.count > 6 ? (showingAll ? "Fewer" : "All \(rows.count)", { withAnimation(M.settle) { showingAll.toggle() } }) : nil
+        ) {
             if rows.isEmpty {
-                Text("No spending categorised this month yet.").font(F.body(12.5)).foregroundStyle(T.faint)
+                Text("No spending categorised this month yet.")
+                    .font(F.body(13)).foregroundStyle(T.muted).padding(.vertical, 14)
             } else {
-                let elapsed = Double(month.dayOfMonth) / Double(month.daysInMonth)
                 // Budgeted spend and the tape don't always sum to the daily
                 // series, so shares are of whichever is larger — never over 100%.
                 let whole = max(totals.spentCents, rows.reduce(0) { $0 + $1.cents }, 1)
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                    ForEach(Array((showingAll ? rows : Array(rows.prefix(6))).enumerated()), id: \.element.id) { i, row in
-                        CategorySpendTile(row: row, share: Double(row.cents) / Double(whole), elapsed: elapsed) {
-                            openCategory = row
-                        }
-                        .rise(5 + i)
+                ForEach(showingAll ? rows : Array(rows.prefix(6))) { row in
+                    CategoryLine(row: row, share: Double(row.cents) / Double(whole)) {
+                        openCategory = row
                     }
                 }
             }
         }
-        .padding(.top, 4)
-        .rise(4)
+        .rise(5)
+
+        Text(footnote(month))
+            .font(F.mono(11))
+            .foregroundStyle(T.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func chartCard(totals: CompanionModel.Totals, pace: CompanionModel.Totals?, rows: [CompanionModel.CategorySpend], limit: Int, month: CompanionModel.Month) -> some View {
-        // Against a budget, pace is budgeted spend only; with no budgets it's
-        // all spend against its own run rate.
+    private func footnote(_ month: CompanionModel.Month) -> String {
+        var parts = ["\(month.label) · day \(month.dayOfMonth) of \(month.daysInMonth)"]
+        if companion.lastSyncAt != nil { parts.append("synced \(CompanionFormat.ago(companion.lastSyncAt))") }
+        return parts.joined(separator: " · ")
+    }
+
+    // ── Hero ──
+
+    /// Left to spend, the Mac's pace sentence, and the flexible bar with a tick
+    /// for today. With no budgets there is nothing to be left of, so the month's
+    /// spend stands in.
+    @ViewBuilder
+    private func hero(_ s: Summary, pos: CompanionModel.BudgetPosition, totals: CompanionModel.Totals, month: CompanionModel.Month, elapsed: Double) -> some View {
+        let daysLeft = max(0, month.daysInMonth - month.dayOfMonth)
+        if let verdict = CompanionModel.paceVerdict(pos, dayOfMonth: month.dayOfMonth, daysInMonth: month.daysInMonth) {
+            let over = pos.left < 0
+            let spent = pos.paceSpent.dollars.money()
+            let limit = pos.paceLimit.dollars.moneyWhole()
+            StatementHero(
+                eyebrow: over ? "Over budget" : "Left to spend",
+                cents: abs(pos.left),
+                color: over ? T.coral : T.paper,
+                size: 56
+            ) {
+                VerdictText(verdict.text + Text(fixedSentence(s, pos)))
+            } footer: {
+                VStack(spacing: 8) {
+                    TickBar(
+                        fraction: pos.paceLimit > 0 ? Double(pos.paceSpent) / Double(pos.paceLimit) : 0,
+                        color: verdict.tone.color,
+                        tick: elapsed,
+                        height: 6
+                    )
+                    HStack {
+                        Text("\(spent) of \(limit)")
+                        Spacer(minLength: 8)
+                        Text("\(daysLeft) day\(daysLeft == 1 ? "" : "s") left")
+                    }
+                    .font(F.mono(12))
+                    .foregroundStyle(T.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                }
+                .padding(.top, 4)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(spent) of \(limit) \(pos.judgesFlexible ? "flexible " : "")budget spent, today is day \(month.dayOfMonth) of \(month.daysInMonth)")
+            }
+        } else {
+            StatementHero(eyebrow: "Spent this month", cents: totals.spentCents, size: 56) {
+                VerdictText(comparison(totals, month: month) + Text(" No budgets set — add them on your Mac."))
+            }
+        }
+    }
+
+    /// " Rent is paid." — what the fixed budgets are doing while pace is judged
+    /// on the rest. Empty unless the month is split.
+    private func fixedSentence(_ s: Summary, _ pos: CompanionModel.BudgetPosition) -> String {
+        guard pos.judgesFlexible else { return "" }
+        let fixed = s.budgets.filter(\.isFixed)
+        if fixed.count == 1, let b = fixed.first {
+            return " \(CompanionModel.name(b.category, CompanionModel.categoryIndex(s))) is \(FixedStatus.word(b))."
+        }
+        let paid = fixed.filter { FixedStatus.word($0) == "paid" }.count
+        return " \(paid) of \(fixed.count) fixed costs \(paid == 1 ? "is" : "are") paid."
+    }
+
+    private func comparison(_ totals: CompanionModel.Totals, month: CompanionModel.Month) -> Text {
+        guard let delta = totals.deltaPct else { return Text("No prior month to compare yet.") }
+        let pct = "\(Int(abs(delta).rounded()))%"
+        return Text(delta > 0 ? "Up " : "Down ")
+            + Text(pct).foregroundStyle(delta > 0 ? T.coral : T.jade)
+            + Text(" on the \(totals.priorCents.dollars.moneyCompact()) spent by day \(month.dayOfMonth) last month.")
+    }
+
+    // ── Money strip ──
+
+    private func moneyCells(_ s: Summary, totals: CompanionModel.Totals, month: CompanionModel.Month) -> [StatCells.Cell] {
+        var netNote = "\(s.accounts.count) account\(s.accounts.count == 1 ? "" : "s")"
+        var netColor = T.muted
+        let spark = s.netWorth.spark
+        if let a = spark.first, let b = spark.last, spark.count > 1, a.cents != 0 {
+            let pct = Double(b.cents - a.cents) / Double(abs(a.cents)) * 100
+            let days = max(1, (b.d - a.d) / 86_400)
+            netNote = "\(pct >= 0 ? "+" : "−")\(String(format: "%.1f", abs(pct)))% in \(days)d"
+            netColor = pct >= 0 ? T.jade : T.coral
+        }
+        var cells = [StatCells.Cell(label: "Net worth", value: s.netWorth.cents.dollars.moneyWhole(), note: netNote, noteColor: netColor)]
+
+        if let move = PortfolioDay.move(s) {
+            let tint = move.cents >= 0 ? T.jade : T.coral
+            cells.append(.init(
+                label: "Portfolio today",
+                value: "\(move.cents >= 0 ? "+" : "−")\(abs(move.cents).dollars.moneyWhole())",
+                note: PortfolioDay.percent(move.pct),
+                valueColor: tint,
+                noteColor: tint
+            ))
+        } else if s.investments != nil || !s.positions.isEmpty {
+            let value = s.investments?.valueCents ?? s.positions.reduce(0) { $0 + $1.cents }
+            cells.append(.init(label: "Portfolio", value: value.dollars.moneyWhole(), note: "\(s.positions.count) position\(s.positions.count == 1 ? "" : "s")"))
+        } else {
+            cells.append(.init(
+                label: "Per day",
+                value: (totals.spentCents.dollars / Double(max(1, month.dayOfMonth))).moneyCompact(),
+                note: "average spend"
+            ))
+        }
+        return cells
+    }
+
+    // ── Needs you ──
+
+    /// The first payback the Mac spotted, with the same Confirm the Shared tab
+    /// sends. One row: the rest wait in Shared.
+    @ViewBuilder
+    private func needsYou(_ s: Summary) -> some View {
+        // A suggestion already confirmed from here stops asking.
+        let confirming = Set(companion.pending.compactMap { op -> String? in
+            if case .recordSettlement(let o) = op { return o.txnId } else { return nil }
+        })
+        let suggestions = (s.settleSuggestions ?? []).filter { !confirming.contains($0.txnId) }
+        if let sg = suggestions.first {
+            let person = (s.people ?? []).first { $0.id == sg.personId }
+            let who = person?.name.split(separator: " ").first.map(String.init) ?? "Someone"
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    (Text("\(who) paid you ").font(F.medium(15)).foregroundStyle(T.paper)
+                        + Text("+\(abs(sg.cents).dollars.money())").font(F.mono(14)).foregroundStyle(T.muted))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(suggestions.count > 1 ? "\(sg.detail) · +\(suggestions.count - 1) more in Shared" : sg.detail)
+                        .font(F.body(13))
+                        .foregroundStyle(T.muted)
+                        .lineLimit(2)
+                }
+                .accessibilityElement(children: .combine)
+                Spacer(minLength: 6)
+                Button {
+                    Task {
+                        await companion.submit(.recordSettlement(.init(
+                            id: CompanionOp.newId(), ts: CompanionOp.now(),
+                            personId: sg.personId, cents: sg.cents, txnId: sg.txnId
+                        )))
+                    }
+                } label: {
+                    Text("Confirm")
+                        .font(F.semibold(14))
+                        .foregroundStyle(T.onJade)
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: 44)
+                        .background(Capsule().fill(T.jade))
+                }
+                .buttonStyle(.pressScale)
+                .accessibilityLabel("Confirm payback")
+            }
+            .transition(.opacity)
+        }
+    }
+
+    // ── This month ──
+
+    private func monthSection(_ s: Summary, totals: CompanionModel.Totals, rows: [CompanionModel.CategorySpend], pos: CompanionModel.BudgetPosition, month: CompanionModel.Month) -> some View {
+        StatementSection(title: "This month") {
+            FigureRow(label: "Spent so far", value: totals.spentCents.dollars.money()) {
+                HStack(spacing: 6) {
+                    if let delta = totals.deltaPct {
+                        DeltaPill(pct: delta, size: 10.5)
+                        Text("vs \(totals.priorCents.dollars.moneyCompact()) by day \(month.dayOfMonth) last month")
+                    } else {
+                        Text("no prior month to compare")
+                    }
+                }
+                .font(F.body(12))
+                .foregroundStyle(T.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            }
+            FigureRow(label: "Per day", value: (totals.spentCents.dollars / Double(max(1, month.dayOfMonth))).moneyCompact()) {
+                Text("average").font(F.body(12)).foregroundStyle(T.muted)
+            }
+            chart(s, totals: totals, rows: rows, pos: pos, month: month)
+                .padding(.vertical, 14)
+            Rule()
+        }
+    }
+
+    private func chart(_ s: Summary, totals: CompanionModel.Totals, rows: [CompanionModel.CategorySpend], pos: CompanionModel.BudgetPosition, month: CompanionModel.Month) -> some View {
+        // Against a budget, pace is the Mac's pace series — flexible budgets
+        // only once any is fixed — and with no budgets it's all spend against
+        // its own run rate.
+        let flexible = pos.judgesFlexible && s.flexibleSpendByDay != nil
+        let limit = flexible ? pos.flexibleLimit : pos.totalLimit
+        let pace = CompanionModel.paceTotals(s, month: month)
         let paceSeries = limit > 0 ? pace : totals
         let headings = ["By day", "Cumulative vs pace", "Where it went"]
-        return Card(padding: 16) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
-                    Eyebrow(headings[mode])
-                    Spacer(minLength: 0)
-                    Segmented(options: [("Daily", 0), ("Pace", 1), ("Mix", 2)], selection: $mode)
-                        .frame(width: 176)
-                }
-                ZStack {
-                    switch mode {
-                    case 0:
-                        if totals.perDay.contains(where: { $0 > 0 }) {
-                            ScrubBars(points: totals.perDay.enumerated().map { i, c in
-                                BarPoint(id: "d\(i)", date: CompanionFormat.date(month.startSec + i * 86_400), value: c.dollars)
-                            }, height: 100, showsAverage: true, highlightsLast: true)
-                        } else {
-                            empty("No spending recorded this month.")
-                        }
-                    case 1:
-                        if let paceSeries, paceSeries.cumulative.count > 1 {
-                            VStack(alignment: .leading, spacing: 8) {
-                                PaceChart(
-                                    cumulative: paceSeries.cumulative.map(\.dollars),
-                                    budget: limit.dollars,
-                                    daysInMonth: month.daysInMonth,
-                                    dayOfMonth: month.dayOfMonth,
-                                    height: 100
-                                )
-                                HStack(spacing: 14) {
-                                    legendKey(color: T.paper.opacity(0.5), dashed: true, label: limit > 0 ? "even pace to \(limit.dollars.moneyCompact())" : "run-rate pace")
-                                    legendKey(color: paceAhead(paceSeries, limit, month) ? T.coral : T.jade, dashed: false, label: limit > 0 ? "budgeted spend" : "spent")
-                                }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text(headings[mode]).font(F.body(13)).foregroundStyle(T.muted).lineLimit(1)
+                Spacer(minLength: 0)
+                Segmented(options: [("Daily", 0), ("Pace", 1), ("Mix", 2)], selection: $mode)
+                    .frame(width: 176)
+            }
+            ZStack {
+                switch mode {
+                case 0:
+                    if totals.perDay.contains(where: { $0 > 0 }) {
+                        ScrubBars(points: totals.perDay.enumerated().map { i, c in
+                            BarPoint(id: "d\(i)", date: CompanionFormat.date(month.startSec + i * 86_400), value: c.dollars)
+                        }, height: 100, showsAverage: true, highlightsLast: true)
+                    } else {
+                        empty("No spending recorded this month.")
+                    }
+                case 1:
+                    if let paceSeries, paceSeries.cumulative.count > 1 {
+                        VStack(alignment: .leading, spacing: 8) {
+                            PaceChart(
+                                cumulative: paceSeries.cumulative.map(\.dollars),
+                                budget: limit.dollars,
+                                daysInMonth: month.daysInMonth,
+                                dayOfMonth: month.dayOfMonth,
+                                height: 100
+                            )
+                            HStack(spacing: 14) {
+                                legendKey(color: T.paper.opacity(0.5), dashed: true, label: limit > 0 ? "even pace to \(limit.dollars.moneyCompact())" : "run-rate pace")
+                                legendKey(color: paceAhead(paceSeries, limit, month) ? T.coral : T.jade, dashed: false, label: limit > 0 ? (flexible ? "flexible spend" : "budgeted spend") : "spent")
                             }
-                        } else {
-                            empty(limit > 0 && pace == nil
-                                  ? "Update budgetr on your Mac to see the budget pace."
-                                  : "Not enough of the month yet to draw a pace.")
                         }
-                    default:
-                        let slices = mixSlices(rows, total: totals.spentCents)
-                        if slices.isEmpty {
-                            empty("No categorised spending yet this month.")
-                        } else {
-                            HStack(spacing: 16) {
-                                MixDonut(slices: slices, size: 116)
-                                VStack(alignment: .leading, spacing: 5) {
-                                    ForEach(slices) { sl in
-                                        LegendRow(color: sl.color, name: sl.name, value: sl.value.moneyCompact())
-                                    }
+                    } else {
+                        empty(limit > 0 && pace == nil
+                              ? "Update budgetr on your Mac to see the budget pace."
+                              : "Not enough of the month yet to draw a pace.")
+                    }
+                default:
+                    let slices = mixSlices(rows, total: totals.spentCents)
+                    if slices.isEmpty {
+                        empty("No categorised spending yet this month.")
+                    } else {
+                        HStack(spacing: 16) {
+                            MixDonut(slices: slices, size: 116)
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(slices) { sl in
+                                    LegendRow(color: sl.color, name: sl.name, value: sl.value.moneyCompact())
                                 }
                             }
                         }
                     }
                 }
-                .frame(height: 128)
-                .frame(maxWidth: .infinity)
-                .id(mode)
-                .transition(.opacity)
             }
+            .frame(height: 128)
+            .frame(maxWidth: .infinity)
+            .id(mode)
+            .transition(.opacity)
         }
     }
 
@@ -452,7 +849,7 @@ struct CompanionSpendingView: View {
             }
             .stroke(color, style: StrokeStyle(lineWidth: dashed ? 1 : 2, lineCap: .round, dash: dashed ? [3, 3] : []))
             .frame(width: 14, height: 2)
-            Text(label).font(F.body(10.5)).foregroundStyle(T.faint)
+            Text(label).font(F.body(11)).foregroundStyle(T.muted)
         }
     }
 
@@ -469,62 +866,7 @@ struct CompanionSpendingView: View {
     }
 
     private func empty(_ text: String) -> some View {
-        Text(text).font(F.body(12)).foregroundStyle(T.faint).multilineTextAlignment(.center)
-    }
-}
-
-/// Month to date, said three ways: the figure, how it compares with the same
-/// slice of last month, and — when there are budgets — a ring of how much of
-/// the allowance is gone with a tick for how much of the month is.
-private struct SpendingHero: View {
-    let totals: CompanionModel.Totals
-    let limit: Int
-    /// Spend in budgeted categories only — what the ring measures.
-    let budgeted: Int
-    let month: CompanionModel.Month
-
-    var body: some View {
-        let elapsed = Double(month.dayOfMonth) / Double(month.daysInMonth)
-        let used = limit > 0 ? Double(budgeted) / Double(limit) : 0
-        let tint = CompanionFormat.paceColor(spent: budgeted, limit: limit, elapsed: elapsed)
-
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("SPENT THIS MONTH")
-                    .font(F.mono(10))
-                    .tracking(1.2)
-                    .foregroundStyle(T.muted)
-                AnimatedMoney(value: totals.spentCents.dollars, font: F.display(44))
-                HStack(spacing: 8) {
-                    if let delta = totals.deltaPct {
-                        DeltaPill(pct: delta)
-                        Text("vs \(totals.priorCents.dollars.moneyCompact()) by day \(month.dayOfMonth) last month")
-                            .font(F.body(12)).foregroundStyle(T.faint)
-                    } else {
-                        Text("no prior month to compare").font(F.body(12)).foregroundStyle(T.faint)
-                    }
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            }
-            Spacer(minLength: 0)
-            if limit > 0 {
-                RingGauge(fraction: used, color: tint, lineWidth: 9, marker: elapsed) {
-                    VStack(spacing: 0) {
-                        Text(CompanionFormat.percent(used))
-                            .font(F.monoSemibold(16))
-                            .foregroundStyle(T.paper)
-                        Text("of budget")
-                            .font(F.body(9))
-                            .foregroundStyle(T.faint)
-                    }
-                }
-                .frame(width: 88, height: 88)
-                .accessibilityLabel("\(CompanionFormat.percent(used)) of budget used, \(CompanionFormat.percent(elapsed)) of the month gone")
-            }
-        }
-        .padding(.vertical, 4)
-        .heroGlow(tint)
+        Text(text).font(F.body(13)).foregroundStyle(T.muted).multilineTextAlignment(.center)
     }
 }
 
@@ -544,28 +886,26 @@ private struct TopMerchants: View {
     var body: some View {
         let rows = merchants()
         if !rows.isEmpty {
-            let index = CompanionModel.categoryIndex(summary)
             let top = Double(rows.first?.cents ?? 1)
-            TitledCard("Top merchants", trailing: "recent tape") {
-                VStack(spacing: 12) {
-                    ForEach(rows) { r in
-                        HStack(spacing: 12) {
-                            MerchantAvatar(name: r.id, icon: index[r.category]?.icon, size: 32)
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text(r.id).font(F.medium(13.5)).foregroundStyle(T.paper).lineLimit(1)
-                                    Spacer(minLength: 6)
-                                    Text(r.cents.dollars.money()).font(F.mono(12.5)).foregroundStyle(T.paper)
-                                }
-                                HStack(spacing: 8) {
-                                    SlimMeter(fraction: Double(r.cents) / top, color: T.brass.opacity(0.85), height: 3)
-                                    Text("\(r.visits)×").font(F.mono(10)).foregroundStyle(T.faint).frame(width: 22, alignment: .trailing)
-                                }
+            StatementSection(title: "Top merchants") {
+                ForEach(rows) { r in
+                    RuledRow {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(r.id).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                                Text("\(r.visits)×").font(F.mono(11)).foregroundStyle(T.muted)
+                                Spacer(minLength: 6)
+                                Text(r.cents.dollars.money()).font(F.mono(14)).foregroundStyle(T.paper)
                             }
+                            TickBar(fraction: Double(r.cents) / top, color: T.brass)
                         }
-                        .accessibilityElement(children: .combine)
+                        .padding(.vertical, 9)
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(r.id), \(r.cents.dollars.money()), \(r.visits) visit\(r.visits == 1 ? "" : "s")")
                 }
+                Text("From the recent tape — a floor, not the whole month.")
+                    .font(F.body(12)).foregroundStyle(T.muted).padding(.top, 8)
             }
         }
     }
@@ -584,11 +924,12 @@ private struct TopMerchants: View {
     }
 }
 
-private struct CategorySpendTile: View {
+/// One category's month as a ruled row: dot, name, how it sits against its
+/// budget, the amount and its share of the month.
+private struct CategoryLine: View {
     let row: CompanionModel.CategorySpend
     /// Of the month's total spend.
     let share: Double
-    let elapsed: Double
     let action: () -> Void
 
     private var tint: Color { row.budget.map { CompanionFormat.stateColor($0.state) } ?? T.brass }
@@ -598,49 +939,32 @@ private struct CategorySpendTile: View {
             Haptics.tap()
             action()
         } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top) {
-                    GlyphTile(icon: row.icon, color: tint, size: 28)
-                    Spacer(minLength: 4)
-                    Text(CompanionFormat.percent(share))
-                        .font(F.mono(10))
-                        .foregroundStyle(T.faint)
-                        .padding(.top, 2)
+            RuledRow {
+                HStack(spacing: 12) {
+                    CategoryDot(color: tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.name).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                        if let b = row.budget, b.limitCents > 0 {
+                            Text("\(CompanionFormat.percent(Double(row.cents) / Double(b.limitCents))) of \(b.limitCents.dollars.moneyCompact())")
+                                .font(F.body(12))
+                                .foregroundStyle(b.state == "over" ? T.coral : T.muted)
+                        } else {
+                            Text(row.partial ? "recent only · no budget" : "no budget")
+                                .font(F.body(12)).foregroundStyle(T.muted)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(row.cents.dollars.money()).font(F.mono(14)).foregroundStyle(T.paper)
+                        Text("\(CompanionFormat.percent(share)) of spend").font(F.mono(11)).foregroundStyle(T.muted)
+                    }
                 }
-                Text(row.name)
-                    .font(F.semibold(11.5))
-                    .foregroundStyle(T.muted)
-                    .lineLimit(1)
-                    .padding(.top, 10)
-                Text(row.cents.dollars.moneyCompact())
-                    .font(F.monoSemibold(19))
-                    .foregroundStyle(T.paper)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .padding(.top, 2)
-                Spacer(minLength: 8)
-                if let b = row.budget, b.limitCents > 0 {
-                    StripedMeter(fraction: Double(row.cents) / Double(b.limitCents), color: tint, height: 6, marker: elapsed)
-                    Text("\(CompanionFormat.percent(Double(row.cents) / Double(b.limitCents))) of \(b.limitCents.dollars.moneyCompact())")
-                        .font(F.body(10))
-                        .foregroundStyle(b.state == "over" ? T.coral : T.faint)
-                        .padding(.top, 6)
-                } else {
-                    Text(row.partial ? "recent only · no budget" : "no budget")
-                        .font(F.body(10)).foregroundStyle(T.faint)
-                }
+                .padding(.vertical, 7)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: T.radiusSmall, style: .continuous)
-                    .fill(LinearGradient(colors: [tint.opacity(0.07), T.panel.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .overlay(RoundedRectangle(cornerRadius: T.radiusSmall, style: .continuous).strokeBorder(T.line, lineWidth: 0.75))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: T.radiusSmall, style: .continuous))
         }
-        .buttonStyle(.pressScale)
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens this month's transactions")
     }
 }
 
@@ -668,7 +992,7 @@ private struct CategorySpendSheet: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.name).font(F.display(21)).foregroundStyle(T.paper)
                         Text("\(month.label) · \(txns.count) transaction\(txns.count == 1 ? "" : "s")")
-                            .font(F.body(11.5)).foregroundStyle(T.faint)
+                            .font(F.body(11.5)).foregroundStyle(T.muted)
                     }
                 }
 
@@ -676,7 +1000,7 @@ private struct CategorySpendSheet: View {
                     VStack(alignment: .leading, spacing: 2) {
                         AnimatedMoney(value: row.cents.dollars, font: F.display(36))
                         Text(row.partial ? "this month · from recent transactions only" : "this month")
-                            .font(F.body(12)).foregroundStyle(T.faint)
+                            .font(F.body(12)).foregroundStyle(T.muted)
                     }
                     Spacer(minLength: 0)
                     if let b = row.budget, b.limitCents > 0 {
@@ -709,9 +1033,9 @@ private struct CategorySpendSheet: View {
                     Eyebrow("By day").padding(.top, 24)
                     MiniBars(values: daily, height: 52, color: tint).padding(.top, 10)
                     HStack {
-                        Text("1").font(F.mono(9.5)).foregroundStyle(T.faint)
+                        Text("1").font(F.mono(9.5)).foregroundStyle(T.muted)
                         Spacer()
-                        Text("day \(month.dayOfMonth)").font(F.mono(9.5)).foregroundStyle(T.faint)
+                        Text("day \(month.dayOfMonth)").font(F.mono(9.5)).foregroundStyle(T.muted)
                     }
                     .padding(.top, 4)
                 }
@@ -723,7 +1047,7 @@ private struct CategorySpendSheet: View {
                 }
                 if txns.isEmpty {
                     Text("Nothing on the recent tape for this month.")
-                        .font(F.body(12.5)).foregroundStyle(T.faint).padding(.vertical, 12)
+                        .font(F.body(12.5)).foregroundStyle(T.muted).padding(.vertical, 12)
                 }
             }
             .padding(22)
@@ -783,7 +1107,7 @@ private struct WalletSheet: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(a.text).font(F.body(13)).foregroundStyle(T.paper)
                                         .fixedSize(horizontal: false, vertical: true)
-                                    Text(CompanionFormat.day(a.ts)).font(F.mono(10)).foregroundStyle(T.faint)
+                                    Text(CompanionFormat.day(a.ts)).font(F.mono(10)).foregroundStyle(T.muted)
                                 }
                                 Spacer(minLength: 0)
                             }
@@ -792,7 +1116,7 @@ private struct WalletSheet: View {
                             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(T.coral.opacity(0.3), lineWidth: 0.75))
                         }
                     }
-                    Text("Dismiss alerts on your Mac.").font(F.body(11)).foregroundStyle(T.faint).padding(.top, 6)
+                    Text("Dismiss alerts on your Mac.").font(F.body(11)).foregroundStyle(T.muted).padding(.top, 6)
                 }
 
                 ForEach(Self.kindOrder.filter { groups[$0] != nil }, id: \.self) { kind in
@@ -844,6 +1168,66 @@ private struct WalletSheet: View {
 
 private enum ActivityFilter: Hashable { case all, spending, income, transfers, pending }
 
+/// Where the numbers came from and how fresh they are — the quiet line under
+/// the title when CompanionStatusLine has nothing more urgent to say.
+private struct FreshnessLine: View {
+    @EnvironmentObject private var companion: CompanionStore
+    let asOf: Int
+
+    var body: some View {
+        if companion.syncError == nil && !companion.refreshing && !companion.isStale {
+            HStack(spacing: 8) {
+                Circle().fill(T.jade).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text("From your Mac, \(CompanionFormat.ago(Date(timeIntervalSince1970: TimeInterval(asOf))))")
+                    .font(F.body(12))
+                    .foregroundStyle(T.muted)
+            }
+        }
+    }
+}
+
+/// A transaction on the tape: category dot, name, what it is, mono amount.
+private struct ActivityRow: View {
+    let txn: Summary.Txn
+    let index: [String: Summary.Category]
+    let dot: Color
+    /// Already split with someone.
+    let split: Bool
+
+    var body: some View {
+        let flow = CompanionModel.flow(txn, index)
+        // Only real income is coloured as money arriving; a card payment's
+        // credit side or a transfer in is money moving, not money earned.
+        let inflow = txn.cents > 0 && flow == .income
+        let transfer = flow == .transfer
+        RuledRow {
+            HStack(spacing: 12) {
+                CategoryDot(color: dot)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(txn.merchant).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                    detail.font(F.body(12)).lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                // Summary convention: outflow negative. Inflows are the
+                // exception, so they're the ones signed and coloured.
+                Text((txn.cents > 0 ? "+" : "") + abs(txn.cents).dollars.money())
+                    .font(F.mono(14))
+                    .foregroundStyle(inflow ? T.jade : transfer ? T.muted : T.paper)
+            }
+            .padding(.vertical, 7)
+        }
+        .opacity(txn.pending ? 0.85 : 1)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var detail: Text {
+        var t = Text("\(CompanionModel.name(txn.category, index)) · \(CompanionFormat.time(txn.ts))").foregroundStyle(T.muted)
+        if txn.pending { t = t + Text(" · pending").foregroundStyle(T.brass) }
+        if split { t = t + Text(" · split").foregroundStyle(T.muted) }
+        return t
+    }
+}
+
 struct CompanionActivityView: View {
     @EnvironmentObject private var companion: CompanionStore
     @State private var window = 30
@@ -855,9 +1239,11 @@ struct CompanionActivityView: View {
             CompanionStatusLine()
             if let s = companion.summary {
                 let index = CompanionModel.categoryIndex(s)
+                let dots = categoryDotColors(s)
                 let shown = s.recent.filter { matches($0, index) }
-                spendCard(s).rise(0)
-                flowTiles(s, index: index).rise(1)
+                FreshnessLine(asOf: s.asOf)
+                StatCells(cells: monthCells(s, index: index)).rise(0)
+                spendWindow(s).rise(1)
                 FilterChips(options: [
                     .init(label: "All", value: .all, count: s.recent.count),
                     .init(label: "Spending", value: .spending, count: s.recent.filter { CompanionModel.isSpend($0, index) }.count, symbol: "arrow.up.right"),
@@ -866,20 +1252,19 @@ struct CompanionActivityView: View {
                     .init(label: "Pending", value: .pending, count: s.recent.filter(\.pending).count, symbol: "clock"),
                 ], selection: $filter)
                 .rise(2)
+                flowLine(s, index: index)
 
                 if shown.isEmpty {
-                    Card {
-                        EmptyState(symbol: "line.3.horizontal.decrease.circle", title: "Nothing here", message: "No recent transactions match this filter.")
-                    }
+                    EmptyState(symbol: "line.3.horizontal.decrease.circle", title: "Nothing here", message: "No recent transactions match this filter.")
                 } else {
                     ForEach(Array(groups(shown).enumerated()), id: \.element.day) { i, g in
-                        dayGroup(g, index: index).rise(3 + i)
+                        dayGroup(g, index: index, dots: dots).rise(3 + i)
                     }
                 }
                 Text("The \(s.recent.count) most recent — the full ledger stays on your Mac.")
-                    .font(F.body(11.5))
-                    .foregroundStyle(T.faint)
-                    .frame(maxWidth: .infinity)
+                    .font(F.body(12))
+                    .foregroundStyle(T.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 4)
             } else {
                 AwaitingSummary().rise(0)
@@ -901,42 +1286,61 @@ struct CompanionActivityView: View {
         }
     }
 
-    private func dayGroup(_ g: (day: String, ts: Int, txns: [Summary.Txn]), index: [String: Summary.Category]) -> some View {
+    /// Out this month is the Mac's own daily series; In is the income on the
+    /// recent tape since the 1st — a floor, and labelled as the tape.
+    private func monthCells(_ s: Summary, index: [String: Summary.Category]) -> [StatCells.Cell] {
+        let month = CompanionModel.Month()
+        let tape = s.recent.filter { $0.ts >= month.startSec }
+        let earned = tape.filter { CompanionModel.isIncome($0, index) }
+        let inn = earned.reduce(0) { $0 + $1.cents }
+        let out: StatCells.Cell
+        if let series = s.spendByDay {
+            out = .init(label: "Out in \(month.label)", value: CompanionModel.totals(series, month: month).spentCents.dollars.money())
+        } else {
+            let spent = tape.filter { CompanionModel.isSpend($0, index) }.reduce(0) { $0 - $1.cents }
+            out = .init(label: "Out in \(month.label)", value: spent.dollars.money(), note: "recent tape")
+        }
+        return [
+            out,
+            .init(
+                label: "In",
+                value: "+\(inn.dollars.money())",
+                note: "\(earned.count) deposit\(earned.count == 1 ? "" : "s") · recent tape",
+                valueColor: T.jade
+            ),
+        ]
+    }
+
+    private func dayGroup(_ g: (day: String, ts: Int, txns: [Summary.Txn]), index: [String: Summary.Category], dots: [String: Color]) -> some View {
         // A day's totals are what was spent and earned — a card payment on
         // the same day would otherwise dwarf the coffee it paid for.
         let out = g.txns.filter { CompanionModel.isSpend($0, index) }.reduce(0) { $0 - $1.cents }
         let inn = g.txns.filter { CompanionModel.isIncome($0, index) }.reduce(0) { $0 + $1.cents }
-        return VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(g.day).font(F.semibold(13.5)).foregroundStyle(T.paper)
-                if g.day == "Today" || g.day == "Yesterday" {
-                    Text(CompanionFormat.weekday(g.ts)).font(F.body(11.5)).foregroundStyle(T.faint)
-                }
-                Spacer()
-                if inn > 0 { Text("+\(inn.dollars.moneyCompact())").font(F.mono(10.5)).foregroundStyle(T.jade) }
-                if out > 0 { Text("−\(out.dollars.money())").font(F.mono(10.5)).foregroundStyle(T.muted) }
-            }
-            .padding(.horizontal, 4)
-            Card(padding: 0) {
-                VStack(spacing: 0) {
-                    ForEach(Array(g.txns.enumerated()), id: \.element.id) { j, t in
-                        TxnRow(txn: t, index: index)
-                            .padding(.horizontal, 14)
-                            .background(T.panel.opacity(0.001))
-                            .contextMenu {
-                                // Long-press a purchase to split it — the dinner you
-                                // fronted is usually spotted here, not in Shared.
-                                if CompanionModel.isSpend(t, index), !(companion.summary?.shared ?? []).contains(where: { $0.txnId == t.id }) {
-                                    Button {
-                                        sheet = .split(txnId: t.id, personId: nil)
-                                    } label: {
-                                        Label("Split this bill", systemImage: "person.2")
-                                    }
-                                }
+        let relative = g.day == "Today" || g.day == "Yesterday"
+        let net = [inn > 0 ? "+\(inn.dollars.money())" : nil, out > 0 ? "−\(out.dollars.money())" : nil]
+            .compactMap { $0 }.joined(separator: "  ")
+        let shared = Set((companion.summary?.shared ?? []).map(\.txnId))
+        return VStack(spacing: 0) {
+            RuleLabel(
+                leading: relative ? "\(g.day) · \(CompanionFormat.weekday(g.ts))" : g.day,
+                trailing: net.isEmpty ? nil : net,
+                mono: true
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            ForEach(g.txns) { t in
+                ActivityRow(txn: t, index: index, dot: dots[t.category] ?? T.muted, split: shared.contains(t.id))
+                    .contextMenu {
+                        // Long-press a purchase to split it — the dinner you
+                        // fronted is usually spotted here, not in Shared.
+                        if CompanionModel.isSpend(t, index), !shared.contains(t.id) {
+                            Button {
+                                sheet = .split(txnId: t.id, personId: nil)
+                            } label: {
+                                Label("Split this bill", systemImage: "person.2")
                             }
-                            .overlay(alignment: .top) { if j > 0 { Hairline().padding(.leading, 64) } }
+                        }
                     }
-                }
             }
         }
     }
@@ -958,54 +1362,57 @@ struct CompanionActivityView: View {
     /// Earned against spent across the recent tape. Transfers — card
     /// payments, moves between your own accounts, fronted shares — are
     /// neither, and are counted on their own so they're visibly not ignored.
-    private func flowTiles(_ s: Summary, index: [String: Summary.Category]) -> some View {
+    private func flowLine(_ s: Summary, index: [String: Summary.Category]) -> some View {
         let spent = s.recent.filter { CompanionModel.isSpend($0, index) }
         let earned = s.recent.filter { CompanionModel.isIncome($0, index) }
         let moved = s.recent.filter { CompanionModel.flow($0, index) == .transfer }
         let out = spent.reduce(0) { $0 - $1.cents }
         let inn = earned.reduce(0) { $0 + $1.cents }
-        return HStack(spacing: 8) {
-            StatTile(label: "Income", value: inn.dollars.moneyCompact(), tint: T.jade, note: "\(earned.count) deposit\(earned.count == 1 ? "" : "s")")
-            StatTile(label: "Spent", value: out.dollars.moneyCompact(), note: "\(spent.count) purchase\(spent.count == 1 ? "" : "s")")
-            StatTile(label: "Transfers", value: "\(moved.count)", tint: T.muted, note: "not counted")
-        }
+        return (Text("On this tape  ")
+            + Text("\(spent.count) purchase\(spent.count == 1 ? "" : "s") ") + Text(out.dollars.moneyCompact()).foregroundStyle(T.paper)
+            + Text("  ·  \(earned.count) deposit\(earned.count == 1 ? "" : "s") ") + Text("+\(inn.dollars.moneyCompact())").foregroundStyle(T.jade)
+            + Text("  ·  \(moved.count) transfer\(moved.count == 1 ? "" : "s"), not counted"))
+            .font(F.mono(11))
+            .foregroundStyle(T.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func spendCard(_ s: Summary) -> some View {
+    /// Spend over a chosen window, against the same length just before it.
+    private func spendWindow(_ s: Summary) -> some View {
         let cutoff = Int(Date().timeIntervalSince1970) - window * 86_400
         let points = (s.spendByDay ?? []).filter { $0.d >= cutoff }
         let total = points.reduce(0) { $0 + $1.cents }
         // The same length of window just before this one.
         let prior = (s.spendByDay ?? []).filter { $0.d >= cutoff - window * 86_400 && $0.d < cutoff }
         let priorTotal = prior.reduce(0) { $0 + $1.cents }
-        return Card(padding: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Eyebrow("Spending · \(window)d")
-                        HStack(spacing: 8) {
-                            Text(total.dollars.money())
-                                .font(F.monoSemibold(20))
-                                .foregroundStyle(T.paper)
-                                .contentTransition(.numericText())
-                            if priorTotal > 0 && prior.count >= window / 2 {
-                                DeltaPill(pct: Double(total - priorTotal) / Double(priorTotal) * 100, size: 10.5)
-                            }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Spending · \(window)d").font(F.body(13)).foregroundStyle(T.muted)
+                    HStack(spacing: 8) {
+                        Text(total.dollars.money())
+                            .font(F.mono(14))
+                            .foregroundStyle(T.paper)
+                            .contentTransition(.numericText())
+                        if priorTotal > 0 && prior.count >= window / 2 {
+                            DeltaPill(pct: Double(total - priorTotal) / Double(priorTotal) * 100, size: 10.5)
                         }
                     }
-                    Spacer()
-                    Segmented(options: [("7D", 7), ("30D", 30), ("90D", 90)], selection: $window)
-                        .frame(width: 150)
                 }
-                if points.isEmpty {
-                    Text("No spending in this window.").font(F.body(12)).foregroundStyle(T.faint)
-                        .frame(maxWidth: .infinity, minHeight: 88)
-                } else {
-                    ScrubBars(points: points.map {
-                        BarPoint(id: "\($0.d)", date: CompanionFormat.date($0.d), value: $0.cents.dollars)
-                    }, height: 64, showsAverage: true, highlightsLast: true)
-                    .id(window)
-                }
+                .accessibilityElement(children: .combine)
+                Spacer()
+                Segmented(options: [("7D", 7), ("30D", 30), ("90D", 90)], selection: $window)
+                    .frame(width: 150)
+            }
+            if points.isEmpty {
+                Text("No spending in this window.").font(F.body(13)).foregroundStyle(T.muted)
+                    .frame(maxWidth: .infinity, minHeight: 64)
+            } else {
+                ScrubBars(points: points.map {
+                    BarPoint(id: "\($0.d)", date: CompanionFormat.date($0.d), value: $0.cents.dollars)
+                }, height: 64, showsAverage: true, highlightsLast: true)
+                .id(window)
             }
         }
     }
@@ -1015,6 +1422,7 @@ struct CompanionActivityView: View {
 
 struct CompanionBudgetsView: View {
     @EnvironmentObject private var companion: CompanionStore
+    @State private var open: CompanionModel.CategorySpend?
 
     var body: some View {
         let month = CompanionModel.Month()
@@ -1024,185 +1432,134 @@ struct CompanionBudgetsView: View {
             CompanionStatusLine()
             if let s = companion.summary {
                 if s.budgets.isEmpty {
-                    Card {
-                        EmptyState(symbol: "chart.pie", title: "No budgets yet", message: "Set budgets on your Mac and they'll appear here, paced against the month.")
-                    }
-                    .rise(0)
+                    EmptyState(symbol: "chart.pie", title: "No budgets yet", message: "Set budgets on your Mac and they'll appear here, paced against the month.")
+                        .rise(0)
                 } else {
-                    overview(s, month: month, daysLeft: daysLeft).rise(0)
-                    monthPace(s, month: month).rise(1)
-                    list(s, month: month).rise(2)
+                    let pos = CompanionModel.budgetPosition(s)
+                    let verdict = CompanionModel.paceVerdict(pos, dayOfMonth: month.dayOfMonth, daysInMonth: month.daysInMonth)
+                    hero(pos, verdict: verdict).rise(0)
+                    pace(s, pos: pos, month: month).rise(1)
+                    figures(s, pos: pos, verdict: verdict, month: month, daysLeft: daysLeft).rise(2)
+                    list(s, month: month).rise(3)
                 }
             } else {
                 AwaitingSummary().rise(0)
             }
         }
         .refreshable { await companion.refresh(manual: true) }
-    }
-
-    private func overview(_ s: Summary, month: CompanionModel.Month, daysLeft: Int) -> some View {
-        let spent = s.budgets.reduce(0) { $0 + $1.spentCents }
-        let limit = s.budgets.reduce(0) { $0 + $1.limitCents }
-        let left = limit - spent
-        let elapsed = Double(month.dayOfMonth) / Double(month.daysInMonth)
-        // The ring is the whole month's pace; the per-budget states sit beside
-        // it, so one blown category doesn't paint a healthy month red.
-        let tint = CompanionFormat.paceColor(spent: spent, limit: limit, elapsed: elapsed)
-        let paceNote = spent > limit ? "over" : tint == T.brass ? "ahead of pace" : "on pace"
-        let counts = (
-            ok: s.budgets.filter { $0.state == "ok" }.count,
-            warn: s.budgets.filter { $0.state == "warn" }.count,
-            over: s.budgets.filter { $0.state == "over" }.count
-        )
-
-        return Card(padding: 18) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 18) {
-                    RingGauge(fraction: limit > 0 ? Double(spent) / Double(limit) : 0, color: tint, lineWidth: 12, marker: elapsed) {
-                        VStack(spacing: 1) {
-                            Text(abs(left).dollars.moneyCompact())
-                                .font(F.monoSemibold(18))
-                                .foregroundStyle(left < 0 ? T.coral : T.paper)
-                                .contentTransition(.numericText())
-                            Text(left < 0 ? "over" : "left")
-                                .font(F.body(10.5))
-                                .foregroundStyle(T.faint)
-                        }
-                    }
-                    .frame(width: 124, height: 124)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(spent.dollars.moneyWhole())
-                                .font(F.display(26))
-                                .foregroundStyle(T.paper)
-                            Text("of \(limit.dollars.moneyWhole())")
-                                .font(F.body(12)).foregroundStyle(T.faint)
-                        }
-                        VStack(alignment: .leading, spacing: 5) {
-                            stateLine(T.jade, "\(counts.ok) on track")
-                            stateLine(T.brass, "\(counts.warn) ahead of pace")
-                            stateLine(T.coral, "\(counts.over) over")
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-
-                HStack(spacing: 8) {
-                    StatTile(label: "Per day", value: daysLeft > 0 && left > 0 ? (left.dollars / Double(daysLeft)).moneyCompact() : "—", tint: T.jade, note: "to spend")
-                    StatTile(label: "Month gone", value: CompanionFormat.percent(elapsed), note: "\(daysLeft) days left")
-                    StatTile(label: "Budget used", value: limit > 0 ? CompanionFormat.percent(Double(spent) / Double(limit)) : "—", tint: tint, note: paceNote)
-                }
-            }
+        .sheet(item: $open) { row in
+            if let s = companion.summary { CategorySpendSheet(row: row, summary: s, month: month) }
         }
-        .heroGlow(tint)
     }
 
-    /// The month so far: cumulative spend against the dashed even-pace line
-    /// to the total budget — the Expo app's Budgets chart, natively.
+    /// Left across every budget, and the Mac's reading of the pace.
+    private func hero(_ pos: CompanionModel.BudgetPosition, verdict: CompanionModel.PaceVerdict?) -> some View {
+        let over = pos.left < 0
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                FigureText(cents: abs(pos.left), font: F.display(48), color: over ? T.coral : T.paper)
+                Text(over ? "over" : "left").font(F.body(14)).foregroundStyle(T.muted)
+            }
+            .accessibilityElement(children: .combine)
+            if let verdict { VerdictText(verdict.text) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The month so far: cumulative spend against the dashed even-pace line —
+    /// flexible budgets only once the Mac marks any fixed and sends that split.
     @ViewBuilder
-    private func monthPace(_ s: Summary, month: CompanionModel.Month) -> some View {
-        // Budgeted categories only, as the desktop's Budgets pace line.
-        let totals = CompanionModel.budgetTotals(s, month: month)
-            ?? CompanionModel.Totals(spentCents: 0, priorCents: 0, deltaPct: nil, perDay: [], cumulative: [])
-        let limit = CompanionModel.budgetLimit(s)
-        let paceToDate = limit * month.dayOfMonth / max(1, month.daysInMonth)
-        let ahead = totals.spentCents > paceToDate
-        if totals.cumulative.count > 1 {
-            TitledCard("Month so far", trailing: "day \(month.dayOfMonth) of \(month.daysInMonth)") {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(totals.spentCents.dollars.moneyWhole())
-                            .font(F.monoSemibold(18)).foregroundStyle(T.paper)
-                        Text("spent").font(F.body(12)).foregroundStyle(T.faint)
-                        Spacer()
-                        Text(ahead
-                             ? "\((totals.spentCents - paceToDate).dollars.moneyWhole()) ahead of pace"
-                             : "\((paceToDate - totals.spentCents).dollars.moneyWhole()) under pace")
-                            .font(F.mono(11.5)).foregroundStyle(ahead ? T.coral : T.jade)
-                    }
-                    PaceChart(
-                        cumulative: totals.cumulative.map(\.dollars),
-                        budget: limit.dollars,
-                        daysInMonth: month.daysInMonth,
-                        dayOfMonth: month.dayOfMonth,
-                        height: 140
-                    )
-                    HStack {
-                        Text("1").font(F.mono(9.5)).foregroundStyle(T.faint)
-                        Spacer()
-                        Text("dashed: even pace to \(limit.dollars.moneyCompact())").font(F.body(10.5)).foregroundStyle(T.faint)
-                        Spacer()
-                        Text("\(month.daysInMonth)").font(F.mono(9.5)).foregroundStyle(T.faint)
-                    }
+    private func pace(_ s: Summary, pos: CompanionModel.BudgetPosition, month: CompanionModel.Month) -> some View {
+        let flexible = pos.judgesFlexible && s.flexibleSpendByDay != nil
+        let limit = flexible ? pos.flexibleLimit : pos.totalLimit
+        if let totals = CompanionModel.paceTotals(s, month: month), totals.cumulative.count > 1 {
+            VStack(spacing: 6) {
+                PaceChart(
+                    cumulative: totals.cumulative.map(\.dollars),
+                    budget: limit.dollars,
+                    daysInMonth: month.daysInMonth,
+                    dayOfMonth: month.dayOfMonth,
+                    height: 96
+                )
+                HStack {
+                    Text("1")
+                    Spacer(minLength: 6)
+                    Text("day \(month.dayOfMonth)").foregroundStyle(T.paper)
+                    Spacer(minLength: 6)
+                    Text("dashed: even pace to \(limit.dollars.moneyCompact())")
                 }
+                .font(F.mono(11))
+                .foregroundStyle(T.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(flexible ? "Flexible spending" : "Budgeted spending") so far, \(totals.spentCents.dollars.money()) by day \(month.dayOfMonth), against an even pace to \(limit.dollars.money())")
         }
     }
 
-    private func stateLine(_ color: Color, _ text: String) -> some View {
-        HStack(spacing: 7) {
-            Circle().fill(color).frame(width: 7, height: 7)
-            Text(text).font(F.body(12)).foregroundStyle(T.muted)
+    /// What the old overview carried: the daily allowance, how much of the
+    /// month and the budget are gone, and how many budgets sit in each state.
+    private func figures(_ s: Summary, pos: CompanionModel.BudgetPosition, verdict: CompanionModel.PaceVerdict?, month: CompanionModel.Month, daysLeft: Int) -> some View {
+        let elapsed = Double(month.dayOfMonth) / Double(max(1, month.daysInMonth))
+        let tone = verdict?.tone
+        let paceNote = tone == .over ? "over" : tone == .warn ? "ahead of pace" : "on pace"
+        let flexible = s.budgets.filter { !$0.isFixed }
+        let counts = (
+            ok: flexible.filter { $0.state == "ok" }.count,
+            warn: flexible.filter { $0.state == "warn" }.count,
+            over: s.budgets.filter { $0.spentCents > $0.limitCents || (!$0.isFixed && $0.state == "over") }.count
+        )
+        return VStack(alignment: .leading, spacing: 10) {
+            StatCells(cells: [
+                .init(label: "Per day",
+                      value: daysLeft > 0 && pos.left > 0 ? (pos.left.dollars / Double(daysLeft)).moneyCompact() : "—",
+                      note: "to spend"),
+                .init(label: "Month gone", value: CompanionFormat.percent(elapsed), note: "\(daysLeft) day\(daysLeft == 1 ? "" : "s") left"),
+                .init(label: "Budget used",
+                      value: pos.totalLimit > 0 ? CompanionFormat.percent(Double(pos.totalSpent) / Double(pos.totalLimit)) : "—",
+                      note: paceNote,
+                      noteColor: tone?.color ?? T.muted),
+            ])
+            (Text("\(counts.ok)").foregroundStyle(T.jade) + Text(" on track  ·  ")
+                + Text("\(counts.warn)").foregroundStyle(T.brass) + Text(" ahead of pace  ·  ")
+                + Text("\(counts.over)").foregroundStyle(T.coral) + Text(" over"))
+                .font(F.mono(11.5))
+                .foregroundStyle(T.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func list(_ s: Summary, month: CompanionModel.Month) -> some View {
         let index = CompanionModel.categoryIndex(s)
-        let elapsed = Double(month.dayOfMonth) / Double(month.daysInMonth)
-        let rank = ["over": 0, "warn": 1, "ok": 2]
-        let ordered = s.budgets.sorted {
-            let a = rank[$0.state] ?? 3, b = rank[$1.state] ?? 3
-            if a != b { return a < b }
-            return Double($0.spentCents) / Double(max(1, $0.limitCents)) > Double($1.spentCents) / Double(max(1, $1.limitCents))
-        }
-        return TitledCard("By category", accessory: {
-            HStack(spacing: 5) {
-                Capsule().fill(T.paper.opacity(0.85)).frame(width: 2, height: 10)
-                Text("today's pace").font(F.mono(10.5)).foregroundStyle(T.faint)
-            }
-        }) {
-            VStack(spacing: 0) {
-                ForEach(Array(ordered.enumerated()), id: \.element.category) { i, b in
-                    budgetRow(b, index: index, elapsed: elapsed)
-                        .overlay(alignment: .top) { if i > 0 { Hairline() } }
+        let elapsed = Double(month.dayOfMonth) / Double(max(1, month.daysInMonth))
+        let ordered = budgetOrder(s.budgets)
+        let fixed = ordered.filter(\.isFixed)
+        let flexible = ordered.filter { !$0.isFixed }
+        return VStack(spacing: 0) {
+            if fixed.isEmpty {
+                RuleLabel(leading: "\(ordered.count) budget\(ordered.count == 1 ? "" : "s")", trailing: "tick marks today")
+                rows(ordered, index: index, elapsed: elapsed)
+            } else {
+                RuleLabel(leading: "Fixed", trailing: flexible.isEmpty ? nil : "tick marks today")
+                    .accessibilityAddTraits(.isHeader)
+                rows(fixed, index: index, elapsed: elapsed)
+                if !flexible.isEmpty {
+                    RuleLabel(leading: "Flexible")
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.top, 14)
+                    rows(flexible, index: index, elapsed: elapsed)
                 }
             }
-            .padding(.vertical, -12)
         }
     }
 
-    private func budgetRow(_ b: Summary.Budget, index: [String: Summary.Category], elapsed: Double) -> some View {
-        let color = CompanionFormat.stateColor(b.state)
-        let used = b.limitCents > 0 ? Double(b.spentCents) / Double(b.limitCents) : 0
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                GlyphTile(icon: index[b.category]?.icon, color: color, size: 32)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(CompanionModel.name(b.category, index))
-                        .font(F.medium(14)).foregroundStyle(T.paper).lineLimit(1)
-                    Text(b.spentCents.dollars.moneyWhole())
-                        .font(F.mono(11.5)).foregroundStyle(b.state == "over" ? T.coral : T.muted)
-                    + Text(" / \(b.limitCents.dollars.moneyWhole())")
-                        .font(F.mono(11.5)).foregroundStyle(T.faint)
-                }
-                Spacer(minLength: 8)
-                Text(CompanionFormat.percent(used))
-                    .font(F.monoSemibold(12))
-                    .foregroundStyle(color)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(color.opacity(0.13)))
+    private func rows(_ budgets: [Summary.Budget], index: [String: Summary.Category], elapsed: Double) -> some View {
+        ForEach(budgets, id: \.category) { b in
+            BudgetLine(budget: b, name: CompanionModel.name(b.category, index), elapsed: elapsed) {
+                open = spendRow(b, index)
             }
-            StripedMeter(fraction: used, color: color, height: 10, marker: elapsed)
-            Text(b.spentCents > b.limitCents
-                 ? "\((b.spentCents - b.limitCents).dollars.money()) over"
-                 : "\((b.limitCents - b.spentCents).dollars.money()) left\(b.state == "warn" ? " · ahead of pace" : "")")
-                .font(F.body(11.5))
-                .foregroundStyle(b.state == "ok" ? T.faint : color)
         }
-        .padding(.vertical, 13)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1217,18 +1574,15 @@ struct CompanionHoldingsView: View {
             CompanionStatusLine()
             if let s = companion.summary {
                 if s.positions.isEmpty && s.investments == nil {
-                    Card {
-                        EmptyState(symbol: "chart.line.uptrend.xyaxis", title: "No holdings", message: "Investment accounts linked on your Mac show up here.")
-                    }
-                    .rise(0)
+                    EmptyState(symbol: "chart.line.uptrend.xyaxis", title: "No holdings", message: "Investment accounts linked on your Mac show up here.")
+                        .rise(0)
                 } else {
-                    let colors = sectorColors(s)
                     header(s).rise(0)
-                    movers(s).rise(1)
-                    if let inv = s.investments, !inv.sectors.isEmpty { sectors(inv, colors: colors).rise(2) }
-                    positions(s, colors: colors).rise(3)
+                    if !s.positions.isEmpty { positions(s).rise(1) }
+                    movers(s).rise(2)
+                    if let inv = s.investments, !inv.sectors.isEmpty { sectors(inv, colors: sectorColors(s)).rise(3) }
                     Text("Read-only. Cost basis and lots stay on your Mac.")
-                        .font(F.body(11.5)).foregroundStyle(T.faint).frame(maxWidth: .infinity)
+                        .font(F.body(12)).foregroundStyle(T.muted).frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 AwaitingSummary().rise(0)
@@ -1247,7 +1601,7 @@ struct CompanionHoldingsView: View {
         openSymbol = symbol
     }
 
-    /// A sector keeps one colour on the donut, the bar and every position.
+    /// A sector keeps one colour on its bar segment and its row.
     private func sectorColors(_ s: Summary) -> [String: Color] {
         let order = s.investments?.sectors.map(\.sector) ?? Array(Set(s.positions.compactMap(\.sector))).sorted()
         return Dictionary(order.enumerated().map { ($1, T.chart[$0 % T.chart.count]) }, uniquingKeysWith: { a, _ in a })
@@ -1256,15 +1610,9 @@ struct CompanionHoldingsView: View {
     private func header(_ s: Summary) -> some View {
         let value = s.investments?.valueCents ?? s.positions.reduce(0) { $0 + $1.cents }
         let spark = s.investments?.spark ?? []
-        let change: Double? = {
-            guard let a = spark.first?.cents, let b = spark.last?.cents, a > 0 else { return nil }
-            return Double(b - a) / Double(a) * 100
-        }()
-        return VStack(alignment: .leading, spacing: 6) {
-            Text("PORTFOLIO VALUE").font(F.mono(10)).tracking(1.2).foregroundStyle(T.muted)
-            AnimatedMoney(value: value.dollars, font: F.display(44))
-            Text("\(s.positions.count) position\(s.positions.count == 1 ? "" : "s")")
-                .font(F.body(12.5)).foregroundStyle(T.faint)
+        return VStack(alignment: .leading, spacing: 8) {
+            FigureText(cents: value, font: F.display(46))
+            VerdictText(today(s))
             if spark.count > 1 {
                 RangedSparkLine(points: spark.map {
                     BarPoint(id: "\($0.d)", date: CompanionFormat.date($0.d), value: $0.cents.dollars)
@@ -1272,7 +1620,68 @@ struct CompanionHoldingsView: View {
                 .padding(.top, 6)
             }
         }
-        .heroGlow((change ?? 0) >= 0 ? T.jade : T.coral)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "Up $5.00 today, 0.82%." — from the day moves the Mac priced. Without
+    /// any, the sentence is just what's held.
+    private func today(_ s: Summary) -> Text {
+        let held = "\(s.positions.count) position\(s.positions.count == 1 ? "" : "s")"
+        guard let move = PortfolioDay.move(s) else { return Text("\(held), as your Mac last priced them.") }
+        if move.cents == 0 { return Text("Flat today across \(held).") }
+        let pct = String(format: "%.2f", abs(move.pct))
+        let scope = move.priced < s.positions.count ? " across the \(move.priced) priced today" : ""
+        return Text(move.cents > 0 ? "Up " : "Down ")
+            + Text(abs(move.cents).dollars.money()).foregroundStyle(move.cents > 0 ? T.jade : T.coral)
+            + Text(" today, \(pct)%\(scope).")
+    }
+
+    private func bpText(_ bp: Int) -> String {
+        "\(bp >= 0 ? "+" : "−")\(String(format: "%.2f", Double(abs(bp)) / 100))%"
+    }
+
+    private func positions(_ s: Summary) -> some View {
+        let total = max(1, s.positions.reduce(0) { $0 + $1.cents })
+        let top = Double(max(1, s.positions.map(\.cents).max() ?? 1))
+        return VStack(spacing: 0) {
+            RuleLabel(leading: "\(s.positions.count) position\(s.positions.count == 1 ? "" : "s")", trailing: "value · today")
+            ForEach(Array(s.positions.enumerated()), id: \.element.symbol) { _, p in
+                let weight = CompanionFormat.percent(Double(p.cents) / Double(total))
+                Button { open(p.symbol) } label: {
+                    RuledRow {
+                        HStack(spacing: 12) {
+                            Text(CompanionFormat.ticker(p.symbol))
+                                .font(F.mono(14))
+                                .foregroundStyle(T.paper)
+                                .lineLimit(1)
+                                .frame(minWidth: 50, alignment: .leading)
+                            HStack(spacing: 8) {
+                                // Scaled to the largest holding, so the top row
+                                // fills and the rest read against it.
+                                TickBar(fraction: Double(p.cents) / top, color: T.brass)
+                                Text(weight)
+                                    .font(F.mono(11))
+                                    .foregroundStyle(T.muted)
+                                    .frame(minWidth: 32, alignment: .trailing)
+                            }
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(p.cents.dollars.money()).font(F.mono(14)).foregroundStyle(T.paper)
+                                if let bp = p.dayBp {
+                                    Text(bpText(bp)).font(F.mono(11)).foregroundStyle(bp >= 0 ? T.jade : T.coral)
+                                }
+                            }
+                            .lineLimit(1)
+                            .frame(minWidth: 96, alignment: .trailing)
+                        }
+                        .padding(.vertical, 7)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(p.name ?? p.symbol), \(p.cents.dollars.money()), \(weight) of the portfolio\(p.dayBp.map { ", \(bpText($0)) today" } ?? "")")
+                .accessibilityHint("Opens the price chart and details")
+            }
+        }
     }
 
     /// Today's biggest move each way, as the Mac priced it.
@@ -1281,132 +1690,47 @@ struct CompanionHoldingsView: View {
         let priced = s.positions.filter { $0.dayBp != nil }
         let up = priced.max { ($0.dayBp ?? 0) < ($1.dayBp ?? 0) }
         let down = priced.min { ($0.dayBp ?? 0) < ($1.dayBp ?? 0) }
-        if let up, let down, (up.dayBp ?? 0) > 0 || (down.dayBp ?? 0) < 0 {
-            HStack(spacing: 8) {
-                if (up.dayBp ?? 0) > 0 {
-                    Button { open(up.symbol) } label: { moverTile("Top gainer", up) }.buttonStyle(.pressScale)
-                }
-                if (down.dayBp ?? 0) < 0 {
-                    Button { open(down.symbol) } label: { moverTile("Top loser", down) }.buttonStyle(.pressScale)
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
+        let picks: [(label: String, position: Summary.Position)] =
+            (up.map { ($0.dayBp ?? 0) > 0 ? [("Top gainer", $0)] : [] } ?? [])
+            + (down.map { ($0.dayBp ?? 0) < 0 ? [("Top loser", $0)] : [] } ?? [])
+        if !picks.isEmpty {
+            StatCells(cells: picks.map { pick in
+                let bp = pick.position.dayBp ?? 0
+                return .init(
+                    label: pick.label,
+                    value: CompanionFormat.ticker(pick.position.symbol),
+                    note: bpText(bp),
+                    noteColor: bp >= 0 ? T.jade : T.coral
+                )
+            })
+            .cellTaps(picks.map { pick in
+                ("\(pick.label), \(pick.position.symbol). Opens the price chart and details", { open(pick.position.symbol) })
+            })
         }
-    }
-
-    private func moverTile(_ label: String, _ p: Summary.Position) -> some View {
-        let bp = p.dayBp ?? 0
-        let tint = bp >= 0 ? T.jade : T.coral
-        return HStack(spacing: 10) {
-            Image(systemName: bp >= 0 ? "arrow.up.right" : "arrow.down.right")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(tint)
-                .frame(width: 32, height: 32)
-                .background(Circle().fill(tint.opacity(0.14)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label.uppercased()).font(F.mono(9)).tracking(0.9).foregroundStyle(T.muted)
-                HStack(spacing: 6) {
-                    Text(p.symbol).font(F.monoSemibold(14)).foregroundStyle(T.paper)
-                    Text(bpText(bp)).font(F.mono(11.5)).foregroundStyle(tint)
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(LinearGradient(colors: [tint.opacity(0.1), T.panel.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
-        )
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(T.line, lineWidth: 0.75))
-        .accessibilityElement(children: .combine)
-    }
-
-    private func bpText(_ bp: Int) -> String {
-        "\(bp >= 0 ? "+" : "−")\(String(format: "%.2f", Double(abs(bp)) / 100))%"
     }
 
     private func sectors(_ inv: Summary.Investments, colors: [String: Color]) -> some View {
         let slices = inv.sectors.map { sec in
             MixSlice(id: sec.sector, name: sec.sector, value: sec.cents.dollars, color: colors[sec.sector] ?? T.muted)
         }
-        return TitledCard("Allocation", trailing: "\(slices.count) sectors") {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 16) {
-                    MixDonut(slices: slices, size: 112)
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(slices) { sl in
-                            LegendRow(
-                                color: sl.color,
-                                name: sl.name,
-                                value: inv.valueCents > 0 ? "\(Int((sl.value / inv.valueCents.dollars * 100).rounded()))%" : "—"
-                            )
-                        }
+        return StatementSection(title: "Allocation", count: slices.count) {
+            StackedBar(slices: slices, height: 8).padding(.vertical, 14)
+            Rule()
+            ForEach(slices) { sl in
+                RuledRow(minHeight: 44) {
+                    HStack(spacing: 12) {
+                        CategoryDot(color: sl.color)
+                        Text(sl.name).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(inv.valueCents > 0 ? "\(Int((sl.value / inv.valueCents.dollars * 100).rounded()))%" : "—")
+                            .font(F.mono(11)).foregroundStyle(T.muted)
+                        Text(sl.value.moneyCompact())
+                            .font(F.mono(14)).foregroundStyle(T.paper)
+                            .frame(minWidth: 64, alignment: .trailing)
                     }
                 }
-                StackedBar(slices: slices, height: 8)
+                .accessibilityElement(children: .combine)
             }
-        }
-    }
-
-    private func positions(_ s: Summary, colors: [String: Color]) -> some View {
-        let total = max(1, s.positions.reduce(0) { $0 + $1.cents })
-        let top = Double(s.positions.map(\.cents).max() ?? 1)
-        return TitledCard("Positions", trailing: "\(s.positions.count)") {
-            VStack(spacing: 0) {
-                ForEach(Array(s.positions.enumerated()), id: \.element.symbol) { i, p in
-                    let tint = p.sector.flatMap { colors[$0] } ?? T.brass
-                    Button { open(p.symbol) } label: {
-                    VStack(spacing: 8) {
-                        HStack(spacing: 12) {
-                            Text(CompanionFormat.ticker(p.symbol))
-                                .font(F.monoSemibold(10.5))
-                                .foregroundStyle(tint)
-                                .frame(width: 46, height: 34)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .fill(LinearGradient(colors: [tint.opacity(0.2), tint.opacity(0.07)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                )
-                                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(tint.opacity(0.25), lineWidth: 0.75))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name ?? p.symbol).font(F.medium(13.5)).foregroundStyle(T.paper).lineLimit(1)
-                                Text([p.qtyLabel.map { p.sector == "Crypto" ? $0 : "\($0) sh" }, p.sector].compactMap { $0 }.joined(separator: " · "))
-                                    .font(F.body(11)).foregroundStyle(T.faint).lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                            VStack(alignment: .trailing, spacing: 3) {
-                                Text(p.cents.dollars.money()).font(F.mono(13)).foregroundStyle(T.paper)
-                                if let bp = p.dayBp {
-                                    Text(bpText(bp))
-                                        .font(F.mono(10.5))
-                                        .foregroundStyle(bp >= 0 ? T.jade : T.coral)
-                                }
-                            }
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(T.faint)
-                        }
-                        HStack(spacing: 8) {
-                            SlimMeter(fraction: Double(p.cents) / top, color: tint.opacity(0.8), height: 3)
-                            Text(CompanionFormat.percent(Double(p.cents) / Double(total)))
-                                .font(F.mono(9.5)).foregroundStyle(T.faint)
-                                .frame(width: 30, alignment: .trailing)
-                        }
-                        .padding(.leading, 58)
-                        .padding(.trailing, 19)
-                    }
-                    .padding(.vertical, 11)
-                    .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.pressScale)
-                    .overlay(alignment: .top) { if i > 0 { Hairline() } }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityHint("Opens the price chart and details")
-                }
-            }
-            .padding(.vertical, -11)
         }
     }
 }
@@ -1576,7 +1900,7 @@ private struct LinkCard: View {
                         .fill(LinearGradient(colors: [T.panel2, T.panel], startPoint: .top, endPoint: .bottom))
                 )
                 .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(T.lineStrong, lineWidth: 0.75))
-            Text(label).font(F.body(11)).foregroundStyle(T.faint)
+            Text(label).font(F.body(11)).foregroundStyle(T.muted)
         }
     }
 }
