@@ -266,3 +266,28 @@ describe('fixed budgets', () => {
     expect(s.flexibleSpendByDay).toEqual([{ d: 1_749_086_400, cents: 4_000 }]);
   });
 });
+
+describe('positionPx', () => {
+  it('is omitted when the desktop offers none', () => {
+    expect('positionPx' in buildSummary(baseModel())).toBe(false);
+  });
+
+  it('keeps only prices for positions on the wire, sorted, as integer micros', () => {
+    const s = buildSummary(
+      baseModel({
+        positionPx: [
+          { symbol: 'VTI', micros: 250_123_456.4 },
+          { symbol: 'AAPL', micros: 229_100_000 },
+          { symbol: 'GONE', micros: 1_000_000 },
+          { symbol: 'VTI2', micros: 0 },
+        ],
+      }),
+    );
+    expect(s.positionPx).toEqual([
+      { symbol: 'AAPL', micros: 229_100_000 },
+      { symbol: 'VTI', micros: 250_123_456 },
+    ]);
+    // The strict position shape is untouched: an older phone still accepts it.
+    expect(s.positions.every((p) => Object.keys(p).every((k) => k !== 'micros' && k !== 'px'))).toBe(true);
+  });
+});

@@ -63,6 +63,7 @@ export interface DesktopReadModel {
   // Budgeted categories only, budget month only. Optional.
   budgetSpendByDay?: Array<{ d: number; cents: number }>;
   flexibleSpendByDay?: Array<{ d: number; cents: number }>;
+  positionPx?: Array<{ symbol: string; micros: number }>;
   // Active categories in display order. Optional.
   categories?: Array<{ id: string; name: string; icon?: string | null; group: 'income' | 'spending' | 'transfer' }>;
   // Optional shared-expense detail (contract v2). Absent on installs that have
@@ -257,6 +258,14 @@ export function buildSummary(model: DesktopReadModel): Summary {
       ...(p.sector !== undefined ? { sector: p.sector } : {}),
     }));
 
+  // Unit prices at publish time, for positions that still exist after the
+  // strip above. Non-positive or non-finite prices are dropped, not rounded.
+  const known = new Set(positions.map((p) => p.symbol));
+  const positionPx = [...(model.positionPx ?? [])]
+    .filter((p) => known.has(p.symbol) && Number.isFinite(p.micros) && p.micros >= 1)
+    .sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0))
+    .map((p) => ({ symbol: p.symbol, micros: Math.round(p.micros) }));
+
   const alerts = [...model.alerts]
     .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((a) => ({ id: a.id, kind: a.kind, text: a.text, ts: seconds(a.ts, `alert ${a.id} ts`) }));
@@ -275,6 +284,7 @@ export function buildSummary(model: DesktopReadModel): Summary {
     ...(model.investments ? { investments: buildInvestments(model.investments) } : {}),
     ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
     ...(model.budgetSpendByDay ? { budgetSpendByDay: buildSpark(model.budgetSpendByDay, 'budgetSpendByDay') } : {}),
+    ...(positionPx.length > 0 ? { positionPx } : {}),
     // Only meaningful beside a fixed budget; dropped otherwise so a ledger with
     // nothing flagged publishes byte-for-byte what it did before.
     ...(model.flexibleSpendByDay && model.budgets.some((b) => b.fixed)

@@ -76,6 +76,7 @@ struct AppShell: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var app = AppModel()
     @StateObject private var companion = CompanionStore()
+    @StateObject private var live = LiveQuotes()
     @AppStorage(SampleData.flagKey) private var sampleLoaded = false
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -105,6 +106,7 @@ struct AppShell: View {
             .animation(M.settle, value: companion.phase)
             .environmentObject(app)
             .environmentObject(companion)
+            .environmentObject(live)
             // EmptyStorePrompt (from the 0.15 first-run work) opens the importer
             // through the environment; route it to the one importer AppModel owns.
             .environment(\.triggerImport, { app.showingImporter = true })

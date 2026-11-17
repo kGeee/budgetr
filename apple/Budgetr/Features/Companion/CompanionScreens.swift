@@ -453,6 +453,7 @@ private struct FigureRow<Note: View>: View {
 
 struct CompanionSpendingView: View {
     @EnvironmentObject private var companion: CompanionStore
+    @EnvironmentObject private var live: LiveQuotes
 
     @State private var mode = 0
     @State private var openCategory: CompanionModel.CategorySpend?
@@ -462,7 +463,10 @@ struct CompanionSpendingView: View {
 
     var body: some View {
         let month = CompanionModel.Month()
-        let s = companion.summary
+        // The synced summary with live quotes folded into the portfolio — net
+        // worth and the portfolio cell move with the market between syncs.
+        let book = companion.summary.map { live.book(for: $0) }
+        let s = book?.summary
 
         BScreen("Today", eyebrow: Date().pageEyebrow, trailing: {
             if let s {
@@ -478,7 +482,11 @@ struct CompanionSpendingView: View {
                 AwaitingSummary().rise(0)
             }
         }
-        .refreshable { await companion.refresh(manual: true) }
+        .refreshable {
+            await companion.refresh(manual: true)
+            await live.refresh(for: companion.summary, force: true)
+        }
+        .task { await live.follow { companion.summary } }
         .sheet(item: $openCategory) { row in
             if let s { CategorySpendSheet(row: row, summary: s, month: month) }
         }
@@ -672,7 +680,7 @@ struct CompanionSpendingView: View {
         if let move = PortfolioDay.move(s) {
             let tint = move.cents >= 0 ? T.jade : T.coral
             cells.append(.init(
-                label: "Portfolio today",
+                label: live.book(for: companion.summary ?? s).isLive ? "Portfolio today · live" : "Portfolio today",
                 value: "\(move.cents >= 0 ? "+" : "−")\(abs(move.cents).dollars.moneyWhole())",
                 note: PortfolioDay.percent(move.pct),
                 valueColor: tint,
@@ -1567,17 +1575,22 @@ struct CompanionBudgetsView: View {
 
 struct CompanionHoldingsView: View {
     @EnvironmentObject private var companion: CompanionStore
+    @EnvironmentObject private var live: LiveQuotes
     @State private var openSymbol: String?
 
     var body: some View {
+        // Values follow live quotes between syncs; positions the Mac sent no
+        // price for (option legs, fixed-value holdings) stay as synced.
+        let book = companion.summary.map { live.book(for: $0) }
         BScreen("Holdings", eyebrow: "Investments") {
             CompanionStatusLine()
-            if let s = companion.summary {
+            if let book {
+                let s = book.summary
                 if s.positions.isEmpty && s.investments == nil {
                     EmptyState(symbol: "chart.line.uptrend.xyaxis", title: "No holdings", message: "Investment accounts linked on your Mac show up here.")
                         .rise(0)
                 } else {
-                    header(s).rise(0)
+                    header(s, book: book).rise(0)
                     if !s.positions.isEmpty { positions(s).rise(1) }
                     movers(s).rise(2)
                     if let inv = s.investments, !inv.sectors.isEmpty { sectors(inv, colors: sectorColors(s)).rise(3) }
@@ -1588,7 +1601,11 @@ struct CompanionHoldingsView: View {
                 AwaitingSummary().rise(0)
             }
         }
-        .refreshable { await companion.refresh(manual: true) }
+        .refreshable {
+            await companion.refresh(manual: true)
+            await live.refresh(for: companion.summary, force: true)
+        }
+        .task { await live.follow { companion.summary } }
         .navigationDestination(item: $openSymbol) { symbol in
             if let s = companion.summary, let p = s.positions.first(where: { $0.symbol == symbol }) {
                 PositionDetailView(position: p, summary: s)
@@ -1607,12 +1624,13 @@ struct CompanionHoldingsView: View {
         return Dictionary(order.enumerated().map { ($1, T.chart[$0 % T.chart.count]) }, uniquingKeysWith: { a, _ in a })
     }
 
-    private func header(_ s: Summary) -> some View {
+    private func header(_ s: Summary, book: CompanionModel.LiveBook) -> some View {
         let value = s.investments?.valueCents ?? s.positions.reduce(0) { $0 + $1.cents }
         let spark = s.investments?.spark ?? []
         return VStack(alignment: .leading, spacing: 8) {
             FigureText(cents: value, font: F.display(46))
             VerdictText(today(s))
+            liveLine(book)
             if spark.count > 1 {
                 RangedSparkLine(points: spark.map {
                     BarPoint(id: "\($0.d)", date: CompanionFormat.date($0.d), value: $0.cents.dollars)
@@ -1621,6 +1639,28 @@ struct CompanionHoldingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Says plainly that the figure above is an estimate, how fresh it is, and
+    /// how much of the book it covers. Absent when nothing is quoted: then the
+    /// numbers are exactly the Mac's.
+    @ViewBuilder
+    private func liveLine(_ book: CompanionModel.LiveBook) -> some View {
+        if book.isLive {
+            let at = live.fetchedAt.map { $0.formatted(.dateTime.hour().minute()) } ?? "now"
+            let scope = book.live.count < book.total
+                ? "\(book.live.count) of \(book.total) positions, the rest as synced"
+                : "all \(book.total) positions"
+            let move = book.deltaCents
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(T.jade).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text("Live · quotes \(at) · \(scope) · \(move >= 0 ? "+" : "−")\(abs(move).dollars.money()) since your Mac synced")
+                    .font(F.mono(11.5))
+                    .foregroundStyle(T.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+        }
     }
 
     /// "Up $5.00 today, 0.82%." — from the day moves the Mac priced. Without

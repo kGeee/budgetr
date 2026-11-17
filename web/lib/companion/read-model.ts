@@ -158,12 +158,16 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
     dayNow: number; // Σ qty·price   (rows with both prices)
     dayClose: number; // Σ qty·close
     sector: string | null;
+    // True while every dollar of this position is quantity × a unit price of
+    // this one symbol. An option leg or a fixed-value holding breaks it, and
+    // then the phone must not rescale the value by a live share price.
+    units: boolean;
   };
   const bySymbol = new Map<string, PosAcc>();
   const acc = (symbol: string): PosAcc => {
     let a = bySymbol.get(symbol);
     if (!a) {
-      a = { cents: 0, name: null, qty: null, pnl: 0, costed: true, dayNow: 0, dayClose: 0, sector: null };
+      a = { cents: 0, name: null, qty: null, pnl: 0, costed: true, dayNow: 0, dayClose: 0, sector: null, units: true };
       bySymbol.set(symbol, a);
     }
     return a;
@@ -178,7 +182,9 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
     a.cents += cents(h.value);
     if (parsed) {
       a.qty = null; // options in the mix — suppress the share count
+      a.units = false;
     } else {
+      if (h.quantity == null || !h.ticker) a.units = false;
       a.name ??= h.securityName ?? null;
       if (h.quantity != null) a.qty = (a.qty ?? 0) + h.quantity;
       if (h.price != null && h.closePrice != null && h.quantity != null) {
@@ -197,6 +203,8 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
     const a = acc(symbol);
     a.cents += cents(value);
     a.name ??= m.name ?? null;
+    // A fixed-value holding (no symbol, or no quantity) has no quote to follow.
+    if (!m.symbol || m.quantity == null) a.units = false;
     if (m.quantity != null) a.qty = (a.qty ?? 0) + m.quantity;
     if (m.costBasis == null) a.costed = false;
     else a.pnl += value - m.costBasis;
@@ -227,6 +235,14 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
     ...(a.sector ? { sector: a.sector } : {}),
   }));
 
+  // The unit price each all-units position was valued at: value ÷ quantity, so
+  // rescaling by a live price reproduces quantity × live price exactly, whatever
+  // mix of bank, manual and imported rows made the position up.
+  const positionPx = [...bySymbol.entries()]
+    .filter(([, a]) => a.units && a.qty != null && a.qty > 0 && a.cents > 0)
+    .map(([symbol, a]) => ({ symbol, micros: Math.round((a.cents / 100 / (a.qty as number)) * 1_000_000) }))
+    .filter((p) => p.micros >= 1);
+
   const investments = buildInvestmentsModel(holdings, manual, optionLegs, now, prices, imported);
 
   // detectAnomalies already excludes dismissed/snoozed alert keys.
@@ -246,6 +262,7 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
     budgets,
     transactions,
     positions,
+    positionPx,
     alerts,
     investments,
     spendByDay: getDailySpend(92).map((r) => ({ d: dayToUnix(r.date), cents: cents(r.spent) })),

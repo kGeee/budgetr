@@ -184,6 +184,17 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
   if (s.budgetSpendByDay !== undefined) validateSpark(s.budgetSpendByDay, '$.budgetSpendByDay');
   if (s.flexibleSpendByDay !== undefined) validateSpark(s.flexibleSpendByDay, '$.flexibleSpendByDay');
 
+  if (s.positionPx !== undefined) {
+    reqArr(s.positionPx, '$.positionPx');
+    s.positionPx.forEach((p, i) => {
+      const path = `$.positionPx[${i}]`;
+      req(isRecord(p), path, 'must be an object');
+      reqStr(p.symbol, `${path}.symbol`);
+      reqInt(p.micros, `${path}.micros`);
+      req((p.micros as number) > 0, `${path}.micros`, 'must be positive');
+    });
+  }
+
   if (s.categories !== undefined) {
     reqArr(s.categories, '$.categories');
     s.categories.forEach((c, i) => {

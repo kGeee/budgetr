@@ -61,6 +61,15 @@ export interface Summary {
   // pace" line plots. Present only when at least one budget is fixed; without
   // it the phone paces against budgetSpendByDay as before.
   flexibleSpendByDay?: SparkPoint[];
+  // The unit price each position was valued at when this was published, so the
+  // phone can move a value with the market between syncs:
+  //   live value = cents × live price ÷ (micros / 1e6).
+  // Only positions that are purely units of one quoted symbol appear — never
+  // one with option legs or a fixed-value holding folded in. It sits beside
+  // `positions` rather than on them because the position validator is strict,
+  // and an older phone would reject a summary carrying a key it doesn't know.
+  // It reveals nothing new: value and quantity are already on the wire.
+  positionPx?: PositionPx[];
   // Active categories in the desktop's display order; ≤ MAX_CATEGORIES.
   categories?: CategoryInfo[];
   // ── v2: shared expenses ──────────────────────────────────────────
@@ -171,6 +180,11 @@ export interface BudgetSummary {
   // as paid-or-not rather than against an even pace. Present only when true —
   // an older phone ignores it, an older desktop never sends it.
   fixed?: boolean;
+}
+
+export interface PositionPx {
+  symbol: string; // matches PositionSummary.symbol
+  micros: number; // unit price × 1e6, integer — cents are too coarse for crypto
 }
 
 export interface TxnSummary {
