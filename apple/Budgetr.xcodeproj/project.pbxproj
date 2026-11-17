@@ -70,6 +70,7 @@
 		A62D05521DD3A12090CF43AE /* SplineSansMono_600SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 712761E876095C79F4EF383C /* SplineSansMono_600SemiBold.ttf */; };
 		A73898EE565443161C169BB5 /* CompanionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6814342FB043AA274F3D4122 /* CompanionModel.swift */; };
 		A752A428C0C68642B4EB9872 /* Receipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7565C6513995769AFBA5350 /* Receipt.swift */; };
+		AFD2D45E82CB701C6EFE8753 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB76C1D514762114A8EA8258 /* BackgroundRefresh.swift */; };
 		B6D436853727724BC1C0673E /* SummaryContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0122F91033077D6528498720 /* SummaryContract.swift */; };
 		BA0ACE53888001F6564CD865 /* SplineSansMono_500Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 84094BE09AC13D32000C0F5B /* SplineSansMono_500Medium.ttf */; };
 		BB888E4C7C9BAFBCFEA9614C /* Outbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D3D69E80610EB85EB1975EF /* Outbox.swift */; };
@@ -141,6 +142,7 @@
 		A7565C6513995769AFBA5350 /* Receipt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Receipt.swift; sourceTree = "<group>"; };
 		B040CF24E9A61EE1B3421A53 /* PositionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionDetailView.swift; sourceTree = "<group>"; };
 		BADF462CADCE7DEA792E49E5 /* AppCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCrypto.swift; sourceTree = "<group>"; };
+		BB76C1D514762114A8EA8258 /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
 		BCA45997321AFEBA24701B7F /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
 		C03F4080CE879F5EFD02A6FF /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
 		C081D5C60A84BF9D2B81535C /* Charts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Charts.swift; sourceTree = "<group>"; };
@@ -264,6 +266,7 @@
 			isa = PBXGroup;
 			children = (
 				BADF462CADCE7DEA792E49E5 /* AppCrypto.swift */,
+				BB76C1D514762114A8EA8258 /* BackgroundRefresh.swift */,
 				8F928F8BDD0DC37862CF4838 /* KeychainStore.swift */,
 				1199B07255846412985307A5 /* LiveQuotes.swift */,
 				9DAC8EFC1E1D3CB7F0F35B76 /* MarketData.swift */,
@@ -475,6 +478,7 @@
 				31B85DF883C4E6BF7E9D8457 /* AppCrypto.swift in Sources */,
 				46718A0C835373E3DE94B2C9 /* AppShell.swift in Sources */,
 				955B036DDCB5D17F74F3CF3B /* AutoTagging.swift in Sources */,
+				AFD2D45E82CB701C6EFE8753 /* BackgroundRefresh.swift in Sources */,
 				9E1F220AA1164A46A02D8DBC /* BudgetPacing.swift in Sources */,
 				FA264A4DA55251BA685AB151 /* BudgetrApp.swift in Sources */,
 				D99A7E025DD77605EA371985 /* BudgetsView.swift in Sources */,

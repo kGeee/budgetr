@@ -21,6 +21,13 @@ struct BudgetrApp: App {
             AppShell()
                 .environment(\.managedObjectContext, persistence.container.viewContext)
         }
+        #if os(iOS)
+        // iOS wakes the app for this when it judges the moment right; see
+        // BackgroundRefresh for what "on a schedule" can and can't promise.
+        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
+            await BackgroundRefresh.run()
+        }
+        #endif
         #if os(macOS)
         .defaultSize(width: 1100, height: 720)
         .windowToolbarStyle(.unified)

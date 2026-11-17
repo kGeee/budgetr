@@ -75,7 +75,7 @@ struct AppShell: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var app = AppModel()
-    @StateObject private var companion = CompanionStore()
+    @StateObject private var companion = CompanionRuntime.store
     @StateObject private var live = LiveQuotes()
     @AppStorage(SampleData.flagKey) private var sampleLoaded = false
     #if os(iOS)
@@ -139,6 +139,19 @@ struct AppShell: View {
                 // Back in the foreground is when the numbers are most likely
                 // stale — the Mac has probably synced since.
                 if phase == .active { Task { await companion.refresh() } }
+                // Leaving the screen: ask iOS to wake us for a refresh later.
+                if phase == .background { BackgroundRefresh.schedule() }
+            }
+            // While the app is on screen, check with the Mac every minute, so a
+            // phone left open on a desk follows the ledger without a pull. The
+            // task restarts with the scene phase, so it only runs when active.
+            .task(id: scenePhase) {
+                guard scenePhase == .active else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: BackgroundRefresh.foregroundInterval)
+                    if Task.isCancelled { break }
+                    await companion.refresh()
+                }
             }
     }
 
