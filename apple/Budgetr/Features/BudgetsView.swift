@@ -1,264 +1,219 @@
-import Charts
 import CoreData
 import SwiftUI
 
-/// Budgets — one bar per category that has a limit set.
+/// Budgets — the month's allowance, and whether you're spending it on pace.
 ///
-/// Only categories with a `CDBudget` row appear here (limits are read-only on
-/// native; set them on the web app). Spend is resolved the same way as
-/// `CategoriesView`: user override wins, else Plaid-primary → category mapping.
+/// Leads with the whole-month position (spent against the total, and where the
+/// current rate lands you), then each budgeted category on the striped meter.
+/// Categories you spent in but never budgeted for come last, stated rather than
+/// left out, because unbudgeted spend is still spend.
 struct BudgetsView: View {
-    @Environment(\.managedObjectContext) private var context
-
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "date", ascending: false)])
     private var transactions: FetchedResults<CDTransaction>
 
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "sortOrder", ascending: true)],
-        predicate: NSPredicate(format: "archived == NO")
-    )
+    @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "sortOrder", ascending: true)])
     private var categories: FetchedResults<CDCategory>
 
-    @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "amount", ascending: false)])
+    @FetchRequest(sortDescriptors: [])
     private var budgets: FetchedResults<CDBudget>
 
-    private var model: BudgetModel {
-        BudgetModel(
-            transactions: transactions.map(\.spendLine),
-            categories: Array(categories),
-            budgets: Array(budgets)
+    private struct Line: Identifiable {
+        let id: String
+        let name: String
+        let icon: String?
+        let spent: Double
+        let limit: Double
+        let pacing: BudgetPacing
+        var state: BudgetState { BudgetState.of(spent: spent, limit: limit, pacing: pacing) }
+    }
+
+    private struct Model {
+        var budgeted: [Line] = []
+        var unbudgeted: [Line] = []
+        var totalLimit = 0.0
+        var totalSpent = 0.0
+        var dayOfMonth = 1
+        var daysInMonth = 30
+        var pacing = BudgetPacing(totalBudget: 0, spentToDate: 0, dayOfMonth: 1, daysInMonth: 30)
+    }
+
+    private var model: Model {
+        let calendar = Calendar.current
+        let now = Date()
+        let idx = CategoryIndex(categories: Array(categories))
+        let styles = CategoryStyles(categories: Array(categories))
+        let month = MonthSummary.monthKey(of: now)
+        let dom = calendar.component(.day, from: now)
+        let dim = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
+
+        // Spend is resolved the way the ledger resolves it — the override, else
+        // the category Plaid's guess maps to. Counting overrides alone missed
+        // every transaction the bank had already categorised correctly.
+        var spent: [String: Double] = [:]
+        for t in transactions where (t.date ?? "").hasPrefix(month) && t.amount > 0 && idx.countsTowardSpend(t) {
+            spent[idx.resolvedId(for: t) ?? "__none__", default: 0] += t.amount
+        }
+        let limits = Dictionary(
+            budgets.compactMap { b in b.category?.id.map { ($0, b.amount) } },
+            uniquingKeysWith: { a, _ in a }
         )
+
+        var m = Model()
+        m.dayOfMonth = dom
+        m.daysInMonth = dim
+        for (id, limit) in limits where limit > 0 {
+            let s = spent[id] ?? 0
+            m.budgeted.append(Line(
+                id: id, name: idx.name(forId: id), icon: styles.icon(id), spent: s, limit: limit,
+                pacing: BudgetPacing(totalBudget: limit, spentToDate: s, dayOfMonth: dom, daysInMonth: dim)
+            ))
+        }
+        for (id, s) in spent where (limits[id] ?? 0) <= 0 {
+            m.unbudgeted.append(Line(
+                id: id, name: id == "__none__" ? "Uncategorised" : idx.name(forId: id), icon: styles.icon(id),
+                spent: s, limit: 0,
+                pacing: BudgetPacing(totalBudget: 0, spentToDate: s, dayOfMonth: dom, daysInMonth: dim)
+            ))
+        }
+        // Most at risk first: the share of the allowance gone.
+        m.budgeted.sort { $0.spent / $0.limit > $1.spent / $1.limit }
+        m.unbudgeted.sort { $0.spent > $1.spent }
+        m.totalLimit = m.budgeted.reduce(0) { $0 + $1.limit }
+        m.totalSpent = m.budgeted.reduce(0) { $0 + $1.spent }
+        m.pacing = BudgetPacing(totalBudget: m.totalLimit, spentToDate: m.totalSpent, dayOfMonth: dom, daysInMonth: dim)
+        return m
     }
 
     var body: some View {
-        ScrollView {
-            let m = model
+        let m = model
+        let daysLeft = max(0, m.daysInMonth - m.dayOfMonth)
 
-            if FirstRunImport.storeIsEmpty(context) {
-                EmptyStorePrompt(
-                    title: "No budgets yet",
-                    detail: "Import budgetr.db to load your categories and limits."
-                )
-            } else if m.rows.isEmpty {
-                ContentUnavailableView(
-                    "No budgets set",
-                    systemImage: "wallet.bifold",
-                    description: Text("Add limits on the web app — only categories with a budget appear here.")
-                )
-                .padding(.top, 80)
+        BScreen("Budgets", eyebrow: "\(Date().formatted(.dateTime.month(.wide))) · \(daysLeft) day\(daysLeft == 1 ? "" : "s") left") {
+            if m.budgeted.isEmpty {
+                Card {
+                    EmptyState(
+                        symbol: "chart.pie",
+                        title: "No budgets yet",
+                        message: "Budgets are set on the desktop app and arrive with the ledger. Once they're here, this page paces each one against the month."
+                    )
+                }
+                .rise(0)
             } else {
-                VStack(alignment: .leading, spacing: 16) {
-                    hero(m)
-                    ForEach(m.rows) { row in
-                        budgetRow(row)
+                overview(m, daysLeft: daysLeft).rise(0)
+                budgetedCard(m).rise(1)
+            }
+            if !m.unbudgeted.isEmpty {
+                unbudgetedCard(m).rise(2)
+            }
+        }
+    }
+
+    private func overview(_ m: Model, daysLeft: Int) -> some View {
+        let state = BudgetState.of(spent: m.totalSpent, limit: m.totalLimit, pacing: m.pacing)
+        let left = m.totalLimit - m.totalSpent
+        return VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                AnimatedMoney(value: m.totalSpent, font: F.display(44))
+                Text("of \(m.totalLimit.moneyWhole()) budgeted this month")
+                    .font(F.body(12.5))
+                    .foregroundStyle(T.faint)
+            }
+
+            StripedMeter(fraction: m.totalLimit > 0 ? m.totalSpent / m.totalLimit : 0, color: state.color)
+
+            HStack(spacing: 8) {
+                StatTile(
+                    label: left < 0 ? "Over by" : "Left",
+                    value: abs(left).moneyCompact(),
+                    tint: left < 0 ? T.coral : T.paper
+                )
+                StatTile(
+                    label: "Projected",
+                    value: m.pacing.projectedMonthEnd.moneyCompact(),
+                    tint: m.pacing.projectedMonthEnd > m.totalLimit ? T.coral : T.jade,
+                    note: m.pacing.isAheadOfPace ? "ahead of pace" : "under pace"
+                )
+                StatTile(
+                    label: "Per day",
+                    value: daysLeft > 0 && left > 0 ? (left / Double(daysLeft)).moneyCompact() : "—",
+                    note: "to stay on budget"
+                )
+            }
+        }
+    }
+
+    private func budgetedCard(_ m: Model) -> some View {
+        TitledCard("By category", trailing: "\(m.budgeted.count) budgets") {
+            VStack(spacing: 0) {
+                ForEach(Array(m.budgeted.enumerated()), id: \.element.id) { i, line in
+                    budgetRow(line)
+                        .padding(.vertical, 12)
+                        .overlay(alignment: .top) { if i > 0 { Hairline() } }
+                }
+            }
+            .padding(.vertical, -12)
+        }
+    }
+
+    private func budgetRow(_ line: Line) -> some View {
+        let state = line.state
+        let over = line.spent > line.limit
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10) {
+                GlyphTile(icon: line.icon, color: state.color, size: 28)
+                Text(line.name)
+                    .font(F.medium(14))
+                    .foregroundStyle(T.paper)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(line.spent.moneyWhole())
+                    .font(F.mono(13))
+                    .foregroundStyle(over ? T.coral : T.paper)
+                + Text(" / \(line.limit.moneyWhole())")
+                    .font(F.mono(11))
+                    .foregroundStyle(T.faint)
+            }
+            StripedMeter(fraction: line.spent / line.limit, color: state.color, height: 10)
+            Text(footnote(line))
+                .font(F.body(11.5))
+                .foregroundStyle(state == .ok ? T.faint : state.color)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func footnote(_ line: Line) -> String {
+        if line.spent > line.limit {
+            return "\((line.spent - line.limit).money()) over"
+        }
+        let left = (line.limit - line.spent).money()
+        if line.pacing.isAheadOfPace {
+            return "\(left) left · on pace for \(line.pacing.projectedMonthEnd.moneyWhole())"
+        }
+        return "\(left) left · under pace"
+    }
+
+    private func unbudgetedCard(_ m: Model) -> some View {
+        let total = m.unbudgeted.reduce(0) { $0 + $1.spent }
+        return TitledCard("Without a budget", trailing: total.money()) {
+            VStack(spacing: 0) {
+                ForEach(Array(m.unbudgeted.enumerated()), id: \.element.id) { i, line in
+                    HStack(spacing: 10) {
+                        GlyphIcon(icon: line.icon, color: T.muted, size: 12)
+                            .frame(width: 18)
+                        Text(line.name)
+                            .font(F.body(13.5))
+                            .foregroundStyle(T.paper)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(line.spent.money())
+                            .font(F.mono(12.5))
+                            .foregroundStyle(T.muted)
                     }
+                    .padding(.vertical, 10)
+                    .overlay(alignment: .top) { if i > 0 { Hairline() } }
                 }
-                .padding(20)
             }
+            .padding(.vertical, -10)
         }
-        .background(T.ink)
-        .navigationTitle("Budgets")
-    }
-
-    // MARK: - Hero
-
-    private func hero(_ m: BudgetModel) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Eyebrow(m.leftToSpend < 0 ? "Over budget" : "Left to spend", color: m.leftToSpend < 0 ? T.coral : T.brass)
-            Text(abs(m.leftToSpend).money())
-                .font(F.display(38))
-                .foregroundStyle(m.leftToSpend < 0 ? T.coral : T.paper)
-            Text("\(m.totalSpent.money()) of \(m.totalLimit.money()) · \(m.monthLabel)")
-                .font(F.body(12.5))
-                .foregroundStyle(T.muted)
-
-            if m.totalLimit > 0, !m.byDay.isEmpty {
-                paceChart(m)
-            }
-
-            Text("Projected \(m.pacing.projectedMonthEnd.money()) by month end")
-                .font(F.mono(11))
-                .foregroundStyle(m.pacing.isAheadOfPace ? T.coral : T.faint)
-        }
-    }
-
-    private func paceChart(_ m: BudgetModel) -> some View {
-        let cumulative = m.cumulativeByDay
-        return Chart {
-            ForEach(cumulative, id: \.date) { point in
-                AreaMark(x: .value("Day", point.date), y: .value("Spent", point.spent))
-                    .foregroundStyle((m.pacing.isAheadOfPace ? T.coral : T.jade).opacity(0.14))
-                LineMark(x: .value("Day", point.date), y: .value("Spent", point.spent))
-                    .foregroundStyle(m.pacing.isAheadOfPace ? T.coral : T.jade)
-            }
-            RuleMark(y: .value("Budget", m.totalLimit))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .foregroundStyle(T.faint)
-        }
-        .chartYAxis { AxisMarks(position: .leading) }
-        .frame(height: 120)
-        .padding(.top, 6)
-    }
-
-    // MARK: - Rows
-
-    private func budgetRow(_ row: BudgetModel.Row) -> some View {
-        let tint = row.utilisation == .over ? T.coral : row.utilisation == .warn ? T.brass : T.jade
-        let ratio = row.limit > 0 ? row.spent / row.limit : 0
-        let leftover = row.limit - row.spent
-        let multiplier = BudgetUtilisation.multiplierLabel(spent: row.spent, limit: row.limit)
-
-        return Panel {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(row.name)
-                        .font(F.medium(14))
-                        .foregroundStyle(T.paper)
-                    Spacer()
-                    Text("\(row.spent.money()) / \(row.limit.money())")
-                        .font(F.mono(12.5))
-                        .foregroundStyle(tint)
-                }
-
-                HStack(alignment: .center, spacing: 10) {
-                    MeterBar(fraction: ratio, color: tint)
-                    if let multiplier {
-                        Text(multiplier)
-                            .font(F.monoSemibold(11))
-                            .foregroundStyle(T.coral)
-                            .fixedSize()
-                    }
-                }
-
-                Text(leftover < 0
-                     ? "\(abs(leftover).money()) over"
-                     : "\(leftover.money()) left")
-                    .font(F.mono(10))
-                    .foregroundStyle(leftover < 0 ? T.coral : T.faint)
-            }
-        }
-    }
-}
-
-// MARK: - Model
-
-private struct BudgetModel {
-    struct Row: Identifiable {
-        let id: String
-        let name: String
-        let spent: Double
-        let limit: Double
-        let utilisation: BudgetUtilisation
-    }
-
-    let rows: [Row]
-    let totalLimit: Double
-    let totalSpent: Double
-    let leftToSpend: Double
-    let pacing: BudgetPacing
-    let byDay: [MonthSummary.DayTotal]
-    let monthLabel: String
-
-    var cumulativeByDay: [(date: Date, spent: Double)] {
-        var running = 0.0
-        return byDay.map { day in
-            running += day.spent
-            return (day.date, running)
-        }
-    }
-
-    init(
-        transactions: [CategorySpend.Line],
-        categories: [CDCategory],
-        budgets: [CDBudget],
-        now: Date = Date(),
-        calendar: Calendar = .current
-    ) {
-        let idx = CategoryIndex(categories: categories)
-        let plaidMap = Dictionary(
-            categories.compactMap { c -> (String, String)? in
-                guard let id = c.id, let primary = c.plaidPrimary, !primary.isEmpty else { return nil }
-                return (primary, id)
-            },
-            uniquingKeysWith: { a, _ in a }
-        )
-        let groupById = Dictionary(
-            categories.compactMap { c -> (String, String)? in
-                guard let id = c.id, let group = c.group else { return nil }
-                return (id, group)
-            },
-            uniquingKeysWith: { a, _ in a }
-        )
-
-        let month = MonthSummary.monthKey(of: now, calendar: calendar)
-        let totals = CategorySpend.totals(
-            lines: transactions,
-            month: month,
-            plaidPrimaryToCategoryId: plaidMap,
-            categoryGroupById: groupById
-        )
-
-        // Only categories with a budget row — same rule as the Expo companion.
-        let budgetRows = budgets.compactMap { b -> Row? in
-            guard let cat = b.category, let id = cat.id, b.amount > 0 else { return nil }
-            // Transfer-group categories shouldn't hold spend envelopes.
-            if cat.group == CategoryMapping.transferGroup { return nil }
-            let spent = CategorySpend.spent(for: id, in: totals)
-            return Row(
-                id: id,
-                name: cat.name ?? idx.name(forId: id),
-                spent: spent,
-                limit: b.amount,
-                utilisation: BudgetUtilisation.classify(spent: spent, limit: b.amount)
-            )
-        }.sorted { $0.spent > $1.spent }
-
-        self.rows = budgetRows
-        self.totalLimit = budgetRows.reduce(0) { $0 + $1.limit }
-
-        // Month totals exclude transfers / reimbursable — same filter as Overview.
-        let spendOnly = CategorySpend.spendLines(
-            transactions,
-            plaidPrimaryToCategoryId: plaidMap,
-            categoryGroupById: groupById
-        )
-        let monthEntries = spendOnly.filter { $0.date.hasPrefix(month) && $0.amount > 0 }
-        let allMonthSpent = monthEntries.reduce(0) { $0 + $1.amount }
-        self.totalSpent = allMonthSpent
-        self.leftToSpend = totalLimit - allMonthSpent
-
-        let day = calendar.component(.day, from: now)
-        let days = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
-        self.pacing = BudgetPacing(
-            totalBudget: totalLimit,
-            spentToDate: allMonthSpent,
-            dayOfMonth: day,
-            daysInMonth: days
-        )
-
-        self.byDay = MonthSummary.byDay(
-            monthEntries.map {
-                MonthSummary.Entry(amount: $0.amount, date: $0.date, categoryId: nil, pending: false)
-            },
-            calendar: calendar
-        )
-
-        let f = DateFormatter()
-        f.dateFormat = "LLLL yyyy"
-        f.locale = .current
-        self.monthLabel = f.string(from: now)
-    }
-}
-
-// MARK: - Bridging
-
-private extension CDTransaction {
-    var spendLine: CategorySpend.Line {
-        CategorySpend.Line(
-            amount: amount,
-            date: date ?? "",
-            userCategoryId: userCategory?.id,
-            plaidPrimary: category
-        )
     }
 }

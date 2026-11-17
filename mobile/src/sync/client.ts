@@ -11,7 +11,7 @@
 import {
   ContractVersionError,
   assertValidSummary,
-  OUTBOX_VERSION,
+  outboxVersionFor,
   type Op,
   type Summary,
 } from "@budgetr/core";
@@ -57,7 +57,7 @@ async function flushOutbox(material: PairingMaterial, ops: Op[]): Promise<void> 
   if (ops.length === 0) return;
   const key = fromBase64(material.syncKey);
   const batch = {
-    v: OUTBOX_VERSION,
+    v: outboxVersionFor(ops),
     deviceId: await getDeviceId(),
     batchId: uuid4(),
     createdAt: Math.floor(Date.now() / 1000),

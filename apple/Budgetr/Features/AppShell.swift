@@ -1,43 +1,161 @@
+import CoreData
 import SwiftUI
+import UniformTypeIdentifiers
+
+struct ImportAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
+/// App-wide actions any screen can reach for: open the ledger importer, load or
+/// remove the sample ledger, and say how that went. One instance, owned by the
+/// shell, so the importer and its alert are wired exactly once for both
+/// platforms instead of once per shell.
+final class AppModel: ObservableObject {
+    @Published var showingImporter = false
+    @Published var alert: ImportAlert?
+    @Published var confirmingErase = false
+
+    func importLedger(_ result: Result<URL, Error>, context: NSManagedObjectContext) {
+        // A real ledger replaces the sample one rather than mixing into it —
+        // invented rows sitting beside real ones would be worse than either.
+        if SampleData.isLoaded, case .success = result {
+            try? DataReset.eraseAll(in: context)
+        }
+        let outcome = ImportRunner.handle(result, context: context)
+        if outcome.title == "Import complete" { Haptics.success() } else { Haptics.error() }
+        alert = outcome
+    }
+
+    func loadSample(context: NSManagedObjectContext) {
+        guard FirstRunImport.storeIsEmpty(context) else {
+            Haptics.warning()
+            alert = ImportAlert(
+                title: "You already have a ledger",
+                message: "Sample data only loads into an empty app, so it can never mix with your own. Erase this one first from Settings."
+            )
+            return
+        }
+        do {
+            try SampleData.load(into: context)
+            Haptics.success()
+        } catch {
+            Haptics.error()
+            alert = ImportAlert(title: "Couldn't load sample data", message: error.localizedDescription)
+        }
+    }
+
+    func eraseAll(context: NSManagedObjectContext) {
+        do {
+            try DataReset.eraseAll(in: context)
+            Haptics.warning()
+        } catch {
+            Haptics.error()
+            alert = ImportAlert(title: "Couldn't erase", message: error.localizedDescription)
+        }
+    }
+}
 
 /// Chooses the navigation the platform actually wants.
 ///
-/// Compact iPhone uses a tab bar (Overview, Ledger, Budgets, …) so switching
-/// sections is one tap. Regular width (iPad, Mac) keeps the sidebar.
+/// A `NavigationSplitView` on an iPhone collapses into a stack whose root is a
+/// list of section names — so every visit starts by picking a destination, and
+/// the back button says "budgetr" rather than where you came from. That is a
+/// desk paradigm running on a phone.
+///
+/// On compact width the app is the companion's floating pill tab bar instead,
+/// so switching sections costs one tap and the current one is always visible.
+/// Regular width (iPad, Mac) keeps the sidebar, which is right there.
+///
+/// On iOS, pairing with the Mac comes first: a paired phone shows the Mac's
+/// published summary; an unpaired one with no ledger opens on the pairing
+/// screen, with the .db import and sample data as the quieter ways in.
 struct AppShell: View {
     @Environment(\.managedObjectContext) private var context
-    @State private var firstRun: ImportAlert?
-    @State private var showingImporter = false
-    @State private var importAlert: ImportAlert?
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var app = AppModel()
+    @StateObject private var companion = CompanionStore()
+    @AppStorage(SampleData.flagKey) private var sampleLoaded = false
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
+    /// One row is enough to know whether there's a ledger at all.
+    @FetchRequest private var anyTransaction: FetchedResults<CDTransaction>
+
+    init() {
+        let request = NSFetchRequest<CDTransaction>(entityName: "CDTransaction")
+        request.sortDescriptors = []
+        request.fetchLimit = 1
+        _anyTransaction = FetchRequest(fetchRequest: request)
+    }
+
+    private static let ledgerType = UTType(filenameExtension: "db") ?? .data
+
     var body: some View {
         shell
-            .environment(\.triggerImport, { showingImporter = true })
-            .task { firstRun = FirstRunImport.run(context: context) }
-            .fileImporter(
-                isPresented: $showingImporter,
-                allowedContentTypes: [.init(filenameExtension: "db")!]
-            ) { result in
-                importAlert = ImportRunner.handle(result, context: context)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if sampleLoaded && !companion.isPaired {
+                    SampleRibbon { app.confirmingErase = true }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
-            .alert(item: $firstRun) { alert in
+            .animation(M.settle, value: sampleLoaded)
+            .animation(M.settle, value: companion.phase)
+            .environmentObject(app)
+            .environmentObject(companion)
+            // EmptyStorePrompt (from the 0.15 first-run work) opens the importer
+            // through the environment; route it to the one importer AppModel owns.
+            .environment(\.triggerImport, { app.showingImporter = true })
+            .tint(T.jade)
+            .preferredColorScheme(.dark)
+            .fileImporter(isPresented: $app.showingImporter, allowedContentTypes: [Self.ledgerType]) { result in
+                app.importLedger(result, context: context)
+            }
+            .alert(item: $app.alert) { alert in
                 Alert(title: Text(alert.title), message: Text(alert.message))
             }
-            .alert(item: $importAlert) { alert in
-                Alert(title: Text(alert.title), message: Text(alert.message))
+            .confirmationDialog(
+                sampleLoaded ? "Remove the sample data?" : "Erase everything on this device?",
+                isPresented: $app.confirmingErase,
+                titleVisibility: .visible
+            ) {
+                Button(sampleLoaded ? "Remove sample data" : "Erase all data", role: .destructive) {
+                    app.eraseAll(context: context)
+                }
+            } message: {
+                Text(sampleLoaded
+                     ? "The app goes back to empty, ready for your own ledger."
+                     : "Transactions, accounts, budgets and categories are removed from this device. Your ledger file is untouched.")
+            }
+            .task {
+                if let outcome = FirstRunImport.run(context: context) { app.alert = outcome }
+                await companion.refresh()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // Back in the foreground is when the numbers are most likely
+                // stale — the Mac has probably synced since.
+                if phase == .active { Task { await companion.refresh() } }
             }
     }
 
     @ViewBuilder
     private var shell: some View {
         #if os(iOS)
-        if sizeClass == .compact {
-            PhoneTabs()
-        } else {
-            RootView()
+        switch companion.phase {
+        case .paired:
+            CompanionTabs()
+        case .updateRequired:
+            NavigationStack { CompanionUpdateRequiredView() }
+        case .unpaired:
+            if anyTransaction.isEmpty {
+                NavigationStack { PairingView() }
+            } else if sizeClass == .compact {
+                PhoneTabs()
+            } else {
+                RootView()
+            }
         }
         #else
         RootView()
@@ -47,61 +165,107 @@ struct AppShell: View {
 
 #if os(iOS)
 
-/// Compact phone shell — Overview, Ledger, and Budgets without a sidebar list.
+private enum PhoneTab: Hashable {
+    case overview, ledger, review, budgets, more
+}
+
+/// The phone shell: five destinations under the floating pill.
+///
+/// A real `TabView` underneath (each tab keeps its own navigation stack and
+/// scroll position), with the system bar hidden and the pill drawn over it.
 private struct PhoneTabs: View {
-    var body: some View {
-        TabView {
-            tab(DashboardView(), "Home", "square.grid.2x2")
-            tab(TransactionsView(), "Transactions", "arrow.left.arrow.right")
-            tab(BudgetsView(), "Budgets", "wallet.bifold")
-            tab(ReviewView(), "Review", "checkmark.circle")
-            tab(MoreView(), "More", "ellipsis")
-        }
-        .tint(T.jade)
-        .preferredColorScheme(.dark)
+    @State private var tab: PhoneTab = .overview
+
+    @FetchRequest(sortDescriptors: [], predicate: NSPredicate(format: "reviewed == NO"))
+    private var unreviewed: FetchedResults<CDTransaction>
+
+    private var items: [FloatingTabBar<PhoneTab>.Item] {
+        [
+            .init(tab: .overview, title: "Home", symbol: "square.grid.2x2"),
+            .init(tab: .ledger, title: "Transactions", symbol: "arrow.left.arrow.right"),
+            .init(tab: .review, title: "Review", symbol: "checkmark.circle", badge: unreviewed.count),
+            .init(tab: .budgets, title: "Budgets", symbol: "chart.pie"),
+            .init(tab: .more, title: "More", symbol: "ellipsis"),
+        ]
     }
 
-    private func tab<V: View>(_ view: V, _ title: String, _ symbol: String) -> some View {
-        NavigationStack { view }
-            .tabItem { Label(title, systemImage: symbol) }
+    var body: some View {
+        TabView(selection: $tab) {
+            NavigationStack { DashboardView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(PhoneTab.overview)
+            NavigationStack { TransactionsView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(PhoneTab.ledger)
+            NavigationStack { ReviewView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(PhoneTab.review)
+            NavigationStack { BudgetsView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(PhoneTab.budgets)
+            NavigationStack { SettingsView() }
+                .toolbar(.hidden, for: .tabBar)
+                .tag(PhoneTab.more)
+        }
+        .environment(\.chromeClearance, 84)
+        .overlay(alignment: .bottom) {
+            FloatingTabBar(items: items, selection: $tab)
+            .padding(.bottom, 2)
+            .ignoresSafeArea(.keyboard)
+        }
     }
 }
 
-/// Desk destinations that don't fit the tab bar, plus import.
-private struct MoreView: View {
-    @Environment(\.triggerImport) private var triggerImport
+
+private enum CompanionTab: Hashable {
+    case spending, activity, shared, budgets, holdings, more
+}
+
+/// The paired phone: the Expo companion's tabs, under the same floating pill.
+private struct CompanionTabs: View {
+    @EnvironmentObject private var companion: CompanionStore
+    @State private var tab: CompanionTab = .spending
+
+    private var items: [FloatingTabBar<CompanionTab>.Item] {
+        [
+            .init(tab: .spending, title: "Spending", symbol: "square.grid.2x2"),
+            .init(tab: .activity, title: "Activity", symbol: "arrow.left.arrow.right"),
+            // Badged while the Mac has spotted a payback waiting to be confirmed.
+            .init(tab: .shared, title: "Shared", symbol: "person.2", badge: companion.summary?.settleSuggestions?.count ?? 0),
+            .init(tab: .budgets, title: "Budgets", symbol: "chart.pie"),
+            .init(tab: .holdings, title: "Holdings", symbol: "chart.line.uptrend.xyaxis"),
+            .init(tab: .more, title: "More", symbol: "ellipsis", badge: companion.syncError == nil ? 0 : 1),
+        ]
+    }
 
     var body: some View {
-        List {
-            Section {
-                NavigationLink { AccountsView() } label: {
-                    Label("Accounts", systemImage: "building.columns")
-                }
-                NavigationLink { CategoriesView() } label: {
-                    Label("Categories", systemImage: "tag")
-                }
-                NavigationLink { RecurringView() } label: {
-                    Label("Recurring", systemImage: "arrow.trianglehead.2.clockwise")
-                }
-            } header: {
-                Eyebrow("Ledger")
-            }
-
-            Section {
-                Button(action: triggerImport) {
-                    Label("Import a ledger…", systemImage: "square.and.arrow.down")
-                }
-            } header: {
-                Eyebrow("Data")
-            } footer: {
-                Text("Put budgetr.db in Files → On My iPhone → Budgetr, or AirDrop it from your Mac, then open it here.")
-                    .font(F.body(11.5))
-                    .foregroundStyle(T.faint)
-            }
+        // Not a TabView: past five tabs UIKit moves the rest into its own
+        // hidden "More" navigation controller, and Holdings grew a "‹ More"
+        // back button. Every stack stays alive in the ZStack, so each tab
+        // keeps its navigation and scroll position like a TabView would.
+        ZStack {
+            page(.spending) { CompanionSpendingView() }
+            page(.activity) { CompanionActivityView() }
+            page(.shared) { CompanionSharedView() }
+            page(.budgets) { CompanionBudgetsView() }
+            page(.holdings) { CompanionHoldingsView() }
+            page(.more) { CompanionSettingsView() }
         }
-        .navigationTitle("More")
-        .background(T.ink)
-        .scrollContentBackground(.hidden)
+        .environment(\.chromeClearance, 84)
+        .overlay(alignment: .bottom) {
+            FloatingTabBar(items: items, selection: $tab)
+                .padding(.bottom, 2)
+                .ignoresSafeArea(.keyboard)
+        }
+    }
+
+    private func page<V: View>(_ t: CompanionTab, @ViewBuilder _ view: () -> V) -> some View {
+        let on = tab == t
+        return NavigationStack { view() }
+            .opacity(on ? 1 : 0)
+            .allowsHitTesting(on)
+            .accessibilityHidden(!on)
+            .zIndex(on ? 1 : 0)
     }
 }
 

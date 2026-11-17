@@ -20,7 +20,7 @@ import { attachments, transactions } from "@/db/schema";
 import { saveAttachmentFile } from "@/lib/attachments";
 import { recognizeReceipt } from "@/lib/receipt/ocr";
 import { parseReceipt, MAX_SCAN_RESULTS, type Op, type ScanReceiptOp } from "@budgetr/core";
-import { readJson, writeJson } from "./store";
+import { appendAppliedOpIds, getAppliedOpIds, readJson, writeJson } from "./store";
 
 const SCANS_KEY = "companion.scanResults";
 
@@ -56,66 +56,81 @@ export async function processScans(ops: Op[]): Promise<{ scanned: number }> {
   if (scans.length === 0) return { scanned: 0 };
 
   const already = new Set(getScanResults().map((s) => s.opId));
+  const acked = new Set(getAppliedOpIds());
   let scanned = 0;
 
   for (const op of scans) {
-    if (already.has(op.id)) continue;
-
-    const txn = db
-      .select({ id: transactions.id })
-      .from(transactions)
-      .where(eq(transactions.id, op.txnId))
-      .get();
-    if (!txn) {
-      remember({ opId: op.id, txnId: op.txnId, ts: op.ts, error: "That transaction is gone." });
-      continue;
-    }
-
     try {
-      const bytes = Buffer.from(op.imageBase64, "base64");
-      // The photo is kept with the transaction, exactly like one dropped on the
-      // desktop — the split should be checkable against the receipt later.
-      const filePath = saveAttachmentFile(bytes, "receipt.jpg");
-      db.insert(attachments)
-        .values({
-          id: `att_${crypto.randomUUID().slice(0, 8)}`,
-          transactionId: op.txnId,
-          filePath,
-          mimeType: "image/jpeg",
-          size: bytes.length,
-          originalName: "receipt-from-phone.jpg",
-          createdAt: new Date(),
-        })
-        .run();
-
-      const ocr = await recognizeReceipt(filePath);
-      if (!ocr.ok) {
-        remember({ opId: op.id, txnId: op.txnId, ts: op.ts, error: ocr.message });
-        continue;
+      if (already.has(op.id)) continue;
+      scanned += Number(await scanOne(op));
+    } finally {
+      // An answer — the parsed lines, or why there are none — is the scan's
+      // effect, so only then may the phone stop resending the photo.
+      if (!acked.has(op.id) && getScanResults().some((s) => s.opId === op.id)) {
+        appendAppliedOpIds([op.id]);
+        acked.add(op.id);
       }
-
-      const receipt = parseReceipt(ocr.lines);
-      if (receipt.items.length === 0) {
-        remember({
-          opId: op.id,
-          txnId: op.txnId,
-          ts: op.ts,
-          error: "Couldn't find any line items — try a straighter, better-lit photo.",
-        });
-        continue;
-      }
-
-      remember({ opId: op.id, txnId: op.txnId, ts: op.ts, receiptJson: JSON.stringify(receipt) });
-      scanned += 1;
-    } catch (err) {
-      remember({
-        opId: op.id,
-        txnId: op.txnId,
-        ts: op.ts,
-        error: err instanceof Error ? err.message : "Couldn't read that photo.",
-      });
     }
   }
 
   return { scanned };
+}
+
+/** True when the receipt was read; every outcome leaves an answer behind. */
+async function scanOne(op: ScanReceiptOp): Promise<boolean> {
+  const txn = db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(eq(transactions.id, op.txnId))
+    .get();
+  if (!txn) {
+    remember({ opId: op.id, txnId: op.txnId, ts: op.ts, error: "That transaction is gone." });
+    return false;
+  }
+
+  try {
+    const bytes = Buffer.from(op.imageBase64, "base64");
+    // The photo is kept with the transaction, exactly like one dropped on the
+    // desktop — the split should be checkable against the receipt later.
+    const filePath = saveAttachmentFile(bytes, "receipt.jpg");
+    db.insert(attachments)
+      .values({
+        id: `att_${crypto.randomUUID().slice(0, 8)}`,
+        transactionId: op.txnId,
+        filePath,
+        mimeType: "image/jpeg",
+        size: bytes.length,
+        originalName: "receipt-from-phone.jpg",
+        createdAt: new Date(),
+      })
+      .run();
+
+    const ocr = await recognizeReceipt(filePath);
+    if (!ocr.ok) {
+      remember({ opId: op.id, txnId: op.txnId, ts: op.ts, error: ocr.message });
+      return false;
+    }
+
+    const receipt = parseReceipt(ocr.lines);
+    if (receipt.items.length === 0) {
+      remember({
+        opId: op.id,
+        txnId: op.txnId,
+        ts: op.ts,
+        error: "Couldn't find any line items — try a straighter, better-lit photo.",
+      });
+      return false;
+    }
+
+    remember({ opId: op.id, txnId: op.txnId, ts: op.ts, receiptJson: JSON.stringify(receipt) });
+    return true;
+  } catch (err) {
+    remember({
+      opId: op.id,
+      txnId: op.txnId,
+      ts: op.ts,
+      error: err instanceof Error ? err.message : "Couldn't read that photo.",
+    });
+    return false;
+  }
 }

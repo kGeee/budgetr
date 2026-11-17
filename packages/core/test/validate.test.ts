@@ -3,7 +3,9 @@ import {
   ContractValidationError,
   ContractVersionError,
   MAX_RECEIPT_BYTES,
+  MIN_OUTBOX_VERSION,
   OUTBOX_VERSION,
+  outboxVersionFor,
   assertValidOutbox,
   assertValidSummary,
   buildSummary,
@@ -41,6 +43,15 @@ const validOutbox = (): OutboxBatch => ({
 describe('assertValidSummary', () => {
   it('accepts a buildSummary product round-tripped through JSON', () => {
     expect(() => assertValidSummary(validSummary())).not.toThrow();
+  });
+
+  it('advertises the newest outbox the desktop applies, and rejects a malformed one', () => {
+    const s = validSummary();
+    expect(s.outboxVersion).toBe(OUTBOX_VERSION);
+    delete s.outboxVersion; // a desktop from before the field
+    expect(() => assertValidSummary(s)).not.toThrow();
+    s.outboxVersion = '3';
+    expect(() => assertValidSummary(s)).toThrow(ContractValidationError);
   });
 
   it('rejects float cents', () => {
@@ -200,6 +211,32 @@ describe('assertValidOutbox — v2 ops', () => {
     expect(() =>
       assertValidOutbox(batch({ kind: 'recordSettlement', personId: 'p1', cents: 0 })),
     ).toThrow();
+  });
+
+  it('accepts someone new to split with, on a v3 batch', () => {
+    expect(() =>
+      assertValidOutbox(batch({ kind: 'addPerson', personId: 'p-new', name: 'Maya', handle: '@maya', color: '#6FE3A6' })),
+    ).not.toThrow();
+  });
+
+  it('refuses a blank name or a malformed colour', () => {
+    expect(() => assertValidOutbox(batch({ kind: 'addPerson', personId: 'p', name: '  ' }))).toThrow();
+    expect(() => assertValidOutbox(batch({ kind: 'addPerson', personId: 'p', name: 'Sam', color: 'green' }))).toThrow();
+  });
+
+  it('still applies a v2 batch, but not one smuggling a v3 op', () => {
+    // A phone that predates v3, or a v3 phone with no new ops to send.
+    expect(() => assertValidOutbox({ ...batch(splitBill), v: 2 })).not.toThrow();
+    expect(() =>
+      assertValidOutbox({ ...batch({ kind: 'addPerson', personId: 'p', name: 'Sam' }), v: 2 }),
+    ).toThrow();
+    expect(() => assertValidOutbox({ ...batch(splitBill), v: 1 })).toThrow();
+  });
+
+  it('versions a batch by what it carries, so a v2 desktop can read it whenever possible', () => {
+    expect(outboxVersionFor([{ kind: 'splitBill' }, { kind: 'recordSettlement' }])).toBe(MIN_OUTBOX_VERSION);
+    expect(outboxVersionFor([{ kind: 'splitBill' }, { kind: 'addPerson' }])).toBe(OUTBOX_VERSION);
+    expect(outboxVersionFor([])).toBe(MIN_OUTBOX_VERSION);
   });
 
   it('accepts a receipt photo', () => {

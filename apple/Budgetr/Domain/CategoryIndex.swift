@@ -17,19 +17,36 @@ struct CategoryIndex {
     private let names: [String: String]
     /// Plaid primary (`FOOD_AND_DRINK`) → category id.
     private let byPlaidPrimary: [String: String]
+    /// Category id → group (`spending`, `income`, `transfer`).
+    private let groups: [String: String]
 
     init(categories: [CDCategory]) {
         var names: [String: String] = [:]
         var byPrimary: [String: String] = [:]
+        var groups: [String: String] = [:]
         for c in categories {
             guard let id = c.id else { continue }
             names[id] = c.name ?? id
+            if let group = c.group { groups[id] = group }
             if let primary = c.plaidPrimary, !primary.isEmpty {
                 byPrimary[primary] = id
             }
         }
         self.names = names
         self.byPlaidPrimary = byPrimary
+        self.groups = groups
+    }
+
+    /// Whether an outflow is spending rather than money moving between your own
+    /// accounts — the web app's rule (`CategoryMapping.countsTowardSpend`): the
+    /// resolved category's group wins, so a transfer filed under Dining counts
+    /// and Dining filed under Reimbursable does not. Every screen that totals
+    /// spend goes through this, or a card payment reads as a month of shopping.
+    func countsTowardSpend(_ txn: CDTransaction) -> Bool {
+        CategoryMapping.countsTowardSpend(
+            resolvedGroup: resolvedId(for: txn).flatMap { groups[$0] },
+            plaidPrimary: txn.category
+        )
     }
 
     /// The category id a transaction reports under, or nil when nothing maps.

@@ -17,6 +17,7 @@ import {
   MAX_SECTOR_SLICES,
   MAX_SPARK_POINTS,
   MAX_STRATEGIES,
+  OUTBOX_VERSION,
   SUMMARY_VERSION,
   type AccountKind,
   type AlertKind,
@@ -59,6 +60,8 @@ export interface DesktopReadModel {
   alerts: Array<{ id: string; kind: AlertKind; text: string; ts: number }>;
   // Daily spending totals, positive cents. Optional.
   spendByDay?: Array<{ d: number; cents: number }>;
+  // Budgeted categories only, budget month only. Optional.
+  budgetSpendByDay?: Array<{ d: number; cents: number }>;
   // Active categories in display order. Optional.
   categories?: Array<{ id: string; name: string; icon?: string | null; group: 'income' | 'spending' | 'transfer' }>;
   // Optional shared-expense detail (contract v2). Absent on installs that have
@@ -70,6 +73,7 @@ export interface DesktopReadModel {
     cents: number;
     openCount: number;
     lastSettledAt?: number | null;
+    handle?: string | null;
   }>;
   shared?: Array<{
     id: string;
@@ -254,6 +258,7 @@ export function buildSummary(model: DesktopReadModel): Summary {
     v: SUMMARY_VERSION,
     asOf: seconds(model.now, 'now'),
     appliedOpIds: model.appliedOpIds.slice(-MAX_APPLIED_OP_IDS),
+    outboxVersion: OUTBOX_VERSION,
     netWorth: { cents: cents(model.netWorthCents, 'netWorth'), spark },
     accounts,
     budgets,
@@ -262,6 +267,7 @@ export function buildSummary(model: DesktopReadModel): Summary {
     alerts,
     ...(model.investments ? { investments: buildInvestments(model.investments) } : {}),
     ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
+    ...(model.budgetSpendByDay ? { budgetSpendByDay: buildSpark(model.budgetSpendByDay, 'budgetSpendByDay') } : {}),
     // Sorted and bounded like everything else, so an unchanged desktop state
     // still produces byte-identical JSON and never churns the relay blob.
     ...(model.people
@@ -276,6 +282,7 @@ export function buildSummary(model: DesktopReadModel): Summary {
               cents: cents(p.cents, `person ${p.id}`),
               openCount: Math.max(0, Math.trunc(p.openCount)),
               ...(p.lastSettledAt ? { lastSettledAt: seconds(p.lastSettledAt, `person ${p.id} settled`) } : {}),
+              ...(p.handle?.trim() ? { handle: p.handle.trim() } : {}),
             })),
         }
       : {}),

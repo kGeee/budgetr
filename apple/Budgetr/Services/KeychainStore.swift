@@ -25,6 +25,16 @@ enum KeychainStore {
         guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
     }
 
+    static func delete(_ account: String, synchronizable: Bool = true) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: synchronizable,
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError.unexpectedStatus(status) }
+    }
+
     static func get(_ account: String, synchronizable: Bool = true) throws -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

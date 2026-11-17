@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { assertValidOutbox, buildSummary, type OutboxBatch } from "@budgetr/core";
 import { fromBase64, open, seal, type Envelope } from "@budgetr/sync-crypto";
-import { buildReadModel } from "./read-model";
+import { buildReadModel, loadPrices } from "./read-model";
 import { applyOps } from "./ops";
 import { processScans } from "./scans";
 import {
@@ -79,7 +79,11 @@ export async function syncNow(): Promise<SyncResult> {
     }
 
     // ── 2. push a fresh summary when content changed (or ops landed) ──
-    const summary = buildSummary(buildReadModel());
+    // Live-priced holdings (ticker manual entries, imported positions) need a
+    // last close, which the synchronous read model can't fetch itself. A
+    // price-feed failure degrades to stored values rather than failing sync.
+    const prices = await loadPrices().catch(() => ({}));
+    const summary = buildSummary(buildReadModel(undefined, prices));
     const hash = createHash("sha256").update(JSON.stringify({ ...summary, asOf: 0 })).digest("hex");
     if (hash !== getLastPushedHash() || mutated > 0) {
       const putRes = await fetch(`${base}/summary`, {
