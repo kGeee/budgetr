@@ -7,6 +7,50 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-17
+
+The phone catches up with the desktop. The companion is redrawn in the same
+statement layout as 0.15, it moves the portfolio with the market between syncs,
+and both ends now keep each other current on a schedule instead of waiting to be
+asked.
+
+**Upgrade note:** the desktop and the companion should be updated together. An
+older companion keeps working against this desktop; the new figures (fixed
+budgets, live values) appear once the phone is on the new build.
+
+### Added
+
+- **Automatic sync.** Settings → Automatic sync pulls from your banks every 1,
+  3, 6, 12 or 24 hours while budgetr is running, then publishes to the phone
+  straight away. Off by default: each sync calls Plaid's balance endpoint, which
+  some plans bill per call, so the cadence is yours to choose. A bank that is
+  down is retried next interval, not every few minutes.
+- **The phone refreshes on its own.** Every minute while the app is on screen,
+  and through iOS background refresh when it isn't — as often as iOS allows.
+- **Live portfolio values on the phone.** Between syncs, holdings follow live
+  quotes: the Mac says what each position was worth and at what price, a quote
+  says what it costs now. The screen says which quotes, when, and how much of the
+  book they cover. Positions with option legs or a fixed value stay as synced,
+  and nothing estimated is ever written over the Mac's figures.
+- **Fixed budgets reach the phone.** A budget marked as a fixed cost on the
+  desktop is judged as paid-or-not on the phone too, and pace is read on
+  flexible spending only — the same sentence on both.
+
+### Changed
+
+- **The companion in the statement layout.** Today (was Spending) opens on what
+  is left to spend and a sentence that reads it; Activity, Budgets, Holdings and
+  Shared follow the same order — one figure, one sentence, then ruled rows.
+  Split a bill, the person and bill sheets and Record a payback match.
+- **Budgets on the phone** groups Fixed and Flexible, with a tick for today on
+  every flexible bar.
+- **The native app's spend figures** no longer count transfers or reimbursable
+  shares, matching the desktop.
+
+### Fixed
+
+- The release build runs on a supported macOS runner again.
+
 ## [0.15.0] — 2026-11-15
 
 Twenty-one pages become nine, and every one of them now opens the same way: one
