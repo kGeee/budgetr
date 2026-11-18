@@ -38,7 +38,7 @@ export interface DesktopReadModel {
   netWorthCents: number;
   netWorthSpark: Array<{ d: number; cents: number }>;
   accounts: Array<{ id: string; name: string; kind: AccountKind; cents: number }>;
-  budgets: Array<{ category: string; spentCents: number; limitCents: number }>;
+  budgets: Array<{ category: string; spentCents: number; limitCents: number; fixed?: boolean }>;
   transactions: Array<{
     id: string;
     ts: number;
@@ -62,6 +62,8 @@ export interface DesktopReadModel {
   spendByDay?: Array<{ d: number; cents: number }>;
   // Budgeted categories only, budget month only. Optional.
   budgetSpendByDay?: Array<{ d: number; cents: number }>;
+  flexibleSpendByDay?: Array<{ d: number; cents: number }>;
+  positionPx?: Array<{ symbol: string; micros: number }>;
   // Active categories in display order. Optional.
   categories?: Array<{ id: string; name: string; icon?: string | null; group: 'income' | 'spending' | 'transfer' }>;
   // Optional shared-expense detail (contract v2). Absent on installs that have
@@ -221,7 +223,13 @@ export function buildSummary(model: DesktopReadModel): Summary {
     .map((b) => {
       const spentCents = cents(b.spentCents, `budget ${b.category} spent`);
       const limitCents = cents(b.limitCents, `budget ${b.category} limit`);
-      return { category: b.category, spentCents, limitCents, state: computeBudgetState(spentCents, limitCents) };
+      return {
+        category: b.category,
+        spentCents,
+        limitCents,
+        state: computeBudgetState(spentCents, limitCents),
+        ...(b.fixed ? { fixed: true } : {}),
+      };
     });
 
   const recent = [...model.transactions]
@@ -250,6 +258,14 @@ export function buildSummary(model: DesktopReadModel): Summary {
       ...(p.sector !== undefined ? { sector: p.sector } : {}),
     }));
 
+  // Unit prices at publish time, for positions that still exist after the
+  // strip above. Non-positive or non-finite prices are dropped, not rounded.
+  const known = new Set(positions.map((p) => p.symbol));
+  const positionPx = [...(model.positionPx ?? [])]
+    .filter((p) => known.has(p.symbol) && Number.isFinite(p.micros) && p.micros >= 1)
+    .sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0))
+    .map((p) => ({ symbol: p.symbol, micros: Math.round(p.micros) }));
+
   const alerts = [...model.alerts]
     .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((a) => ({ id: a.id, kind: a.kind, text: a.text, ts: seconds(a.ts, `alert ${a.id} ts`) }));
@@ -268,6 +284,12 @@ export function buildSummary(model: DesktopReadModel): Summary {
     ...(model.investments ? { investments: buildInvestments(model.investments) } : {}),
     ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
     ...(model.budgetSpendByDay ? { budgetSpendByDay: buildSpark(model.budgetSpendByDay, 'budgetSpendByDay') } : {}),
+    ...(positionPx.length > 0 ? { positionPx } : {}),
+    // Only meaningful beside a fixed budget; dropped otherwise so a ledger with
+    // nothing flagged publishes byte-for-byte what it did before.
+    ...(model.flexibleSpendByDay && model.budgets.some((b) => b.fixed)
+      ? { flexibleSpendByDay: buildSpark(model.flexibleSpendByDay, 'flexibleSpendByDay') }
+      : {}),
     // Sorted and bounded like everything else, so an unchanged desktop state
     // still produces byte-identical JSON and never churns the relay blob.
     ...(model.people

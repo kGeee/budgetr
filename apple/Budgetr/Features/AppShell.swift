@@ -75,7 +75,8 @@ struct AppShell: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var app = AppModel()
-    @StateObject private var companion = CompanionStore()
+    @StateObject private var companion = CompanionRuntime.store
+    @StateObject private var live = LiveQuotes()
     @AppStorage(SampleData.flagKey) private var sampleLoaded = false
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -105,6 +106,7 @@ struct AppShell: View {
             .animation(M.settle, value: companion.phase)
             .environmentObject(app)
             .environmentObject(companion)
+            .environmentObject(live)
             // EmptyStorePrompt (from the 0.15 first-run work) opens the importer
             // through the environment; route it to the one importer AppModel owns.
             .environment(\.triggerImport, { app.showingImporter = true })
@@ -137,6 +139,19 @@ struct AppShell: View {
                 // Back in the foreground is when the numbers are most likely
                 // stale — the Mac has probably synced since.
                 if phase == .active { Task { await companion.refresh() } }
+                // Leaving the screen: ask iOS to wake us for a refresh later.
+                if phase == .background { BackgroundRefresh.schedule() }
+            }
+            // While the app is on screen, check with the Mac every minute, so a
+            // phone left open on a desk follows the ledger without a pull. The
+            // task restarts with the scene phase, so it only runs when active.
+            .task(id: scenePhase) {
+                guard scenePhase == .active else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: BackgroundRefresh.foregroundInterval)
+                    if Task.isCancelled { break }
+                    await companion.refresh()
+                }
             }
     }
 
@@ -228,7 +243,7 @@ private struct CompanionTabs: View {
 
     private var items: [FloatingTabBar<CompanionTab>.Item] {
         [
-            .init(tab: .spending, title: "Spending", symbol: "square.grid.2x2"),
+            .init(tab: .spending, title: "Today", symbol: "house"),
             .init(tab: .activity, title: "Activity", symbol: "arrow.left.arrow.right"),
             // Badged while the Mac has spotted a payback waiting to be confirmed.
             .init(tab: .shared, title: "Shared", symbol: "person.2", badge: companion.summary?.settleSuggestions?.count ?? 0),

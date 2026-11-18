@@ -30,4 +30,9 @@ export async function register(): Promise<void> {
 
   const { startCompanionEngine } = await import("@/lib/companion/engine");
   startCompanionEngine();
+
+  // Pull from the bank on the user's schedule (off unless they chose one), so
+  // the engine above has something new to publish without anyone pressing Sync.
+  const { startAutoSync } = await import("@/lib/auto-sync");
+  startAutoSync();
 }

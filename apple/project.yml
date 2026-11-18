@@ -57,6 +57,12 @@ targets:
           UIColorName: LaunchBackground
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Background refresh of the companion summary (BackgroundRefresh.swift).
+        # iOS only runs a task whose identifier is listed here.
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.budgetr.app.refresh
+        UIBackgroundModes:
+          - fetch
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.budgetr.app

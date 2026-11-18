@@ -94,11 +94,15 @@ enum CompanionDemo {
             let state = spent > limit ? "over" : pace > 1.08 ? "warn" : "ok"
             return .init(category: cat, spentCents: spent, limitCents: limit, state: state)
         }
+        // Rent is a fixed cost: paid in one charge early in the month, so it is
+        // shown as paid-or-not and kept out of the pace the rest is held to.
+        var rent = Summary.Budget(category: "RENT_AND_UTILITIES", spentCents: 256_842, limitCents: 270_000, state: "warn")
+        rent.fixed = true
         let budgets = [
             budget("FOOD_AND_DRINK", 65_000, 1.18),
             budget("GENERAL_MERCHANDISE", 40_000, 0.74),
             budget("TRANSPORTATION", 22_000, 0.92),
-            budget("RENT_AND_UTILITIES", 270_000, 1.0),
+            rent,
             budget("ENTERTAINMENT", 12_000, 1.9),
             budget("PERSONAL_CARE", 9_000, 0.4),
         ]
@@ -180,6 +184,15 @@ enum CompanionDemo {
         let monthTotal = max(1, thisMonth.reduce(0) { $0 + $1.cents })
         let budgeted = budgets.reduce(0) { $0 + $1.spentCents }
         summary.budgetSpendByDay = thisMonth.map { .init(d: $0.d, cents: $0.cents * budgeted / monthTotal) }
+        // The unit price each share-count position was "valued at", so the demo
+        // moves with real quotes the way a synced ledger would.
+        summary.positionPx = positions.compactMap { p in
+            guard let label = p.qtyLabel, let qty = Double(label.replacingOccurrences(of: ",", with: "")), qty > 0 else { return nil }
+            return .init(symbol: p.symbol, micros: Int((Double(p.cents) / 100 / qty * 1_000_000).rounded()))
+        }
+        // The same days with the fixed budget left out, for the flexible pace line.
+        let flexible = budgets.filter { !$0.isFixed }.reduce(0) { $0 + $1.spentCents }
+        summary.flexibleSpendByDay = thisMonth.map { .init(d: $0.d, cents: $0.cents * flexible / monthTotal) }
         return summary
     }
 }

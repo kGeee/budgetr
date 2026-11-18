@@ -68,20 +68,27 @@ struct Summary: Codable, Equatable {
     /// Unix seconds — when the Mac generated it.
     let asOf: Int
     let appliedOpIds: [String]
-    let netWorth: NetWorth
+    var netWorth: NetWorth
     let accounts: [Account]
     let budgets: [Budget]
     /// Most recent first, capped (~40) — a tape, not the ledger.
     let recent: [Txn]
     /// Descending by value.
-    let positions: [Position]
+    var positions: [Position]
     let alerts: [Alert]
-    let investments: Investments?
+    var investments: Investments?
     let spendByDay: [SparkPoint]?
     let categories: [Category]?
     /// Budget month, budgeted categories only — what the desktop's Budgets
     /// pace line plots. Absent from older Macs.
     var budgetSpendByDay: [SparkPoint]? = nil
+    /// The same series without fixed budgets — the Mac's "Flexible pace" line.
+    /// Present only when at least one budget is marked fixed.
+    var flexibleSpendByDay: [SparkPoint]? = nil
+    /// The unit price each position was valued at when the Mac published — what
+    /// lets the phone move a value with the market until the next sync. Only
+    /// positions that are purely units of one quoted symbol are listed.
+    var positionPx: [PositionPx]? = nil
     // v2 — shared expenses. Absent on installs that have never split a bill.
     let people: [Person]?
     /// Most recent first.
@@ -143,7 +150,7 @@ struct Summary: Codable, Equatable {
     }
 
     struct NetWorth: Codable, Equatable {
-        let cents: Int
+        var cents: Int
         let spark: [SparkPoint]
     }
 
@@ -163,6 +170,10 @@ struct Summary: Codable, Equatable {
         let limitCents: Int
         /// ok | warn | over — the Mac decides; the phone never recomputes pace.
         let state: String
+        /// A fixed cost (rent, a loan): judged as paid-or-not, never on pace.
+        /// Sent only when true; absent from a Mac older than 0.15.
+        var fixed: Bool? = nil
+        var isFixed: Bool { fixed ?? false }
     }
 
     struct Txn: Codable, Equatable, Identifiable {
@@ -187,6 +198,12 @@ struct Summary: Codable, Equatable {
         let sector: String?
     }
 
+    struct PositionPx: Codable, Equatable {
+        let symbol: String
+        /// Unit price × 1e6.
+        let micros: Int
+    }
+
     struct Alert: Codable, Equatable, Identifiable {
         let id: String
         let kind: String
@@ -196,9 +213,9 @@ struct Summary: Codable, Equatable {
     }
 
     struct Investments: Codable, Equatable {
-        let valueCents: Int
+        var valueCents: Int
         let spark: [SparkPoint]
-        let sectors: [Sector]
+        var sectors: [Sector]
     }
 
     struct Sector: Codable, Equatable {

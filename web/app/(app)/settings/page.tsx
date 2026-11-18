@@ -12,6 +12,14 @@ import { CategoryManager } from "@/components/budget/category-manager";
 import { RulesManager } from "@/components/transactions/rules-manager";
 import { PendingSwitch } from "@/components/pending-toggle";
 import { TradingDeskSwitch } from "./trading-desk-switch";
+import { AutoSyncRow } from "./auto-sync-row";
+import {
+  AUTO_SYNC_OPTIONS,
+  autoSyncLabel,
+  getAutoSyncHours,
+  getAutoSyncLastRunAt,
+} from "@/lib/auto-sync";
+import { formatDistanceToNow } from "date-fns";
 import { SettingRow, SettingRows } from "./setting-row";
 import { PrivacySwitch } from "./privacy-switch";
 import { SettingsIndex, type SettingsSection } from "./settings-index";
@@ -43,6 +51,7 @@ export const dynamic = "force-dynamic";
 const SECTIONS: SettingsSection[] = [
   { id: "display", label: "Appearance" },
   { id: "api-keys", label: "Connections & API keys" },
+  { id: "auto-sync", label: "Automatic sync" },
   { id: "companion", label: "Phone companion" },
   { id: "license", label: "License" },
   { id: "reports", label: "Scheduled report" },
@@ -72,6 +81,9 @@ export default async function SettingsPage() {
   const countPending = getIncludePending();
   const pendingSummary = getPendingSummary();
   const tradingDesk = isTradingDeskEnabled();
+  const autoSyncHours = getAutoSyncHours();
+  const autoSyncLastRun = getAutoSyncLastRunAt();
+  const syncStatus = getSyncStatus();
   const categories = getCategories();
   const archivedCategories = getArchivedCategories();
   const rules = getTagRules();
@@ -178,10 +190,22 @@ export default async function SettingsPage() {
             />
           </section>
 
+          <section id="auto-sync" className={SECTION} aria-label="Automatic sync">
+            <SectionHead title="Automatic sync" />
+            <AutoSyncRow
+              hours={autoSyncHours}
+              options={AUTO_SYNC_OPTIONS.map((h) => ({ hours: h, label: autoSyncLabel(h) }))}
+              lastRun={
+                autoSyncLastRun ? formatDistanceToNow(autoSyncLastRun, { addSuffix: true }) : null
+              }
+              paired={syncStatus.paired}
+            />
+          </section>
+
           {/* Phone companion */}
           <section id="companion" className={SECTION} aria-label="Phone companion">
             <SectionHead title="Phone companion" />
-            <CompanionCard initial={getSyncStatus()} />
+            <CompanionCard initial={syncStatus} />
           </section>
 
           {/* License / trial */}

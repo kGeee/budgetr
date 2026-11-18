@@ -126,6 +126,166 @@ enum CompanionModel {
         return totals(series, month: month)
     }
 
+    // ── Fixed and flexible ───────────────────────────────────────────
+    // A fixed cost (rent) lands in one charge on the 1st, so holding it to an
+    // even daily burn reads as "ahead of pace" all month. Once the Mac marks
+    // any budget fixed, pace is judged on the rest — the same split, and the
+    // same sentence, as the desktop's Budgets page (web/lib/budget-verdict.ts).
+
+    struct BudgetPosition: Equatable {
+        let fixedSpent: Int
+        let fixedLimit: Int
+        let flexibleSpent: Int
+        let flexibleLimit: Int
+
+        var totalSpent: Int { fixedSpent + flexibleSpent }
+        var totalLimit: Int { fixedLimit + flexibleLimit }
+        /// Left across every budget — the hero figure.
+        var left: Int { totalLimit - totalSpent }
+        /// Only narrow to flexible when something flexible is left to judge; a
+        /// month of nothing but fixed budgets reads as the whole month.
+        var judgesFlexible: Bool { fixedLimit > 0 && flexibleLimit > 0 }
+        var paceSpent: Int { judgesFlexible ? flexibleSpent : totalSpent }
+        var paceLimit: Int { judgesFlexible ? flexibleLimit : totalLimit }
+    }
+
+    static func budgetPosition(_ s: Summary) -> BudgetPosition {
+        var fs = 0, fl = 0, xs = 0, xl = 0
+        for b in s.budgets {
+            if b.isFixed { fs += b.spentCents; fl += b.limitCents } else { xs += b.spentCents; xl += b.limitCents }
+        }
+        return BudgetPosition(fixedSpent: fs, fixedLimit: fl, flexibleSpent: xs, flexibleLimit: xl)
+    }
+
+    /// The daily series the pace line should plot: flexible budgets only when
+    /// the Mac sends that split, otherwise every budgeted category as before.
+    static func paceTotals(_ s: Summary, month: Month) -> Totals? {
+        if budgetPosition(s).judgesFlexible, let flexible = s.flexibleSpendByDay {
+            return totals(flexible, month: month)
+        }
+        return budgetTotals(s, month: month)
+    }
+
+    struct PaceVerdict: Equatable {
+        enum Tone { case ok, warn, over }
+        let tone: Tone
+        /// Words before the figure.
+        let lead: String
+        /// The amount the sentence turns on, in cents.
+        let cents: Int
+        /// Words after the figure, including the full stop.
+        let tail: String
+    }
+
+    /// The sentence under "Left to spend". Mirrors `budgetVerdict` on the web,
+    /// in cents, so the phone and the Mac never give different readings.
+    static func paceVerdict(_ p: BudgetPosition, dayOfMonth: Int, daysInMonth: Int) -> PaceVerdict? {
+        guard p.totalLimit > 0 else { return nil }
+        let subject = p.judgesFlexible ? "Flexible spending" : "Spending"
+        let total = max(1, daysInMonth)
+        let day = min(total, max(1, dayOfMonth))
+        let left = total - day
+        let days = "\(left) day\(left == 1 ? "" : "s")"
+        let over = p.paceSpent - p.paceLimit
+
+        if over > 0 {
+            return PaceVerdict(
+                tone: .over,
+                lead: p.judgesFlexible ? "Flexible spending is" : "You are",
+                cents: over,
+                tail: left > 0 ? "over budget with \(days) left." : "over budget."
+            )
+        }
+        if left == 0 {
+            return PaceVerdict(
+                tone: .ok,
+                lead: p.judgesFlexible ? "Flexible spending closed" : "The month closed",
+                cents: -over,
+                tail: "under budget."
+            )
+        }
+        // Integer cents: expected = limit × day / total, rounded to the cent.
+        let expected = Int((Double(p.paceLimit) * Double(day) / Double(total)).rounded())
+        let gap = expected - p.paceSpent
+        return gap >= 0
+            ? PaceVerdict(tone: .ok, lead: "\(subject) is", cents: gap, tail: "under an even pace, with \(days) left.")
+            : PaceVerdict(tone: .warn, lead: "\(subject) is", cents: -gap, tail: "ahead of an even pace, with \(days) left.")
+    }
+
+    // ── Live prices between syncs ────────────────────────────────────
+    // The Mac is the source of truth for what you hold; the market is the
+    // source of truth for what it's worth right now. Between syncs the phone
+    // can combine the two: the Mac says what each position was worth and at
+    // what unit price, a live quote says what a unit costs now, and
+    //
+    //     live value = synced value × live price ÷ price at sync
+    //
+    // which is quantity × live price without the quantity ever needing to be
+    // a number on the phone. Positions the Mac didn't send a price for (option
+    // legs, fixed-value holdings) and symbols with no quote keep their synced
+    // value, so the total is always whole — part live, part as synced.
+
+    struct LiveQuote: Equatable {
+        let price: Double
+        /// The prior session's close, when the source gives one.
+        let previousClose: Double?
+    }
+
+    struct LiveBook: Equatable {
+        /// The summary with live values folded in.
+        let summary: Summary
+        /// Symbols whose value moved with a quote.
+        let live: Set<String>
+        /// Live portfolio value minus the synced one, in cents.
+        let deltaCents: Int
+        /// Positions in the synced summary, for "5 of 7 live".
+        let total: Int
+
+        var isLive: Bool { !live.isEmpty }
+    }
+
+    static func reprice(_ s: Summary, quotes: [String: LiveQuote]) -> LiveBook {
+        let px = Dictionary((s.positionPx ?? []).map { ($0.symbol, $0.micros) }, uniquingKeysWith: { a, _ in a })
+        var live = Set<String>()
+        var delta = 0
+        var sectorDelta: [String: Int] = [:]
+
+        var positions = s.positions.map { p -> Summary.Position in
+            guard let micros = px[p.symbol], micros > 0,
+                  let q = quotes[p.symbol], q.price > 0, q.price.isFinite
+            else { return p }
+            let cents = Int((Double(p.cents) * q.price * 1_000_000 / Double(micros)).rounded())
+            let move = cents - p.cents
+            live.insert(p.symbol)
+            delta += move
+            if let sector = p.sector { sectorDelta[sector, default: 0] += move }
+            // Today's move straight from the quote when it carries a close;
+            // otherwise the Mac's figure stands.
+            let dayBp = q.previousClose.flatMap { close -> Int? in
+                guard close > 0 else { return nil }
+                return Int(((q.price - close) / close * 10_000).rounded())
+            } ?? p.dayBp
+            return Summary.Position(
+                symbol: p.symbol, cents: cents, name: p.name, dayBp: dayBp,
+                // Unrealized P&L moves cent for cent with the value: basis is fixed.
+                pnlCents: p.pnlCents.map { $0 + move },
+                qtyLabel: p.qtyLabel, sector: p.sector
+            )
+        }
+        guard !live.isEmpty else { return LiveBook(summary: s, live: [], deltaCents: 0, total: s.positions.count) }
+
+        positions.sort { $0.cents != $1.cents ? $0.cents > $1.cents : $0.symbol < $1.symbol }
+        var out = s
+        out.positions = positions
+        out.netWorth.cents += delta
+        if var inv = out.investments {
+            inv.valueCents += delta
+            inv.sectors = inv.sectors.map { .init(sector: $0.sector, cents: $0.cents + (sectorDelta[$0.sector] ?? 0)) }
+            out.investments = inv
+        }
+        return LiveBook(summary: out, live: live, deltaCents: delta, total: s.positions.count)
+    }
+
     // ── What counts as spend ─────────────────────────────────────────
     // The Mac's rule, applied to the tape: a transaction is spend when its
     // (effective) category is in the spending group. Card payments ("AMERICAN

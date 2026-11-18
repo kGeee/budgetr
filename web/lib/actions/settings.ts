@@ -8,6 +8,7 @@ import { sql } from "drizzle-orm";
 import { CURRENCY_COOKIE, currencyFromCookie } from "@/lib/currency";
 import { setIncludePending } from "@/lib/pending";
 import { setTradingDeskEnabled } from "@/lib/trading-desk";
+import { setAutoSyncHours } from "@/lib/auto-sync";
 import { upsertRates } from "@/lib/rates";
 
 /**
@@ -55,6 +56,12 @@ export async function setDisplayCurrency(code: string): Promise<void> {
 export async function setCountPending(on: boolean): Promise<void> {
   setIncludePending(on);
   revalidatePath("/", "layout");
+}
+
+/** How often the Mac syncs with the bank on its own; 0 switches it off. */
+export async function setAutoSync(hours: number): Promise<void> {
+  setAutoSyncHours(hours);
+  revalidatePath("/settings");
 }
 
 /** Show or hide the trading tools (Markets, Options, Fundamentals). */

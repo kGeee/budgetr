@@ -126,15 +126,16 @@ struct SplitBillSheet: View {
                 } else {
                     VStack(alignment: .leading, spacing: 22) {
                         header
-                        purchaseSection
-                        if txn != nil {
+                        if txn == nil {
+                            purchaseSection
+                        } else {
                             peopleSection
                             if !chosen.isEmpty { splitSection }
                             noteSection
                         }
                     }
                     .padding(22)
-                    .padding(.bottom, 90)
+                    .padding(.bottom, 24)
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -165,100 +166,126 @@ struct SplitBillSheet: View {
         }
     }
 
+    /// The title, then the purchase in one line — or, before one is picked,
+    /// what splitting does.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Eyebrow("Shared")
-            Text("Split a bill").font(F.display(28)).foregroundStyle(T.paper)
-            Text("Your share stays your spending; the rest is held as owed to you until they pay you back.")
-                .font(F.body(12.5)).foregroundStyle(T.muted)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Split a bill").font(F.display(26)).foregroundStyle(T.paper)
+            if let txn {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    (Text("\(txn.merchant) · \(CompanionModel.name(txn.category, index)) · \(CompanionFormat.day(txn.ts)) · charged ")
+                        + Text(total.dollars.money()).font(F.mono(13)).foregroundStyle(T.paper))
+                        .font(F.body(13))
+                        .foregroundStyle(T.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    if preselectedTxnId == nil {
+                        Button {
+                            withAnimation(M.settle) { txnId = nil }
+                        } label: {
+                            Text("Change").font(F.body(13)).foregroundStyle(T.brass)
+                                .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Change the purchase")
+                    }
+                }
+            } else {
+                Text("Your share stays your spending; the rest is held as owed to you until they pay you back.")
+                    .font(F.body(13)).foregroundStyle(T.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
     // ── Purchase ─────────────────────────────────────────────────────
 
-    @ViewBuilder
+    /// Picking the purchase: your recent spending, ruled.
     private var purchaseSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(title: "Purchase", detail: txn == nil ? "\(candidates.count) recent" : nil,
-                          action: txn != nil && preselectedTxnId == nil ? ("Change", { withAnimation(M.settle) { txnId = nil } }) : nil)
-            if let txn {
-                HStack(spacing: 12) {
-                    MerchantAvatar(name: txn.merchant, icon: index[txn.category]?.icon, size: 40)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(txn.merchant).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
-                        Text("\(CompanionModel.name(txn.category, index)) · \(CompanionFormat.day(txn.ts))")
-                            .font(F.body(11.5)).foregroundStyle(T.faint)
-                    }
-                    Spacer()
-                    Text(total.dollars.money()).font(F.monoSemibold(16)).foregroundStyle(T.paper)
-                }
-                .padding(14)
-                .background(CardSurface(radius: T.radiusSmall))
-            } else if candidates.isEmpty {
+        StatementSection(title: "Purchase", count: candidates.isEmpty ? nil : candidates.count) {
+            if candidates.isEmpty {
                 Text("No recent purchases to split. The phone sees your Mac's most recent transactions only.")
-                    .font(F.body(12.5)).foregroundStyle(T.faint)
+                    .font(F.body(13)).foregroundStyle(T.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 14)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array((showingAllTxns ? candidates : Array(candidates.prefix(8))).enumerated()), id: \.element.id) { i, t in
-                        Button {
-                            Haptics.tick()
-                            withAnimation(M.settle) { txnId = t.id }
-                        } label: {
+                ForEach(showingAllTxns ? candidates : Array(candidates.prefix(8))) { t in
+                    Button {
+                        Haptics.tick()
+                        withAnimation(M.settle) { txnId = t.id }
+                    } label: {
+                        RuledRow(minHeight: 52) {
                             HStack(spacing: 12) {
-                                MerchantAvatar(name: t.merchant, icon: index[t.category]?.icon, size: 34)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(t.merchant).font(F.medium(13.5)).foregroundStyle(T.paper).lineLimit(1)
-                                    Text(CompanionFormat.day(t.ts)).font(F.body(11)).foregroundStyle(T.faint)
+                                    Text(t.merchant).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                                    Text("\(CompanionModel.name(t.category, index)) · \(CompanionFormat.day(t.ts))")
+                                        .font(F.body(12)).foregroundStyle(T.muted).lineLimit(1)
                                 }
-                                Spacer()
-                                Text(abs(t.cents).dollars.money()).font(F.mono(13)).foregroundStyle(T.paper)
+                                Spacer(minLength: 6)
+                                Text(abs(t.cents).dollars.money()).font(F.mono(14)).foregroundStyle(T.paper)
                             }
-                            .padding(.vertical, 9)
-                            .padding(.horizontal, 12)
-                            .contentShape(Rectangle())
+                            .padding(.vertical, 6)
                         }
-                        .buttonStyle(.pressScale)
-                        .overlay(alignment: .top) { if i > 0 { Hairline().padding(.leading, 58) } }
                     }
-                    if candidates.count > 8 && !showingAllTxns {
-                        Button {
-                            withAnimation(M.settle) { showingAllTxns = true }
-                        } label: {
-                            Text("Show all \(candidates.count)").font(F.semibold(12.5)).foregroundStyle(T.brass)
-                                .frame(maxWidth: .infinity).padding(.vertical, 11)
-                        }
-                        .buttonStyle(.plain)
-                        .overlay(alignment: .top) { Hairline() }
-                    }
+                    .buttonStyle(.pressScale)
+                    .accessibilityElement(children: .combine)
                 }
-                .background(CardSurface(radius: T.radiusSmall))
+                if candidates.count > 8 && !showingAllTxns {
+                    Button {
+                        withAnimation(M.settle) { showingAllTxns = true }
+                    } label: {
+                        Text("Show all \(candidates.count)").font(F.body(13)).foregroundStyle(T.brass)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
 
     // ── People ───────────────────────────────────────────────────────
 
+    private var modeSwitch: some View {
+        ModeSwitch(options: [("Evenly", 0), ("Custom", 1), ("By item", 2)], selection: $mode)
+    }
+
     private var peopleSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "Split with", detail: chosen.isEmpty ? nil : "\(chosen.count)")
-            FlowChips(people: people, chosen: $chosen) {
+        VStack(alignment: .leading, spacing: 8) {
+            // The method sits beside the label, and drops under it when the
+            // text is too large for one line.
+            if chosen.isEmpty {
+                splitWithLabel.frame(minHeight: 44)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        splitWithLabel
+                        Spacer(minLength: 12)
+                        modeSwitch
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        splitWithLabel
+                        modeSwitch
+                    }
+                }
+            }
+            FlowChips(people: people, chosen: $chosen, includeMe: $includeMe, meLocked: mode == 2) {
                 newName = ""
                 newHandle = ""
                 addingPerson = true
             }
-            if mode != 2 {
-                Toggle(isOn: $includeMe.animation(M.settle)) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Include me").font(F.medium(14)).foregroundStyle(T.paper)
-                        Text(includeMe ? "You keep a share of the bill" : "You paid entirely for others")
-                            .font(F.body(11)).foregroundStyle(T.faint)
-                    }
-                }
-                .tint(T.jade)
-                .padding(.top, 4)
+            if mode != 2 && !includeMe {
+                Text("You paid entirely for others — none of this bill stays with you.")
+                    .font(F.body(12)).foregroundStyle(T.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var splitWithLabel: some View {
+        Text("Split with").font(F.medium(13)).foregroundStyle(T.muted)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func addPerson() {
@@ -283,12 +310,6 @@ struct SplitBillSheet: View {
 
     private var splitSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                SectionHeader(title: "Amounts")
-                Segmented(options: [("Evenly", 0), ("Custom", 1), ("By item", 2)], selection: $mode)
-                    .frame(width: 228)
-            }
-
             if mode == 2 {
                 ReceiptPanel(
                     receipt: $receipt,
@@ -301,26 +322,16 @@ struct SplitBillSheet: View {
                     itemized: itemized
                 )
             } else {
-                StackedBar(slices: slices, height: 8)
-                VStack(spacing: 0) {
+                StatementSection(title: "Amounts") {
                     if includeMe || mine > 0 {
-                        amountRow(avatar: AnyView(PersonAvatar(name: "You", color: T.paper, size: 32)), name: "You", cents: mine, editable: false, personId: nil)
+                        amountRow(avatar: AnyView(PersonAvatar(name: "You", color: PersonAvatar.me, size: 30)), name: "You", cents: mine, editable: false, personId: nil)
                     }
                     ForEach(chosen, id: \.self) { id in
                         if let p = people.first(where: { $0.id == id }) {
-                            amountRow(avatar: AnyView(PersonAvatar(person: p, size: 32)), name: p.name, cents: shares[id] ?? 0, editable: mode == 1, personId: id)
-                                .overlay(alignment: .top) { Hairline().padding(.leading, 44) }
+                            amountRow(avatar: AnyView(PersonAvatar(person: p, size: 30)), name: p.name, cents: shares[id] ?? 0, editable: mode == 1, personId: id)
                         }
                     }
                 }
-                .padding(.horizontal, 12)
-                .background(CardSurface(radius: T.radiusSmall))
-            }
-
-            HStack {
-                Text("They owe you").font(F.body(12)).foregroundStyle(T.muted)
-                Spacer()
-                Text(owed.dollars.money()).font(F.monoSemibold(13)).foregroundStyle(mode != 2 && owed > total ? T.coral : T.jade)
             }
         }
         .onChange(of: mode) { _, new in
@@ -335,79 +346,116 @@ struct SplitBillSheet: View {
         }
     }
 
-    private var slices: [MixSlice] {
-        var out: [MixSlice] = []
-        if mine > 0 { out.append(MixSlice(id: "__me", name: "You", value: mine.dollars, color: T.paper.opacity(0.8))) }
-        for id in chosen {
-            guard let p = people.first(where: { $0.id == id }), let c = shares[id], c > 0 else { continue }
-            out.append(MixSlice(id: id, name: p.name, value: c.dollars, color: PersonAvatar.color(for: p)))
-        }
-        return out
-    }
-
     private func amountRow(avatar: AnyView, name: String, cents: Int, editable: Bool, personId: String?) -> some View {
-        HStack(spacing: 12) {
-            avatar
-            Text(name).font(F.medium(14)).foregroundStyle(T.paper).lineLimit(1)
-            Spacer()
-            if editable, let personId {
-                HStack(spacing: 2) {
-                    Text("$").font(F.mono(13.5)).foregroundStyle(T.faint)
-                    TextField("0.00", text: Binding(
-                        get: { custom[personId] ?? "" },
-                        set: { custom[personId] = $0 }
-                    ))
-                    .font(F.mono(13.5))
-                    .foregroundStyle(T.paper)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 80)
-                    #if os(iOS)
-                    .keyboardType(.decimalPad)
-                    #endif
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(T.ink))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(T.lineStrong, lineWidth: 0.75))
-            } else {
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(cents.dollars.money()).font(F.mono(13.5)).foregroundStyle(cents < 0 ? T.coral : T.paper)
-                    if total > 0 {
-                        Text(CompanionFormat.percent(Double(cents) / Double(total))).font(F.mono(9.5)).foregroundStyle(T.faint)
+        RuledRow(minHeight: 52) {
+            HStack(spacing: 10) {
+                avatar
+                Text(name).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                Spacer(minLength: 6)
+                if editable, let personId {
+                    HStack(spacing: 2) {
+                        Text("$").font(F.mono(14)).foregroundStyle(T.muted)
+                        TextField("0.00", text: Binding(
+                            get: { custom[personId] ?? "" },
+                            set: { custom[personId] = $0 }
+                        ))
+                        .font(F.mono(14))
+                        .foregroundStyle(T.paper)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                        #if os(iOS)
+                        .keyboardType(.decimalPad)
+                        #endif
+                        .accessibilityLabel("\(name)'s share")
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 44)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(T.ink))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(T.lineStrong, lineWidth: 1))
+                } else {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(cents.dollars.money()).font(F.mono(14)).foregroundStyle(cents < 0 ? T.coral : T.paper)
+                        if total > 0 {
+                            Text(CompanionFormat.percent(Double(cents) / Double(total))).font(F.mono(11)).foregroundStyle(T.muted)
+                        }
                     }
                 }
             }
+            .padding(.vertical, 4)
         }
-        .padding(.vertical, 10)
     }
 
     private var noteSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(title: "Note")
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Note").font(F.medium(13)).foregroundStyle(T.muted)
             TextField("What was it? (optional)", text: $note)
-                .font(F.body(14))
+                .font(F.body(15))
                 .foregroundStyle(T.paper)
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(T.ink))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(T.line, lineWidth: 0.75))
+                .frame(minHeight: 44)
+            Rule(strong: true)
         }
     }
 
     // ── Send ─────────────────────────────────────────────────────────
 
-    private var sendBar: some View {
-        VStack(spacing: 6) {
-            if let problem, txn != nil {
-                Text(problem).font(F.body(11.5)).foregroundStyle(T.faint)
+    /// The result, pinned: what stays with you and what comes back.
+    private var resultCells: [StatCells.Cell] {
+        var mineValue = mine
+        var mineNote: String?
+        var theirNote: String?
+        if mode == 2, let itemized {
+            if let me = itemized.people.first(where: { $0.participantId == ReceiptSplit.me }) {
+                mineValue = Int((me.total * 100).rounded())
+                mineNote = "\(me.items.money()) + \((me.tax + me.tip).money()) tax & tip"
             }
-            PillButton(title: sending ? "Sending…" : "Split \(basis > 0 ? basis.dollars.money() : "bill")", systemImage: "paperplane.fill", role: .primary) {
+            let others = itemized.people.filter { $0.participantId != ReceiptSplit.me }
+            if !others.isEmpty {
+                let items = others.reduce(0) { $0 + $1.items }
+                let extra = others.reduce(0) { $0 + $1.tax + $1.tip }
+                theirNote = "\(items.money()) + \(extra.money()) tax & tip"
+            }
+        } else if mode != 2, total > 0 {
+            mineNote = "\(CompanionFormat.percent(Double(mine) / Double(total))) of the charge"
+            theirNote = chosen.count == 1
+                ? "\(CompanionFormat.percent(Double(owed) / Double(total))) of the charge"
+                : "from \(chosen.count) people"
+        }
+        let who = chosen.count == 1 ? people.first { $0.id == chosen[0] }?.givenName : nil
+        return [
+            .init(label: "Your share", value: mineValue.dollars.money(), note: mineNote,
+                  valueColor: mineValue < 0 ? T.coral : T.paper),
+            .init(label: who.map { "\($0) owes you" } ?? "They owe you", value: owed.dollars.money(), note: theirNote,
+                  valueColor: mode != 2 && owed > total ? T.coral : T.jade),
+        ]
+    }
+
+    /// What happens after the split goes out — the sent view offers each request.
+    private var venmoHint: String {
+        if chosen.count == 1, owed > 0, let p = people.first(where: { $0.id == chosen[0] }) {
+            return "Next: request \(p.givenName)'s \(owed.dollars.money()) on Venmo, already filled in."
+        }
+        return "Next: request each share on Venmo, already filled in."
+    }
+
+    private var sendBar: some View {
+        VStack(spacing: 8) {
+            if txn != nil, !chosen.isEmpty {
+                StatCells(cells: resultCells)
+            }
+            PillButton(title: sending ? "Sending…" : "Split \(basis > 0 ? basis.dollars.money() : "bill")", role: .primary) {
                 send()
             }
             .disabled(problem != nil || sending)
             .opacity(problem != nil ? 0.45 : 1)
+            if txn != nil {
+                Text(problem ?? venmoHint)
+                    .font(F.body(12)).foregroundStyle(T.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 22)
-        .padding(.top, 10)
+        .padding(.top, txn != nil && !chosen.isEmpty ? 0 : 10)
         .padding(.bottom, 6)
         .background(T.panel.opacity(0.96))
     }
@@ -475,33 +523,32 @@ private struct SplitSentView: View {
                     .foregroundStyle(T.onJade)
                     .frame(width: 40, height: 40)
                     .background(Circle().fill(T.jade))
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Split sent").font(F.display(26)).foregroundStyle(T.paper)
-                    Text("Your Mac applies it on its next sync.").font(F.body(12.5)).foregroundStyle(T.muted)
+                    Text("Your Mac applies it on its next sync.").font(F.body(13)).foregroundStyle(T.muted)
                 }
             }
-            Eyebrow("Ask for it back")
-            VStack(spacing: 0) {
-                ForEach(Array(sent.enumerated()), id: \.offset) { i, s in
+            StatementSection(title: "Ask for it back", count: sent.count) {
+                ForEach(Array(sent.enumerated()), id: \.offset) { _, s in
                     if let p = people.first(where: { $0.id == s.personId }) {
-                        HStack(spacing: 12) {
-                            PersonAvatar(person: p, size: 36)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name).font(F.medium(14)).foregroundStyle(T.paper)
-                                Text("owes \(s.cents.dollars.money())").font(F.mono(11.5)).foregroundStyle(T.jade)
+                        RuledRow(minHeight: 60) {
+                            HStack(spacing: 12) {
+                                PersonAvatar(person: p, size: 34)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.name).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                                    Text("owes \(s.cents.dollars.money())").font(F.mono(12)).foregroundStyle(T.jade)
+                                }
+                                Spacer(minLength: 6)
+                                VenmoRequestButton(person: p, cents: s.cents, note: venmoNote, compact: true)
+                                    .fixedSize()
                             }
-                            Spacer()
-                            VenmoRequestButton(person: p, cents: s.cents, note: venmoNote, compact: true)
                         }
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 12)
-                        .overlay(alignment: .top) { if i > 0 { Hairline().padding(.leading, 60) } }
                     }
                 }
             }
-            .background(CardSurface(radius: T.radiusSmall))
             Text("Venmo opens with the request filled in — you confirm it there. When they pay, budgetr matches it and offers to settle.")
-                .font(F.body(11.5)).foregroundStyle(T.faint)
+                .font(F.body(12)).foregroundStyle(T.muted)
                 .fixedSize(horizontal: false, vertical: true)
             PillButton(title: "Done", role: .standard) { done() }
         }
@@ -549,13 +596,19 @@ private struct ReceiptPanel: View {
             if receipt == nil || scanning {
                 capture
             } else if let receipt {
-                brushRow
-                itemsCard(receipt)
-                totalsCard
-                if let itemized { perPerson(itemized) }
+                StatementSection(title: "Receipt", count: receipt.items.count) {
+                    brushRow
+                    Rule()
+                    ForEach(receipt.items) { item in
+                        itemRow(item)
+                    }
+                    totals
+                    addLineButton
+                }
+                if let itemized, participants.count > 2 { perPerson(itemized) }
             }
             if let scanNote {
-                Text(scanNote).font(F.body(11.5)).foregroundStyle(T.brass)
+                Text(scanNote).font(F.body(12)).foregroundStyle(T.brass)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -590,67 +643,71 @@ private struct ReceiptPanel: View {
     // ── Capture ──────────────────────────────────────────────────────
 
     private var capture: some View {
-        VStack(spacing: 12) {
-            if scanning {
-                HStack(spacing: 10) {
-                    ProgressView().tint(T.jade)
-                    Text("Reading the receipt on this phone…").font(F.body(13)).foregroundStyle(T.muted)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 26)
-                .background(CardSurface(radius: T.radiusSmall))
-            } else {
-                HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
+            StatementSection(title: "Receipt") {
+                if scanning {
+                    RuledRow(minHeight: 60) {
+                        HStack(spacing: 10) {
+                            ProgressView().tint(T.jade)
+                            Text("Reading the receipt on this phone…").font(F.body(14)).foregroundStyle(T.muted)
+                        }
+                    }
+                } else {
                     #if os(iOS)
-                    captureTile(symbol: "camera.fill", title: "Take a photo", enabled: CameraPicker.isAvailable) {
+                    captureRow(symbol: "camera", title: "Take a photo", enabled: CameraPicker.isAvailable) {
                         showingCamera = true
                     }
                     #endif
                     PhotosPicker(selection: $photo, matching: .images) {
-                        tileLabel(symbol: "photo.on.rectangle", title: "Photo or screenshot", enabled: true)
+                        rowLabel(symbol: "photo.on.rectangle", title: "Photo or screenshot", enabled: true)
+                    }
+                    .buttonStyle(.pressScale)
+                    Button {
+                        Haptics.tap()
+                        receipt = .empty
+                        editing = .newItem
+                        draftLabel = ""
+                        draftAmount = ""
+                    } label: {
+                        rowLabel(symbol: "keyboard", title: "Or type the lines in", enabled: true)
                     }
                     .buttonStyle(.pressScale)
                 }
-                Button {
-                    Haptics.tap()
-                    receipt = .empty
-                    editing = .newItem
-                    draftLabel = ""
-                    draftAmount = ""
-                } label: {
-                    Text("Or type the lines in").font(F.semibold(12.5)).foregroundStyle(T.brass)
-                }
-                .buttonStyle(.plain)
+            }
+            if !scanning {
                 Text("Read on this phone with Apple's text recognition — the picture isn't uploaded anywhere.")
-                    .font(F.body(11)).foregroundStyle(T.faint).multilineTextAlignment(.center)
+                    .font(F.body(12)).foregroundStyle(T.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    private func captureTile(symbol: String, title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    private func captureRow(symbol: String, title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button {
             Haptics.tap()
             action()
         } label: {
-            tileLabel(symbol: symbol, title: title, enabled: enabled)
+            rowLabel(symbol: symbol, title: title, enabled: enabled)
         }
         .buttonStyle(.pressScale)
         .disabled(!enabled)
     }
 
-    private func tileLabel(symbol: String, title: String, enabled: Bool) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(enabled ? T.jade : T.faint)
-                .frame(width: 46, height: 46)
-                .background(Circle().fill(T.jade.opacity(enabled ? 0.14 : 0.05)))
-            Text(title).font(F.semibold(12.5)).foregroundStyle(enabled ? T.paper : T.faint)
-                .multilineTextAlignment(.center)
+    private func rowLabel(symbol: String, title: String, enabled: Bool) -> some View {
+        RuledRow(minHeight: 52) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(enabled ? T.jade : T.muted)
+                    .frame(width: 24)
+                Text(title).font(F.medium(15)).foregroundStyle(enabled ? T.paper : T.muted)
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(T.muted)
+                    .accessibilityHidden(true)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
-        .background(CardSurface(radius: T.radiusSmall))
         .opacity(enabled ? 1 : 0.6)
     }
 
@@ -705,15 +762,22 @@ private struct ReceiptPanel: View {
     }
 
     private func color(_ id: String) -> Color {
-        if id == ReceiptSplit.me { return T.paper }
+        if id == ReceiptSplit.me { return PersonAvatar.me }
         return people.first { $0.id == id }.map(PersonAvatar.color(for:)) ?? T.muted
     }
 
+    /// "You" / "SL" — the tag a person wears on a line.
+    private func tag(_ id: String) -> String {
+        if id == ReceiptSplit.me { return "You" }
+        return people.first { $0.id == id }.map { PersonAvatar.initials($0.name) } ?? "?"
+    }
+
+    /// Who the next tap puts on a line.
     private var brushRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Tap the lines for…").font(F.body(11.5)).foregroundStyle(T.faint)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Tap a line to assign it to…").font(F.body(12)).foregroundStyle(T.muted)
             ScrollView(.horizontal) {
-                HStack(spacing: 7) {
+                HStack(spacing: 8) {
                     ForEach(participants, id: \.self) { id in
                         let on = brush == id
                         Button {
@@ -721,95 +785,92 @@ private struct ReceiptPanel: View {
                             withAnimation(M.snappy) { brush = id }
                         } label: {
                             HStack(spacing: 6) {
-                                PersonAvatar(name: name(id), color: color(id), size: 22)
-                                Text(name(id)).font(F.semibold(12.5)).foregroundStyle(on ? T.paper : T.muted)
+                                PersonTag(text: tag(id), color: color(id)).opacity(on ? 1 : 0.55)
+                                Text(name(id)).font(F.medium(13)).foregroundStyle(on ? T.paper : T.muted)
                                 if let p = itemized?.people.first(where: { $0.participantId == id }) {
-                                    Text(p.total.money()).font(F.mono(10.5)).foregroundStyle(on ? color(id) : T.faint)
+                                    Text(p.total.money()).font(F.mono(12)).foregroundStyle(T.muted)
                                 }
                             }
-                            .padding(.leading, 4)
-                            .padding(.trailing, 10)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(on ? color(id).opacity(0.18) : T.ink))
-                            .overlay(Capsule().strokeBorder(on ? color(id).opacity(0.7) : T.line, lineWidth: on ? 1.2 : 0.75))
+                            .padding(.leading, 6)
+                            .padding(.trailing, 12)
+                            .frame(minHeight: 44)
+                            .background(Capsule().fill(on ? T.panel2 : Color.clear))
+                            .overlay(Capsule().strokeBorder(on ? color(id) : T.line, lineWidth: 1))
+                            .contentShape(Capsule())
                         }
                         .buttonStyle(.pressScale)
+                        .accessibilityAddTraits(on ? .isSelected : [])
                     }
                 }
                 .padding(.vertical, 1)
+                .padding(.horizontal, 1)
             }
             .scrollIndicators(.hidden)
         }
+        .padding(.vertical, 10)
     }
 
-    private func itemsCard(_ receipt: ParsedReceipt) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(receipt.items.enumerated()), id: \.element.id) { i, item in
-                itemRow(item)
-                    .overlay(alignment: .top) { if i > 0 { Hairline().padding(.leading, 12) } }
-            }
-            Button {
-                Haptics.tap()
-                draftLabel = ""
-                draftAmount = ""
-                editing = .newItem
-            } label: {
-                Label("Add a line", systemImage: "plus")
-                    .font(F.semibold(12.5)).foregroundStyle(T.brass)
-                    .frame(maxWidth: .infinity).padding(.vertical, 11)
-            }
-            .buttonStyle(.plain)
-            .overlay(alignment: .top) { Hairline() }
+    private var addLineButton: some View {
+        Button {
+            Haptics.tap()
+            draftLabel = ""
+            draftAmount = ""
+            editing = .newItem
+        } label: {
+            Label("Add a line", systemImage: "plus")
+                .font(F.body(13)).foregroundStyle(T.brass)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
-        .background(CardSurface(radius: T.radiusSmall))
+        .buttonStyle(.plain)
     }
 
     private func itemRow(_ item: ReceiptItem) -> some View {
         let weights = assignments[item.id] ?? [:]
         let on = participants.filter { (weights[$0] ?? 0) > 0 }
         let empty = on.isEmpty
-        return Button {
-            Haptics.tick()
-            toggle(item.id)
-        } label: {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 5) {
-                        Text(item.label).font(F.medium(13.5)).foregroundStyle(T.paper).lineLimit(1)
-                        if item.quantity > 1 {
-                            Text("×\(item.quantity)").font(F.mono(10.5)).foregroundStyle(T.faint)
-                        }
-                    }
-                    if empty {
-                        Text("tap to put \(name(brush)) on it").font(F.body(10.5)).foregroundStyle(T.coral)
-                    } else {
-                        HStack(spacing: -5) {
-                            ForEach(on, id: \.self) { id in
-                                PersonAvatar(name: name(id), color: color(id), size: 18)
-                                    .background(Circle().fill(T.panel))
+        return RuledRow(minHeight: 48) {
+            Button {
+                Haptics.tick()
+                toggle(item.id)
+            } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 5) {
+                            Text(item.label).font(F.body(15)).foregroundStyle(T.paper).lineLimit(1)
+                            if item.quantity > 1 {
+                                Text("×\(item.quantity)").font(F.mono(12)).foregroundStyle(T.muted)
                             }
                         }
+                        if empty {
+                            Text("tap to put \(name(brush)) on it").font(F.body(12)).foregroundStyle(T.coral)
+                        }
                     }
+                    Spacer(minLength: 6)
+                    HStack(spacing: 4) {
+                        ForEach(on.prefix(4), id: \.self) { id in
+                            PersonTag(text: tag(id), color: color(id))
+                        }
+                        if on.count > 4 {
+                            Text("+\(on.count - 4)").font(F.mono(11)).foregroundStyle(T.muted)
+                        }
+                    }
+                    Text(item.total.money()).font(F.mono(14)).foregroundStyle(T.paper)
+                        .frame(minWidth: 64, alignment: .trailing)
                 }
-                Spacer(minLength: 6)
-                Text(item.total.money()).font(F.mono(13)).foregroundStyle(T.paper)
-                Image(systemName: (weights[brush] ?? 0) > 0 ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
-                    .foregroundStyle((weights[brush] ?? 0) > 0 ? color(brush) : T.lineStrong)
+                .frame(minHeight: 48)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .background(empty ? T.coral.opacity(0.06) : Color.clear)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button { shareEverywhere(item.id) } label: { Label("Everyone shared it", systemImage: "person.3") }
-            Button {
-                draftLabel = item.label
-                draftAmount = String(format: "%.2f", item.total)
-                editing = .item(item.id)
-            } label: { Label("Edit line", systemImage: "pencil") }
+            .buttonStyle(.plain)
+            .accessibilityValue(empty ? "nobody on it" : on.map(name).joined(separator: ", "))
+            .contextMenu {
+                Button { shareEverywhere(item.id) } label: { Label("Everyone shared it", systemImage: "person.3") }
+                Button {
+                    draftLabel = item.label
+                    draftAmount = String(format: "%.2f", item.total)
+                    editing = .item(item.id)
+                } label: { Label("Edit line", systemImage: "pencil") }
+            }
         }
     }
 
@@ -827,81 +888,89 @@ private struct ReceiptPanel: View {
 
     // ── Totals ───────────────────────────────────────────────────────
 
-    private var totalsCard: some View {
+    @ViewBuilder
+    private var totals: some View {
         let r = reconciled?.receipt ?? receipt ?? .empty
-        return VStack(spacing: 0) {
-            totalRow("Items", ReceiptSplit.itemsTotal(r).money(), edit: nil)
-            totalRow("Tax", (r.tax ?? 0).money(), edit: .tax)
-            totalRow("Tip", (r.tip ?? 0).money(), edit: .tip, note: (reconciled?.addedTip ?? 0) > 0 ? "incl. \((reconciled?.addedTip ?? 0).money()) to match the charge" : nil)
-            HStack {
-                Text("Receipt total").font(F.semibold(13.5)).foregroundStyle(T.paper)
-                Spacer()
-                Text(ReceiptSplit.receiptTotal(r).money()).font(F.monoSemibold(14)).foregroundStyle(T.paper)
+        totalRow("Items", ReceiptSplit.itemsTotal(r).money(), edit: nil)
+        totalRow("Tax, shared in proportion", (r.tax ?? 0).money(), edit: .tax)
+        totalRow("Tip, shared in proportion", (r.tip ?? 0).money(), edit: .tip, note: (reconciled?.addedTip ?? 0) > 0 ? "incl. \((reconciled?.addedTip ?? 0).money()) to match the charge" : nil)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("Receipt total").font(F.medium(15)).foregroundStyle(T.paper)
+            // Reconciled to the cent — as printed, or once the gap went to tip.
+            if let pending = reconciled?.pendingCharge, pending == 0 {
+                Text("matches the charge").font(F.body(12)).foregroundStyle(T.jade)
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .overlay(alignment: .top) { Hairline() }
-            if let pending = reconciled?.pendingCharge, Self.mismatched(pending: pending, charged: charged) {
-                Text("This receipt is \(pending.money()) more than the \(charged.dollars.money()) charged — far more than a tip. Check it's the right purchase, or fix a line.")
-                    .font(F.body(11)).foregroundStyle(T.coral)
-                    .padding(.horizontal, 12).padding(.bottom, 10)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let pending = reconciled?.pendingCharge, pending > 0 {
-                Text("Charged \(charged.dollars.money()) so far — the \(pending.money()) tip still has to settle. Friends owe their share of the full receipt.")
-                    .font(F.body(11)).foregroundStyle(T.brass)
-                    .padding(.horizontal, 12).padding(.bottom, 10)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Spacer(minLength: 6)
+            Text(ReceiptSplit.receiptTotal(r).money()).font(F.mono(14)).foregroundStyle(T.paper)
         }
-        .background(CardSurface(radius: T.radiusSmall))
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+        if let pending = reconciled?.pendingCharge, Self.mismatched(pending: pending, charged: charged) {
+            Text("This receipt is \(pending.money()) more than the \(charged.dollars.money()) charged — far more than a tip. Check it's the right purchase, or fix a line.")
+                .font(F.body(12)).foregroundStyle(T.coral)
+                .padding(.bottom, 8)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let pending = reconciled?.pendingCharge, pending > 0 {
+            Text("Charged \(charged.dollars.money()) so far — the \(pending.money()) tip still has to settle. Friends owe their share of the full receipt.")
+                .font(F.body(12)).foregroundStyle(T.brass)
+                .padding(.bottom, 8)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        Rule()
     }
 
     private func totalRow(_ label: String, _ value: String, edit: Edit?, note: String? = nil) -> some View {
-        Button {
-            guard let edit else { return }
-            Haptics.tap()
-            let r = receipt ?? .empty
-            draftAmount = String(format: "%.2f", edit == .tax ? (r.tax ?? 0) : (r.tip ?? 0))
-            editing = edit
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(label).font(F.body(13)).foregroundStyle(T.muted)
-                    if let note { Text(note).font(F.body(10)).foregroundStyle(T.faint) }
+        RuledRow(minHeight: 44) {
+            Button {
+                guard let edit else { return }
+                Haptics.tap()
+                let r = receipt ?? .empty
+                draftAmount = String(format: "%.2f", edit == .tax ? (r.tax ?? 0) : (r.tip ?? 0))
+                editing = edit
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(label).font(F.body(13)).foregroundStyle(T.muted)
+                        if let note { Text(note).font(F.body(12)).foregroundStyle(T.muted) }
+                    }
+                    Spacer(minLength: 6)
+                    Text(value).font(F.mono(13)).foregroundStyle(T.muted)
+                    if edit != nil {
+                        Image(systemName: "pencil").font(.system(size: 11)).foregroundStyle(T.muted)
+                            .accessibilityHidden(true)
+                    }
                 }
-                Spacer()
-                Text(value).font(F.mono(12.5)).foregroundStyle(T.paper)
-                if edit != nil {
-                    Image(systemName: "pencil").font(.system(size: 10)).foregroundStyle(T.faint)
-                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 9)
-            .padding(.horizontal, 12)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(edit == nil)
         }
-        .buttonStyle(.plain)
-        .disabled(edit == nil)
     }
 
+    /// With more than one friend on the receipt the result strip can only say
+    /// "they" — this says who.
     private func perPerson(_ split: ItemizedSplit) -> some View {
         VStack(spacing: 0) {
+            RuleLabel(leading: "Each share")
             ForEach(split.people, id: \.participantId) { p in
-                HStack(spacing: 10) {
-                    PersonAvatar(name: name(p.participantId), color: color(p.participantId), size: 28)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(name(p.participantId)).font(F.medium(13.5)).foregroundStyle(T.paper)
-                        Text("\(p.items.money()) + \((p.tax + p.tip).money()) tax & tip")
-                            .font(F.mono(10)).foregroundStyle(T.faint)
+                RuledRow(minHeight: 48) {
+                    HStack(spacing: 10) {
+                        PersonTag(text: tag(p.participantId), color: color(p.participantId))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(name(p.participantId)).font(F.medium(14)).foregroundStyle(T.paper)
+                            Text("\(p.items.money()) + \((p.tax + p.tip).money()) tax & tip")
+                                .font(F.mono(11)).foregroundStyle(T.muted)
+                        }
+                        Spacer(minLength: 6)
+                        Text(p.total.money()).font(F.mono(14))
+                            .foregroundStyle(p.participantId == ReceiptSplit.me ? T.paper : T.jade)
                     }
-                    Spacer()
-                    Text(p.total.money()).font(F.monoSemibold(13.5))
-                        .foregroundStyle(p.participantId == ReceiptSplit.me ? T.paper : T.jade)
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 12)
+                .accessibilityElement(children: .combine)
             }
         }
-        .background(RoundedRectangle(cornerRadius: T.radiusSmall, style: .continuous).fill(T.ink))
     }
 
     /// A receipt over the charge is normal while a tip settles — but not by
@@ -965,42 +1034,80 @@ private struct ReceiptPanel: View {
     }
 }
 
-/// People as toggle chips that wrap onto as many lines as they need.
+/// Evenly / Custom / By item — the kit's segmented control, drawn with the
+/// taller segments a thumb needs beside a label.
+private struct ModeSwitch: View {
+    let options: [(label: String, value: Int)]
+    @Binding var selection: Int
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(options.indices, id: \.self) { i in
+                let option = options[i]
+                let active = option.value == selection
+                Button {
+                    guard !active else { return }
+                    Haptics.tick()
+                    withAnimation(reduceMotion ? .easeOut(duration: 0.15) : M.snappy) {
+                        selection = option.value
+                    }
+                } label: {
+                    Text(option.label)
+                        .font(F.medium(12.5))
+                        .foregroundStyle(active ? T.paper : T.muted)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 38)
+                        .background(Capsule().fill(active ? T.panel2 : Color.clear))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(active ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .overlay(Capsule().strokeBorder(T.line, lineWidth: 1))
+        .fixedSize()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Method")
+    }
+}
+
+/// You and your people as toggle chips that wrap onto as many lines as they need.
 private struct FlowChips: View {
     let people: [Summary.Person]
     @Binding var chosen: [String]
+    @Binding var includeMe: Bool
+    /// By item you're always on the receipt, so your chip stays on.
+    var meLocked = false
     var onAdd: (() -> Void)?
 
     var body: some View {
+        let meOn = includeMe || meLocked
         WrapLayout(spacing: 8) {
+            Button {
+                Haptics.tick()
+                withAnimation(M.settle) { includeMe.toggle() }
+            } label: {
+                chip(avatar: PersonAvatar(name: "You", color: PersonAvatar.me, size: 30), title: "Me", color: PersonAvatar.me, on: meOn)
+            }
+            .buttonStyle(.pressScale)
+            .disabled(meLocked)
+            .accessibilityLabel("Include me")
+            .accessibilityValue(meOn ? "You keep a share of the bill" : "You paid entirely for others")
+            .accessibilityAddTraits(meOn ? .isSelected : [])
+
             ForEach(people) { p in
                 let on = chosen.contains(p.id)
-                let color = PersonAvatar.color(for: p)
                 Button {
                     Haptics.tick()
                     withAnimation(M.snappy) {
                         if on { chosen.removeAll { $0 == p.id } } else { chosen.append(p.id) }
                     }
                 } label: {
-                    HStack(spacing: 7) {
-                        // The tick rides the avatar, so choosing someone never
-                        // changes a chip's width and reflows the row.
-                        PersonAvatar(person: p, size: 24)
-                            .overlay {
-                                if on {
-                                    Circle().fill(color)
-                                    Image(systemName: "checkmark").font(.system(size: 10, weight: .heavy)).foregroundStyle(T.onJade)
-                                }
-                            }
-                        Text(p.name.split(separator: " ").first.map(String.init) ?? p.name)
-                            .font(F.semibold(13))
-                            .foregroundStyle(on ? T.paper : T.muted)
-                    }
-                    .padding(.leading, 4)
-                    .padding(.trailing, 12)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(on ? color.opacity(0.16) : T.ink))
-                    .overlay(Capsule().strokeBorder(on ? color.opacity(0.6) : T.line, lineWidth: on ? 1 : 0.75))
+                    chip(avatar: PersonAvatar(person: p, size: 30), title: p.name, color: PersonAvatar.color(for: p), on: on)
                 }
                 .buttonStyle(.pressScale)
                 .accessibilityAddTraits(on ? .isSelected : [])
@@ -1012,16 +1119,36 @@ private struct FlowChips: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "plus").font(.system(size: 11, weight: .bold))
-                        Text("Someone new").font(F.semibold(13))
+                        Text("Someone new").font(F.body(15))
                     }
-                    .foregroundStyle(T.brass)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Capsule().strokeBorder(T.brass.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                    .foregroundStyle(T.muted)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(Capsule().strokeBorder(T.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.pressScale)
             }
         }
+    }
+
+    /// The chip keeps its width whether it's on or off, so choosing someone
+    /// never reflows the row.
+    private func chip(avatar: PersonAvatar, title: String, color: Color, on: Bool) -> some View {
+        HStack(spacing: 8) {
+            avatar.opacity(on ? 1 : 0.45)
+            Text(title)
+                .font(F.body(15))
+                .foregroundStyle(on ? T.paper : T.muted)
+                .lineLimit(1)
+                .frame(maxWidth: 170)
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 14)
+        .frame(minHeight: 44)
+        .background(Capsule().fill(on ? T.panel2 : Color.clear))
+        .overlay(Capsule().strokeBorder(on ? color : T.line, lineWidth: 1))
+        .contentShape(Capsule())
     }
 }
 
@@ -1100,80 +1227,78 @@ struct RecordPaybackSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Eyebrow("Shared")
-                        Text("Record a payback").font(F.display(28)).foregroundStyle(T.paper)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Record a payback").font(F.display(26)).foregroundStyle(T.paper)
                         Text("Settles what they owe. Link the deposit it arrived as, and it stays out of your income.")
-                            .font(F.body(12.5)).foregroundStyle(T.muted)
+                            .font(F.body(13)).foregroundStyle(T.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionHeader(title: "From")
+                    StatementSection(title: "From") {
                         if people.isEmpty {
-                            Text("No people yet — add them on your Mac.").font(F.body(12.5)).foregroundStyle(T.faint)
+                            Text("No people yet — add them on your Mac.").font(F.body(13)).foregroundStyle(T.muted)
+                                .padding(.vertical, 14)
                         }
-                        VStack(spacing: 0) {
-                            ForEach(Array(people.enumerated()), id: \.element.id) { i, p in
-                                Button {
-                                    Haptics.tick()
-                                    withAnimation(M.snappy) {
-                                        personId = p.id
-                                        if amount.isEmpty || depositId == nil, p.cents > 0 {
-                                            amount = String(format: "%.2f", p.cents.dollars)
-                                        }
+                        ForEach(people) { p in
+                            Button {
+                                Haptics.tick()
+                                withAnimation(M.snappy) {
+                                    personId = p.id
+                                    if amount.isEmpty || depositId == nil, p.cents > 0 {
+                                        amount = String(format: "%.2f", p.cents.dollars)
                                     }
-                                } label: {
+                                }
+                            } label: {
+                                RuledRow(minHeight: 56) {
                                     HStack(spacing: 12) {
                                         PersonAvatar(person: p, size: 34)
-                                        Text(p.name).font(F.medium(14)).foregroundStyle(T.paper)
-                                        Spacer()
-                                        Text(p.cents > 0 ? "owes \(p.cents.dollars.money())" : p.cents < 0 ? "you owe \(abs(p.cents).dollars.money())" : "settled")
-                                            .font(F.mono(11.5))
-                                            .foregroundStyle(p.cents > 0 ? T.jade : p.cents < 0 ? T.coral : T.faint)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(p.name).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                                            Text(p.cents > 0 ? "owes \(p.cents.dollars.money())" : p.cents < 0 ? "you owe \(abs(p.cents).dollars.money())" : "settled")
+                                                .font(F.mono(12))
+                                                .foregroundStyle(p.cents > 0 ? T.jade : p.cents < 0 ? T.coral : T.muted)
+                                        }
+                                        Spacer(minLength: 6)
                                         Image(systemName: personId == p.id ? "checkmark.circle.fill" : "circle")
-                                            .font(.system(size: 17))
+                                            .font(.system(size: 20))
                                             .foregroundStyle(personId == p.id ? T.jade : T.lineStrong)
+                                            .accessibilityHidden(true)
                                     }
-                                    .padding(.vertical, 9)
-                                    .padding(.horizontal, 12)
-                                    .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.pressScale)
-                                .overlay(alignment: .top) { if i > 0 { Hairline().padding(.leading, 58) } }
                             }
+                            .buttonStyle(.pressScale)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(personId == p.id ? .isSelected : [])
                         }
-                        .background(CardSurface(radius: T.radiusSmall))
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionHeader(title: "Amount")
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Amount").font(F.medium(13)).foregroundStyle(T.muted)
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("$").font(F.display(30)).foregroundStyle(T.faint)
+                            Text("$").font(F.display(30)).foregroundStyle(T.muted)
                             TextField("0.00", text: $amount)
-                                .font(F.display(40))
+                                .font(F.display(44))
                                 .foregroundStyle(T.paper)
                                 #if os(iOS)
                                 .keyboardType(.decimalPad)
                                 #endif
+                                .accessibilityLabel("Amount")
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(T.ink))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(T.lineStrong, lineWidth: 0.75))
+                        .padding(.vertical, 6)
+                        Rule(strong: true)
                         if let person, let cents, person.cents > 0, cents != person.cents {
                             Text(cents < person.cents
                                  ? "Leaves \((person.cents - cents).dollars.money()) still owed."
                                  : "That's \((cents - person.cents).dollars.money()) more than they owe.")
-                                .font(F.body(11.5)).foregroundStyle(cents < person.cents ? T.faint : T.brass)
+                                .font(F.body(12)).foregroundStyle(cents < person.cents ? T.muted : T.brass)
+                                .padding(.top, 8)
                         }
                     }
 
                     if !deposits.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            SectionHeader(title: "Arrived as", detail: "optional")
-                            VStack(spacing: 0) {
-                                ForEach(Array(deposits.prefix(6).enumerated()), id: \.element.id) { i, t in
+                        VStack(alignment: .leading, spacing: 0) {
+                            StatementSection(title: "Arrived as") {
+                                ForEach(deposits.prefix(6)) { t in
                                     Button {
                                         Haptics.tick()
                                         withAnimation(M.snappy) {
@@ -1185,42 +1310,47 @@ struct RecordPaybackSheet: View {
                                             }
                                         }
                                     } label: {
-                                        HStack(spacing: 12) {
-                                            MerchantAvatar(name: t.merchant, icon: index[t.category]?.icon, size: 32)
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(t.merchant).font(F.medium(13.5)).foregroundStyle(T.paper).lineLimit(1)
-                                                Text(CompanionFormat.day(t.ts)).font(F.body(11)).foregroundStyle(T.faint)
+                                        RuledRow(minHeight: 56) {
+                                            HStack(spacing: 12) {
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(t.merchant).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                                                    Text(CompanionFormat.day(t.ts)).font(F.body(12)).foregroundStyle(T.muted)
+                                                }
+                                                Spacer(minLength: 6)
+                                                Text("+\(t.cents.dollars.money())").font(F.mono(14)).foregroundStyle(T.jade)
+                                                Image(systemName: depositId == t.id ? "link.circle.fill" : "link.circle")
+                                                    .font(.system(size: 20))
+                                                    .foregroundStyle(depositId == t.id ? T.jade : T.lineStrong)
+                                                    .accessibilityHidden(true)
                                             }
-                                            Spacer()
-                                            Text("+\(t.cents.dollars.money())").font(F.mono(12.5)).foregroundStyle(T.jade)
-                                            Image(systemName: depositId == t.id ? "link.circle.fill" : "link.circle")
-                                                .font(.system(size: 17))
-                                                .foregroundStyle(depositId == t.id ? T.jade : T.lineStrong)
                                         }
-                                        .padding(.vertical, 9)
-                                        .padding(.horizontal, 12)
-                                        .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.pressScale)
-                                    .overlay(alignment: .top) { if i > 0 { Hairline().padding(.leading, 56) } }
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityAddTraits(depositId == t.id ? .isSelected : [])
                                 }
                             }
-                            .background(CardSurface(radius: T.radiusSmall))
+                            Text("Optional — linking the deposit keeps it out of your income.")
+                                .font(F.body(12)).foregroundStyle(T.muted)
+                                .padding(.top, 8)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
                 .padding(22)
-                .padding(.bottom, 90)
+                .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 6) {
-                    if let problem { Text(problem).font(F.body(11.5)).foregroundStyle(T.faint) }
-                    PillButton(title: sending ? "Sending…" : "Record \(cents.map { $0.dollars.money() } ?? "payback")", systemImage: "checkmark", role: .primary) {
+                VStack(spacing: 8) {
+                    PillButton(title: sending ? "Sending…" : "Record \(cents.map { $0.dollars.money() } ?? "payback")", role: .primary) {
                         send()
                     }
                     .disabled(problem != nil || sending)
                     .opacity(problem != nil ? 0.45 : 1)
+                    if let problem {
+                        Text(problem).font(F.body(12)).foregroundStyle(T.muted)
+                    }
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 10)
@@ -1269,34 +1399,33 @@ struct PendingOpRow: View {
 
     var body: some View {
         let d = describe()
-        HStack(spacing: 11) {
-            Image(systemName: d.symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(T.brass)
-                .frame(width: 30, height: 30)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(T.brass.opacity(0.14)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(d.title).font(F.medium(13.5)).foregroundStyle(T.paper).lineLimit(1)
-                HStack(spacing: 5) {
-                    ProgressView().controlSize(.mini).tint(T.faint)
-                    Text("waiting for your Mac").font(F.body(11)).foregroundStyle(T.faint)
+        RuledRow(minHeight: 60) {
+            HStack(spacing: 12) {
+                Image(systemName: d.symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(T.brass)
+                    .frame(width: 22)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(d.title).font(F.medium(15)).foregroundStyle(T.paper).lineLimit(1)
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini).tint(T.muted)
+                        Text("waiting for your Mac").font(F.body(12)).foregroundStyle(T.muted)
+                    }
+                }
+                Spacer(minLength: 6)
+                Text(d.amount).font(F.mono(14)).foregroundStyle(T.paper)
+                Menu {
+                    Button("Cancel this edit", role: .destructive) { onDiscard() }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(T.muted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
             }
-            Spacer(minLength: 6)
-            Text(d.amount).font(F.mono(12.5)).foregroundStyle(T.paper)
-            Menu {
-                Button("Cancel this edit", role: .destructive) { onDiscard() }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(T.faint)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(T.panel.opacity(0.85)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(T.brass.opacity(0.3), style: StrokeStyle(lineWidth: 0.75, dash: [4, 3])))
         .accessibilityElement(children: .combine)
     }
 
