@@ -7,6 +7,21 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-11-19
+
+### Fixed
+
+- **The phone shows whole months of transactions.** The desktop sent the forty
+  most recent rows, so the companion could never show a full month. It now
+  sends every transaction from the first day of last month, and Activity has a
+  this month / last month switch whose totals and filters follow the month in
+  view. Needs the companion on a matching build; an older one keeps showing the
+  recent forty.
+- **Manual holdings no longer drop off the phone.** A holding entered with a
+  ticker (BTC-USD, a wallet's SOL-USD) is valued as quantity × a quote, and a
+  single failed price lookup used to remove it from the published summary until
+  the next good one. The desktop now falls back to the last price it got.
+
 ## [0.16.0] — 2026-11-17
 
 The phone catches up with the desktop. The companion is redrawn in the same
