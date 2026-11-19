@@ -496,6 +496,59 @@ describe("read-model — what the phone was missing", () => {
   });
 });
 
+describe("read-model — two full months for the phone", () => {
+  it("sends every transaction from the first of last month, not the last forty", () => {
+    const now = new Date();
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const lastMonth15 = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
+    const twoMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 20));
+    db.insert(schema.transactions)
+      .values([
+        // 60 rows last month: more than `recent` can ever hold.
+        ...Array.from({ length: 60 }, (_, i) => ({
+          id: `txn-ledger-${i}`,
+          accountId: "acc-chk",
+          amount: 1 + i,
+          date: iso(lastMonth15),
+          name: `LEDGER ROW ${i}`,
+          pending: false,
+        })),
+        { id: "txn-too-old", accountId: "acc-chk", amount: 5, date: iso(twoMonthsAgo), name: "OLD", pending: false },
+      ])
+      .run();
+
+    const m = buildReadModel(Math.floor(Date.now() / 1000));
+    const s = core.buildSummary(m);
+    core.assertValidSummary(s);
+
+    expect(s.recent.length).toBeLessThanOrEqual(core.MAX_RECENT_TXNS);
+    const ids = new Set((s.ledger ?? []).map((t) => t.id));
+    for (let i = 0; i < 60; i++) expect(ids.has(`txn-ledger-${i}`)).toBe(true);
+    expect(ids.has("txn-1")).toBe(true); // this month too
+    expect(ids.has("txn-too-old")).toBe(false); // nothing before last month
+    // Most recent first, like `recent`.
+    const stamps = (s.ledger ?? []).map((t) => t.ts);
+    expect([...stamps].sort((a, b) => b - a)).toEqual(stamps);
+  });
+});
+
+describe("mergePrices", () => {
+  it("keeps a holding priced when this round's quote fails", async () => {
+    const { mergePrices } = await import("./read-model");
+    // BTC's quote failed this round; the last one that worked stands in.
+    expect(mergePrices(["btc-usd", "ETH-USD"], { "ETH-USD": 3_100 }, { "BTC-USD": 60_000, "ETH-USD": 3_000 })).toEqual({
+      "BTC-USD": 60_000,
+      "ETH-USD": 3_100,
+    });
+  });
+
+  it("never invents a price, and drops symbols no longer held", async () => {
+    const { mergePrices } = await import("./read-model");
+    expect(mergePrices(["SOL-USD"], {}, { "BTC-USD": 60_000 })).toEqual({});
+    expect(mergePrices(["SOL-USD"], { "SOL-USD": 0 }, {})).toEqual({});
+  });
+});
+
 /**
  * The phone resends every op until the desktop lists it in appliedOpIds, so an
  * addPerson and the edits naming that person routinely land in different

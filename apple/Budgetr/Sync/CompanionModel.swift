@@ -331,7 +331,7 @@ enum CompanionModel {
 
         let budgets = Dictionary(s.budgets.map { ($0.category, $0) }, uniquingKeysWith: { a, _ in a })
         var fromTape: [String: Int] = [:]
-        for t in s.recent where t.ts >= month.startSec && t.cents < 0 {
+        for t in s.tape where t.ts >= month.startSec && t.cents < 0 {
             if budgets[t.category] != nil || !isSpend(t.category) { continue }
             fromTape[t.category, default: 0] += abs(t.cents)
         }
@@ -343,14 +343,14 @@ enum CompanionModel {
         }
         for (id, cents) in fromTape {
             rows.append(CategorySpend(id: id, name: name(id, index), icon: index[id]?.icon,
-                                      cents: cents, budget: nil, partial: true))
+                                      cents: cents, budget: nil, partial: !s.hasFullLedger))
         }
         return rows.filter { $0.cents > 0 }.sorted { $0.cents > $1.cents }
     }
 
     /// This month's outflows for one category, newest first.
     static func categoryTxns(_ s: Summary, category: String, month: Month) -> [Summary.Txn] {
-        s.recent
+        s.tape
             .filter { $0.category == category && $0.cents < 0 && $0.ts >= month.startSec }
             .sorted { $0.ts > $1.ts }
     }

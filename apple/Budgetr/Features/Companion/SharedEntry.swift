@@ -44,12 +44,12 @@ struct SplitBillSheet: View {
         let queued = Set(companion.pending.compactMap { op -> String? in
             if case .splitBill(let o) = op { return o.txnId } else { return nil }
         })
-        return summary.recent
+        return summary.tape
             .filter { CompanionModel.isSpend($0, index) && !split.contains($0.id) && !queued.contains($0.id) }
             .sorted { $0.ts > $1.ts }
     }
 
-    private var txn: Summary.Txn? { summary.recent.first { $0.id == txnId } }
+    private var txn: Summary.Txn? { summary.tape.first { $0.id == txnId } }
     private var total: Int { abs(txn?.cents ?? 0) }
 
     // ── By-item arithmetic ───────────────────────────────────────────
@@ -1210,7 +1210,7 @@ struct RecordPaybackSheet: View {
     /// Recent money in that isn't income — the Venmo/Zelle/Apple Cash that
     /// paybacks usually arrive as. Linking one keeps it out of your income.
     private var deposits: [Summary.Txn] {
-        summary.recent
+        summary.tape
             .filter { $0.cents > 0 && !CompanionModel.isIncome($0, index) && !$0.merchant.uppercased().contains("AUTOPAY") }
             .sorted { $0.ts > $1.ts }
     }
@@ -1436,7 +1436,7 @@ struct PendingOpRow: View {
         }
         switch op {
         case .splitBill(let o):
-            let merchant = summary.recent.first { $0.id == o.txnId }?.merchant ?? "a purchase"
+            let merchant = summary.tape.first { $0.id == o.txnId }?.merchant ?? "a purchase"
             let names = o.shares.map { first($0.personId) }
             return ("person.2", "Split \(merchant) with \(names.joined(separator: ", "))",
                     o.shares.reduce(0) { $0 + $1.cents }.dollars.money())

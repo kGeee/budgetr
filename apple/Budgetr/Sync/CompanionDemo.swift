@@ -184,6 +184,8 @@ enum CompanionDemo {
         let monthTotal = max(1, thisMonth.reduce(0) { $0 + $1.cents })
         let budgeted = budgets.reduce(0) { $0 + $1.spentCents }
         summary.budgetSpendByDay = thisMonth.map { .init(d: $0.d, cents: $0.cents * budgeted / monthTotal) }
+        // The demo's tape stands in for the full two-month ledger.
+        summary.ledger = summary.recent.filter { $0.ts >= month.prevStartSec }
         // The unit price each share-count position was "valued at", so the demo
         // moves with real quotes the way a synced ledger would.
         summary.positionPx = positions.compactMap { p in

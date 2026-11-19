@@ -921,7 +921,7 @@ private struct TopMerchants: View {
     private func merchants() -> [Row] {
         let index = CompanionModel.categoryIndex(summary)
         var sums: [String: (Int, Int, String)] = [:]
-        for t in summary.recent where t.ts >= month.startSec && CompanionModel.isSpend(t, index) {
+        for t in summary.tape where t.ts >= month.startSec && CompanionModel.isSpend(t, index) {
             let cur = sums[t.merchant] ?? (0, 0, t.category)
             sums[t.merchant] = (cur.0 + abs(t.cents), cur.1 + 1, cur.2)
         }
@@ -1241,35 +1241,53 @@ struct CompanionActivityView: View {
     @State private var window = 30
     @State private var filter: ActivityFilter = .all
     @State private var sheet: SharedSheet?
+    /// 0 is this month, 1 is last month — the two the Mac sends in full.
+    @State private var monthBack = 0
 
     var body: some View {
-        BScreen("Activity", eyebrow: "Recent transactions") {
+        BScreen("Activity", eyebrow: "Transactions") {
             CompanionStatusLine()
             if let s = companion.summary {
+                let month = CompanionModel.Month()
                 let index = CompanionModel.categoryIndex(s)
                 let dots = categoryDotColors(s)
-                let shown = s.recent.filter { matches($0, index) }
+                // Every transaction of the chosen month when the Mac sends two
+                // full months; otherwise the capped recent tape, as before.
+                let scope = scoped(s, month: month)
+                let shown = scope.filter { matches($0, index) }
                 FreshnessLine(asOf: s.asOf)
-                StatCells(cells: monthCells(s, index: index)).rise(0)
+                if s.hasFullLedger {
+                    Segmented(options: [(month.label, 0), (Self.previousLabel(month), 1)], selection: $monthBack)
+                        .accessibilityLabel("Month")
+                }
+                StatCells(cells: monthCells(s, scope: scope, month: month, index: index)).rise(0)
                 spendWindow(s).rise(1)
                 FilterChips(options: [
-                    .init(label: "All", value: .all, count: s.recent.count),
-                    .init(label: "Spending", value: .spending, count: s.recent.filter { CompanionModel.isSpend($0, index) }.count, symbol: "arrow.up.right"),
-                    .init(label: "Income", value: .income, count: s.recent.filter { CompanionModel.isIncome($0, index) }.count, symbol: "arrow.down.left"),
-                    .init(label: "Transfers", value: .transfers, count: s.recent.filter { CompanionModel.flow($0, index) == .transfer }.count, symbol: "arrow.left.arrow.right"),
-                    .init(label: "Pending", value: .pending, count: s.recent.filter(\.pending).count, symbol: "clock"),
+                    .init(label: "All", value: .all, count: scope.count),
+                    .init(label: "Spending", value: .spending, count: scope.filter { CompanionModel.isSpend($0, index) }.count, symbol: "arrow.up.right"),
+                    .init(label: "Income", value: .income, count: scope.filter { CompanionModel.isIncome($0, index) }.count, symbol: "arrow.down.left"),
+                    .init(label: "Transfers", value: .transfers, count: scope.filter { CompanionModel.flow($0, index) == .transfer }.count, symbol: "arrow.left.arrow.right"),
+                    .init(label: "Pending", value: .pending, count: scope.filter(\.pending).count, symbol: "clock"),
                 ], selection: $filter)
                 .rise(2)
-                flowLine(s, index: index)
+                flowLine(s, scope: scope, month: month, index: index)
 
                 if shown.isEmpty {
-                    EmptyState(symbol: "line.3.horizontal.decrease.circle", title: "Nothing here", message: "No recent transactions match this filter.")
+                    EmptyState(
+                        symbol: "line.3.horizontal.decrease.circle",
+                        title: "Nothing here",
+                        message: s.hasFullLedger ? "No transactions in \(scopeLabel(month)) match this filter." : "No recent transactions match this filter."
+                    )
                 } else {
                     ForEach(Array(groups(shown).enumerated()), id: \.element.day) { i, g in
-                        dayGroup(g, index: index, dots: dots).rise(3 + i)
+                        // Only the first screenful animates in: a month can be
+                        // two hundred rows, and staggering all of them is a wait.
+                        dayGroup(g, index: index, dots: dots).rise(min(3 + i, 8))
                     }
                 }
-                Text("The \(s.recent.count) most recent — the full ledger stays on your Mac.")
+                Text(s.hasFullLedger
+                     ? "Every transaction since \(Self.previousLabel(month)) 1 — \(s.tape.count) in all. Older ones stay on your Mac."
+                     : "The \(s.tape.count) most recent — the full ledger stays on your Mac.")
                     .font(F.body(12))
                     .foregroundStyle(T.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1284,6 +1302,27 @@ struct CompanionActivityView: View {
         }
     }
 
+    /// The transactions in view: one whole month of the ledger, or — from a
+    /// Mac that doesn't send it — the recent tape.
+    private func scoped(_ s: Summary, month: CompanionModel.Month) -> [Summary.Txn] {
+        guard s.hasFullLedger else { return s.tape }
+        return monthBack == 0
+            ? s.tape.filter { $0.ts >= month.startSec }
+            : s.tape.filter { $0.ts >= month.prevStartSec && $0.ts < month.startSec }
+    }
+
+    private func scopeLabel(_ month: CompanionModel.Month) -> String {
+        monthBack == 0 ? month.label : Self.previousLabel(month)
+    }
+
+    /// "October", for the month before `month`.
+    private static func previousLabel(_ month: CompanionModel.Month) -> String {
+        let f = DateFormatter()
+        f.timeZone = CompanionModel.utc.timeZone
+        f.dateFormat = "LLLL"
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(month.prevStartSec)))
+    }
+
     private func matches(_ t: Summary.Txn, _ index: [String: Summary.Category]) -> Bool {
         switch filter {
         case .all: return true
@@ -1294,26 +1333,31 @@ struct CompanionActivityView: View {
         }
     }
 
-    /// Out this month is the Mac's own daily series; In is the income on the
-    /// recent tape since the 1st — a floor, and labelled as the tape.
-    private func monthCells(_ s: Summary, index: [String: Summary.Category]) -> [StatCells.Cell] {
-        let month = CompanionModel.Month()
-        let tape = s.recent.filter { $0.ts >= month.startSec }
-        let earned = tape.filter { CompanionModel.isIncome($0, index) }
+    /// Out is the Mac's own daily series for the month in view; In is the
+    /// income among the transactions in view — complete with the full ledger,
+    /// a floor (and labelled so) on the recent tape.
+    private func monthCells(_ s: Summary, scope: [Summary.Txn], month: CompanionModel.Month, index: [String: Summary.Category]) -> [StatCells.Cell] {
+        let label = s.hasFullLedger ? scopeLabel(month) : month.label
+        let inView = s.hasFullLedger ? scope : scope.filter { $0.ts >= month.startSec }
+        let earned = inView.filter { CompanionModel.isIncome($0, index) }
         let inn = earned.reduce(0) { $0 + $1.cents }
+        let tapeSpent = inView.filter { CompanionModel.isSpend($0, index) }.reduce(0) { $0 - $1.cents }
         let out: StatCells.Cell
         if let series = s.spendByDay {
-            out = .init(label: "Out in \(month.label)", value: CompanionModel.totals(series, month: month).spentCents.dollars.money())
+            let cents = s.hasFullLedger && monthBack == 1
+                ? series.filter { $0.d >= month.prevStartSec && $0.d < month.startSec }.reduce(0) { $0 + $1.cents }
+                : CompanionModel.totals(series, month: month).spentCents
+            out = .init(label: "Out in \(label)", value: cents.dollars.money())
         } else {
-            let spent = tape.filter { CompanionModel.isSpend($0, index) }.reduce(0) { $0 - $1.cents }
-            out = .init(label: "Out in \(month.label)", value: spent.dollars.money(), note: "recent tape")
+            out = .init(label: "Out in \(label)", value: tapeSpent.dollars.money(), note: s.hasFullLedger ? nil : "recent tape")
         }
+        let deposits = "\(earned.count) deposit\(earned.count == 1 ? "" : "s")"
         return [
             out,
             .init(
                 label: "In",
                 value: "+\(inn.dollars.money())",
-                note: "\(earned.count) deposit\(earned.count == 1 ? "" : "s") · recent tape",
+                note: s.hasFullLedger ? deposits : "\(deposits) · recent tape",
                 valueColor: T.jade
             ),
         ]
@@ -1367,16 +1411,16 @@ struct CompanionActivityView: View {
         return out.map { (day: $0.0, ts: $0.1, txns: $0.2) }
     }
 
-    /// Earned against spent across the recent tape. Transfers — card
+    /// Earned against spent across what's in view. Transfers — card
     /// payments, moves between your own accounts, fronted shares — are
     /// neither, and are counted on their own so they're visibly not ignored.
-    private func flowLine(_ s: Summary, index: [String: Summary.Category]) -> some View {
-        let spent = s.recent.filter { CompanionModel.isSpend($0, index) }
-        let earned = s.recent.filter { CompanionModel.isIncome($0, index) }
-        let moved = s.recent.filter { CompanionModel.flow($0, index) == .transfer }
+    private func flowLine(_ s: Summary, scope: [Summary.Txn], month: CompanionModel.Month, index: [String: Summary.Category]) -> some View {
+        let spent = scope.filter { CompanionModel.isSpend($0, index) }
+        let earned = scope.filter { CompanionModel.isIncome($0, index) }
+        let moved = scope.filter { CompanionModel.flow($0, index) == .transfer }
         let out = spent.reduce(0) { $0 - $1.cents }
         let inn = earned.reduce(0) { $0 + $1.cents }
-        return (Text("On this tape  ")
+        return (Text(s.hasFullLedger ? "\(scopeLabel(month))  " : "On this tape  ")
             + Text("\(spent.count) purchase\(spent.count == 1 ? "" : "s") ") + Text(out.dollars.moneyCompact()).foregroundStyle(T.paper)
             + Text("  ·  \(earned.count) deposit\(earned.count == 1 ? "" : "s") ") + Text("+\(inn.dollars.moneyCompact())").foregroundStyle(T.jade)
             + Text("  ·  \(moved.count) transfer\(moved.count == 1 ? "" : "s"), not counted"))
@@ -1812,7 +1856,7 @@ struct CompanionSettingsView: View {
                     HStack(spacing: 8) {
                         StatTile(label: "Accounts", value: "\(s.accounts.count)", note: "linked")
                         StatTile(label: "Budgets", value: "\(s.budgets.count)", note: "this month")
-                        StatTile(label: "Recent", value: "\(s.recent.count)", note: "transactions")
+                        StatTile(label: s.hasFullLedger ? "Ledger" : "Recent", value: "\(s.tape.count)", note: "transactions")
                     }
                 }
                 .rise(2)
