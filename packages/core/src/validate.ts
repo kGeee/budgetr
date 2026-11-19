@@ -150,6 +150,20 @@ export function assertValidSummary(s: unknown): asserts s is Summary {
     req(typeof t.pending === 'boolean', `${path}.pending`, 'must be a boolean');
   });
 
+  if (s.ledger !== undefined) {
+    reqArr(s.ledger, '$.ledger');
+    s.ledger.forEach((t, i) => {
+      const path = `$.ledger[${i}]`;
+      req(isRecord(t), path, 'must be an object');
+      reqStr(t.id, `${path}.id`);
+      reqInt(t.ts, `${path}.ts`);
+      req(typeof t.merchant === 'string', `${path}.merchant`, 'must be a string');
+      reqInt(t.cents, `${path}.cents`);
+      reqStr(t.category, `${path}.category`);
+      req(typeof t.pending === 'boolean', `${path}.pending`, 'must be a boolean');
+    });
+  }
+
   reqArr(s.positions, '$.positions');
   s.positions.forEach((p, i) => {
     const path = `$.positions[${i}]`;

@@ -47,6 +47,11 @@ export interface Summary {
   accounts: AccountSummary[];
   budgets: BudgetSummary[];
   recent: TxnSummary[]; // most-recent first; ~40 items
+  // Every transaction from the first day of last month to now, most recent
+  // first — so the phone can show two whole months rather than the last forty
+  // rows. `recent` stays as it was for phones that predate this; a phone that
+  // knows `ledger` reads it instead. Capped at MAX_LEDGER_TXNS.
+  ledger?: TxnSummary[];
   positions: PositionSummary[]; // descending by value
   alerts: AlertSummary[];
   investments?: InvestmentsSummary; // optional: older writers simply omit it
@@ -374,6 +379,9 @@ export interface ScanReceiptOp extends OpBase {
 // ── Contract bounds (shared by buildSummary and validators) ────────
 export const MAX_APPLIED_OP_IDS = 200;
 export const MAX_RECENT_TXNS = 40;
+// Two months of a busy household's ledger, with room to spare, and still well
+// inside the relay's 256 KB body limit once sealed.
+export const MAX_LEDGER_TXNS = 1200;
 export const MAX_SPARK_POINTS = 92;
 export const MAX_SECTOR_SLICES = 10;
 export const MAX_STRATEGIES = 8;

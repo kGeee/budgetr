@@ -76,6 +76,20 @@ final class LivePricingTests: XCTestCase {
         XCTAssertEqual(book.live, ["AAPL"])
     }
 
+    func testTheTapeIsTheFullLedgerWhenTheMacSendsOne() throws {
+        var s = try summary(px: nil)
+        XCTAssertFalse(s.hasFullLedger)
+        XCTAssertEqual(s.tape, s.recent) // an older Mac: the capped tape stands
+
+        let json = #"[{"id":"a","ts":1750000000,"merchant":"Cafe","cents":-450,"category":"cat_food","pending":false},{"id":"b","ts":1749000000,"merchant":"Pay","cents":200000,"category":"cat_income","pending":false}]"#
+        s.ledger = try JSONDecoder().decode([Summary.Txn].self, from: Data(json.utf8))
+        XCTAssertTrue(s.hasFullLedger)
+        XCTAssertEqual(s.tape.map(\.id), ["a", "b"])
+        // And it survives a round trip through the cache encoding.
+        let back = try JSONDecoder().decode(Summary.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.ledger?.count, 2)
+    }
+
     func testOlderPayloadsDecodeWithoutThePrices() throws {
         XCTAssertNil(try summary(px: nil).positionPx)
     }

@@ -11,7 +11,7 @@
 //  - positions carry ONLY symbol + market value (buildSummary strips the rest,
 //    and the core validator hard-rejects anything extra — basis never leaves).
 
-import type { DesktopReadModel } from "@budgetr/core";
+import { MAX_LEDGER_TXNS, type DesktopReadModel } from "@budgetr/core";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -29,6 +29,7 @@ import {
   getNetWorth,
   getNetWorthSeries,
   getRecentTransactions,
+  searchTransactions,
   sectorKeyFor,
 } from "@/lib/queries";
 import { getPeopleBalances, getSharedExpenses, suggestSettlements } from "@/lib/sharing";
@@ -36,7 +37,7 @@ import { getScanResults } from "./scans";
 import { detectAnomalies, type Alert } from "@/lib/anomalies";
 import { classifyOptionLegs, parseOccSymbol, type OptionLegInput, type ParsedOption } from "@/lib/options";
 import { payoffCurve } from "@/lib/payoff";
-import { getAppliedOpIds } from "./store";
+import { getAppliedOpIds, readJson, writeJson } from "./store";
 import { getTickerHistories } from "@/lib/portfolio-history";
 
 /** Latest close per symbol (upper-cased), dollars. */
@@ -56,16 +57,45 @@ export function pricedSymbols(): string[] {
   return [...new Set(syms.map((s) => s.toUpperCase()))];
 }
 
+/**
+ * Fill each symbol from this round's quotes, falling back to the last price
+ * that ever came back for it.
+ *
+ * A ticker-carrying manual holding (BTC-USD, a wallet's SOL-USD) has no stored
+ * value of its own — it is quantity × a quote. So one failed quote used to mean
+ * the holding had no value, was skipped, and vanished from the phone until the
+ * next successful fetch; Yahoo rate-limits often enough that this happened in
+ * practice. A slightly old price is a far smaller lie than a missing holding.
+ */
+export function mergePrices(symbols: string[], fresh: PriceMap, known: PriceMap): PriceMap {
+  const out: PriceMap = {};
+  for (const raw of symbols) {
+    const sym = raw.toUpperCase();
+    const px = fresh[sym] ?? known[sym];
+    if (typeof px === "number" && Number.isFinite(px) && px > 0) out[sym] = px;
+  }
+  return out;
+}
+
+const LAST_PRICES_KEY = "companion.lastPrices";
+
 /** The same last-close source the investments page values these with. */
 export async function loadPrices(symbols = pricedSymbols()): Promise<PriceMap> {
   if (symbols.length === 0) return {};
-  const histories = await getTickerHistories(symbols, 1);
-  const out: PriceMap = {};
-  for (const [sym, hist] of Object.entries(histories)) {
-    const last = hist.at(-1)?.close;
-    if (typeof last === "number" && Number.isFinite(last)) out[sym.toUpperCase()] = last;
+  const fresh: PriceMap = {};
+  try {
+    const histories = await getTickerHistories(symbols, 1);
+    for (const [sym, hist] of Object.entries(histories)) {
+      const last = hist.at(-1)?.close;
+      if (typeof last === "number" && Number.isFinite(last)) fresh[sym.toUpperCase()] = last;
+    }
+  } catch {
+    // Offline or rate-limited: fall through to the remembered prices.
   }
-  return out;
+  const merged = mergePrices(symbols, fresh, readJson<PriceMap>(LAST_PRICES_KEY) ?? {});
+  // Remember only what is still held, so the row never grows without bound.
+  if (Object.keys(fresh).length > 0) writeJson(LAST_PRICES_KEY, merged);
+  return merged;
 }
 
 /**
@@ -132,14 +162,25 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
     }
   }
 
-  const transactions = getRecentTransactions(40).map((t) => ({
+  const toTxn = (t: ReturnType<typeof getRecentTransactions>[number]) => ({
     id: t.id,
     ts: dayToUnix(t.date),
     merchant: t.displayName,
     cents: -cents(t.amount), // Plaid positive-outflow → contract negative-outflow
     category: t.categoryId ?? "uncategorized",
     pending: t.pending,
-  }));
+  });
+  const transactions = getRecentTransactions(40).map(toTxn);
+
+  // This month and all of last month, in full. Forty rows is a glance; two
+  // whole months is enough to answer "what was that charge" and to total a
+  // month on the phone without the Mac. The month boundary is UTC, like every
+  // day stamp on the wire.
+  const today = new Date(now * 1000);
+  const ledgerFrom = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1))
+    .toISOString()
+    .slice(0, 10);
+  const ledger = searchTransactions({ dateFrom: ledgerFrom }, MAX_LEDGER_TXNS).map(toTxn);
 
   // Positions: Plaid holdings aggregated by ticker (option legs fold into
   // their underlying — exposure per name), plus manual holdings that carry a
@@ -261,6 +302,7 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
     accounts,
     budgets,
     transactions,
+    ledger,
     positions,
     positionPx,
     alerts,

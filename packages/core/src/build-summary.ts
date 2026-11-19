@@ -14,6 +14,7 @@ import {
   MAX_SHARED,
   MAX_CURVE_POINTS,
   MAX_RECENT_TXNS,
+  MAX_LEDGER_TXNS,
   MAX_SECTOR_SLICES,
   MAX_SPARK_POINTS,
   MAX_STRATEGIES,
@@ -64,6 +65,8 @@ export interface DesktopReadModel {
   budgetSpendByDay?: Array<{ d: number; cents: number }>;
   flexibleSpendByDay?: Array<{ d: number; cents: number }>;
   positionPx?: Array<{ symbol: string; micros: number }>;
+  /** Every transaction from the first day of last month on; unsorted is fine. */
+  ledger?: DesktopReadModel['transactions'];
   // Active categories in display order. Optional.
   categories?: Array<{ id: string; name: string; icon?: string | null; group: 'income' | 'spending' | 'transfer' }>;
   // Optional shared-expense detail (contract v2). Absent on installs that have
@@ -244,6 +247,20 @@ export function buildSummary(model: DesktopReadModel): Summary {
       pending: t.pending,
     }));
 
+  const ledger = model.ledger
+    ? [...model.ledger]
+        .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .slice(0, MAX_LEDGER_TXNS)
+        .map((t) => ({
+          id: t.id,
+          ts: seconds(t.ts, `ledger ${t.id} ts`),
+          merchant: t.merchant,
+          cents: cents(t.cents, `ledger ${t.id}`),
+          category: t.category,
+          pending: t.pending,
+        }))
+    : undefined;
+
   // Strip to the pre-rendered display keys only: raw basis, greeks, and lots
   // must be unreconstructable from the wire (spec invariant 2).
   const positions = [...model.positions]
@@ -285,6 +302,7 @@ export function buildSummary(model: DesktopReadModel): Summary {
     ...(model.spendByDay ? { spendByDay: buildSpark(model.spendByDay, 'spendByDay') } : {}),
     ...(model.budgetSpendByDay ? { budgetSpendByDay: buildSpark(model.budgetSpendByDay, 'budgetSpendByDay') } : {}),
     ...(positionPx.length > 0 ? { positionPx } : {}),
+    ...(ledger ? { ledger } : {}),
     // Only meaningful beside a fixed budget; dropped otherwise so a ledger with
     // nothing flagged publishes byte-for-byte what it did before.
     ...(model.flexibleSpendByDay && model.budgets.some((b) => b.fixed)

@@ -89,6 +89,15 @@ struct Summary: Codable, Equatable {
     /// lets the phone move a value with the market until the next sync. Only
     /// positions that are purely units of one quoted symbol are listed.
     var positionPx: [PositionPx]? = nil
+    /// Every transaction from the first day of last month on, most recent
+    /// first. Absent from a Mac older than 0.17, which sends only `recent`.
+    var ledger: [Txn]? = nil
+
+    /// The transactions to show: two full months when the Mac sends them,
+    /// otherwise the capped recent tape.
+    var tape: [Txn] { ledger ?? recent }
+    /// True when `tape` is complete for this month and last, not a sample.
+    var hasFullLedger: Bool { ledger != nil }
     // v2 — shared expenses. Absent on installs that have never split a bill.
     let people: [Person]?
     /// Most recent first.
