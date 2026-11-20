@@ -27,6 +27,9 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
             <Link href="/getting-started" className="hover:text-[var(--paper)]">
               Getting started
             </Link>
+            <Link href="/learn" className="hover:text-[var(--paper)]">
+              Guides
+            </Link>
           </nav>
           <DownloadLink className="ml-auto sm:ml-0" />
         </div>
@@ -43,6 +46,9 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
           <div className="flex flex-wrap items-center gap-5">
             <Link href="/getting-started" className="hover:text-[var(--paper)]">
               Getting Started
+            </Link>
+            <Link href="/learn" className="hover:text-[var(--paper)]">
+              Guides
             </Link>
             <Link href="/pricing" className="hover:text-[var(--paper)]">
               Pricing &amp; FAQ
