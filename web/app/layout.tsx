@@ -41,14 +41,14 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: "budgetr",
-    title: "budgetr — private personal finance for macOS",
+    title: SITE.tagline,
     description: SITE.description,
     url: SITE.siteUrl,
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    title: "budgetr — private personal finance for macOS",
+    title: SITE.tagline,
     description: SITE.description,
   },
   manifest: "/manifest.webmanifest",

@@ -25,28 +25,28 @@ export function MarketingLanding() {
       {/* Hero */}
       <section className="mx-auto max-w-6xl px-5 pb-10 pt-12 text-center sm:px-8 sm:pt-16">
         <BrandMark size={64} className="mx-auto" />
-        <p className="eyebrow mt-8">Private personal finance for macOS</p>
+        <p className="eyebrow mt-8">Private personal finance for Apple Silicon</p>
         <h1 className="display-1 mx-auto mt-4 max-w-3xl font-display text-5xl leading-[1.05] sm:text-6xl">
           {SITE.tagline}
         </h1>
-        <p className="mx-auto mt-6 max-w-xl text-lg text-[var(--muted)]">{SITE.description}</p>
+        <div className="mx-auto mt-6 max-w-2xl space-y-3 text-lg text-[var(--muted)]">
+          <p>{SITE.description}</p>
+          <p>
+            Plaid still connects the bank, with keys you create. We do not keep a server-side copy.
+            $29 once. Copilot Money stores the ledger on Google Cloud and bills $95/year.
+          </p>
+        </div>
         <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
-          <DownloadLink />
+          <DownloadLink label="Download the 14-day trial" />
           {demo && (
             <Link
               href={DEMO_HREF}
-              className="group inline-flex items-center gap-1.5 rounded-full border border-[var(--brass-dim)] bg-[color-mix(in_srgb,var(--brass)_8%,transparent)] px-4 py-2 text-sm font-medium text-[var(--brass)] transition hover:border-[var(--brass)]"
+              className="group inline-flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-sm font-medium text-[var(--paper)] transition hover:border-[var(--brass-dim)]"
             >
               Try the live demo
               <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
             </Link>
           )}
-          <Link
-            href="#screens"
-            className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm text-[var(--paper)] transition hover:border-[var(--brass-dim)]"
-          >
-            See the app
-          </Link>
         </div>
         <p className="mt-5 inline-flex items-center gap-2 text-xs text-[var(--muted)]">
           <ShieldCheck size={13} className="text-[var(--jade)]" />

@@ -33,9 +33,11 @@ const CHECKOUT_URL = "https://whop.com/checkout/ch_3Yc4SnEzTyrKeua/";
 
 export const SITE = {
   name: "budgetr",
-  tagline: "Your whole financial life — private, on your Mac.",
+  tagline: "Your ledger is a SQLite file on this Mac.",
+  // First hero beat only — also the OG/meta description. The Copilot Money
+  // comparison lives on the landing hero itself, not in social cards.
   description:
-    "Net worth, spending, income, investments and options — read-only and stored on your own machine. No cloud account, no data resale.",
+    "Net worth, spending, and investments live in a local database. No budgetr account. No budgetr server for your finances.",
   repoUrl: repo,
   // `||`, not `??`: an unset GitHub Actions variable arrives as "" rather than
   // undefined, and `??` would let that empty string win over the constant —
