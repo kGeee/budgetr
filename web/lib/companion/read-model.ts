@@ -37,66 +37,25 @@ import { getScanResults } from "./scans";
 import { detectAnomalies, type Alert } from "@/lib/anomalies";
 import { classifyOptionLegs, parseOccSymbol, type OptionLegInput, type ParsedOption } from "@/lib/options";
 import { payoffCurve } from "@/lib/payoff";
-import { getAppliedOpIds, readJson, writeJson } from "./store";
-import { getTickerHistories } from "@/lib/portfolio-history";
+import { getAppliedOpIds } from "./store";
+import {
+  getOffPlaid,
+  loadPricing,
+  offPlaidValue,
+  pricedSymbols,
+  withOffPlaid,
+  type InclusiveNetWorth,
+  type PriceMap,
+} from "@/lib/net-worth";
 import { forwardFilledTotals, type SnapshotRow } from "@/lib/snapshot-series";
 
-/** Latest close per symbol (upper-cased), dollars. */
-export type PriceMap = Record<string, number>;
-
-/**
- * Symbols the investments page prices live rather than reading a stored value:
- * ticker-carrying manual holdings (BTC-USD, a wallet's ETH-USD) and positions
- * rebuilt from imported broker trades. Without these the phone silently lost
- * every ad-hoc holding the desktop shows.
- */
-export function pricedSymbols(): string[] {
-  const syms = [
-    ...getManualHoldings().map((m) => m.symbol),
-    ...getImportedHoldings().map((h) => h.ticker),
-  ].filter((s): s is string => Boolean(s) && !parseOccSymbol(s));
-  return [...new Set(syms.map((s) => s.toUpperCase()))];
-}
-
-/**
- * Fill each symbol from this round's quotes, falling back to the last price
- * that ever came back for it.
- *
- * A ticker-carrying manual holding (BTC-USD, a wallet's SOL-USD) has no stored
- * value of its own — it is quantity × a quote. So one failed quote used to mean
- * the holding had no value, was skipped, and vanished from the phone until the
- * next successful fetch; Yahoo rate-limits often enough that this happened in
- * practice. A slightly old price is a far smaller lie than a missing holding.
- */
-export function mergePrices(symbols: string[], fresh: PriceMap, known: PriceMap): PriceMap {
-  const out: PriceMap = {};
-  for (const raw of symbols) {
-    const sym = raw.toUpperCase();
-    const px = fresh[sym] ?? known[sym];
-    if (typeof px === "number" && Number.isFinite(px) && px > 0) out[sym] = px;
-  }
-  return out;
-}
-
-const LAST_PRICES_KEY = "companion.lastPrices";
+// Pricing moved to lib/net-worth so the dashboard and the phone value
+// off-Plaid holdings the same way; re-exported for existing callers.
+export { mergePrices, pricedSymbols, type PriceMap } from "@/lib/net-worth";
 
 /** The same last-close source the investments page values these with. */
 export async function loadPrices(symbols = pricedSymbols()): Promise<PriceMap> {
-  if (symbols.length === 0) return {};
-  const fresh: PriceMap = {};
-  try {
-    const histories = await getTickerHistories(symbols, 1);
-    for (const [sym, hist] of Object.entries(histories)) {
-      const last = hist.at(-1)?.close;
-      if (typeof last === "number" && Number.isFinite(last)) fresh[sym.toUpperCase()] = last;
-    }
-  } catch {
-    // Offline or rate-limited: fall through to the remembered prices.
-  }
-  const merged = mergePrices(symbols, fresh, readJson<PriceMap>(LAST_PRICES_KEY) ?? {});
-  // Remember only what is still held, so the row never grows without bound.
-  if (Object.keys(fresh).length > 0) writeJson(LAST_PRICES_KEY, merged);
-  return merged;
+  return (await loadPricing(symbols, 1)).prices;
 }
 
 /**
@@ -126,7 +85,11 @@ function alertKind(kind: Alert["kind"]): "overspend" | "large_move" | "low_balan
   return kind === "spike" ? "large_move" : "other";
 }
 
-export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: PriceMap = {}): DesktopReadModel {
+export function buildReadModel(
+  now = Math.floor(Date.now() / 1000),
+  prices: PriceMap = {},
+  inclusive?: Pick<InclusiveNetWorth, "nw" | "series">,
+): DesktopReadModel {
   const accounts = getAccounts()
     .filter((a) => !a.excluded)
     .map((a) => {
@@ -287,6 +250,17 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
 
   const investments = buildInvestmentsModel(holdings, manual, optionLegs, now, prices, imported);
 
+  // All-inclusive net worth (accounts + manual + imported), matching the
+  // desktop headline. Without price histories, priced holdings ride at today's
+  // quote across the sparkline.
+  const off = inclusive ? null : getOffPlaid();
+  const netWorth = inclusive?.nw ?? (() => {
+    const base = getNetWorth();
+    const extra = offPlaidValue(off!, prices);
+    return { ...base, assets: base.assets + extra, net: base.net + extra };
+  })();
+  const netWorthSeries = inclusive?.series ?? withOffPlaid(getNetWorthSeries(), off!, {}, prices);
+
   // detectAnomalies already excludes dismissed/snoozed alert keys.
   const alerts = detectAnomalies().map((a) => ({
     id: a.key,
@@ -298,8 +272,8 @@ export function buildReadModel(now = Math.floor(Date.now() / 1000), prices: Pric
   return {
     now,
     appliedOpIds: getAppliedOpIds(),
-    netWorthCents: cents(getNetWorth().net),
-    netWorthSpark: getNetWorthSeries().map((p) => ({ d: dayToUnix(p.date), cents: cents(p.netWorth) })),
+    netWorthCents: cents(netWorth.net),
+    netWorthSpark: netWorthSeries.map((p) => ({ d: dayToUnix(p.date), cents: cents(p.netWorth) })),
     accounts,
     budgets,
     transactions,
