@@ -2594,10 +2594,20 @@ export type WidgetData =
  * the existing query functions. Unknown types are coerced to a spend-by-category
  * fallback so a stale/hand-edited row never crashes a whole dashboard.
  */
-export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetData {
+/** Net worth with off-Plaid holdings folded in (lib/net-worth), loaded by the caller. */
+export type InclusiveNetWorthData = {
+  nw: NetWorth;
+  series: { date: string; netWorth: number }[];
+};
+
+export function getWidgetData(
+  type: string,
+  config: WidgetConfig = {},
+  inclusive?: InclusiveNetWorthData,
+): WidgetData {
   switch (type) {
     case "net-worth":
-      return { type: "net-worth", series: getNetWorthSeries() };
+      return { type: "net-worth", series: inclusive?.series ?? getNetWorthSeries() };
     case "cashflow":
       return { type: "cashflow", series: getMonthlyCashflow(config.months ?? 6) };
     case "top-vendors":
@@ -2639,7 +2649,7 @@ export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetDa
       };
     }
     case "net-worth-summary":
-      return getNetWorthSummaryWidget();
+      return getNetWorthSummaryWidget(inclusive);
     case "review-queue": {
       // Pull a small page for the inbox plus the true backlog size (the header
       // reads "N entries need a look"). One scan, sliced — cheaper than two.
@@ -2666,27 +2676,31 @@ export function getWidgetData(type: string, config: WidgetConfig = {}): WidgetDa
 
 /**
  * Net-worth hero: assets/liabilities/net plus the historical series with today's
- * live figure pinned on the end. Fixed-value manual assets (crypto held as a flat
- * dollar amount, cash-like holdings) are folded in synchronously; tickered manual
- * holdings that need a live price fetch are intentionally left out so this stays a
- * pure, cache-free DB read (the Investments desk carries the full live figure).
+ * live figure pinned on the end. With `inclusive` (lib/net-worth) it covers
+ * everything — accounts, fixed and priced manual holdings, imported positions —
+ * so it matches the Investments desk. Without it, it falls back to accounts plus
+ * fixed-value manual assets, the part that needs no price fetch.
  */
-function getNetWorthSummaryWidget(): Extract<WidgetData, { type: "net-worth-summary" }> {
-  const base = getNetWorth();
-  const manual = getManualHoldings();
-  const fixedValueTotal = manual
-    .filter((m) => !m.symbol)
-    .reduce((s, m) => s + (m.manualValue ?? 0), 0);
-  const nw: NetWorth = {
-    assets: base.assets + fixedValueTotal,
-    liabilities: base.liabilities,
-    net: base.net + fixedValueTotal,
-  };
-
-  const baseSeries = getNetWorthSeries();
-  const series = fixedValueTotal
-    ? baseSeries.map((p) => ({ date: p.date, netWorth: p.netWorth + fixedValueTotal }))
-    : baseSeries;
+function getNetWorthSummaryWidget(
+  inclusive?: InclusiveNetWorthData,
+): Extract<WidgetData, { type: "net-worth-summary" }> {
+  let nw: NetWorth;
+  let series: { date: string; netWorth: number }[];
+  if (inclusive) {
+    nw = inclusive.nw;
+    series = [...inclusive.series];
+  } else {
+    const base = getNetWorth();
+    const fixedValueTotal = getManualHoldings()
+      .filter((m) => !m.symbol)
+      .reduce((s, m) => s + (m.manualValue ?? 0), 0);
+    nw = {
+      assets: base.assets + fixedValueTotal,
+      liabilities: base.liabilities,
+      net: base.net + fixedValueTotal,
+    };
+    series = getNetWorthSeries().map((p) => ({ date: p.date, netWorth: p.netWorth + fixedValueTotal }));
+  }
   // Pin a live "today" point so the line ends at the headline number.
   const today = new Date().toISOString().slice(0, 10);
   if (series.length === 0 || series[series.length - 1].date !== today) {

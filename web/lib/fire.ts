@@ -138,9 +138,10 @@ function dateInYears(years: number): string {
  * expenses ÷ safe-withdrawal-rate, the compounding projection to that number,
  * and milestone progress against live net worth.
  */
-export function getFireMetrics(): FireMetrics {
+export function getFireMetrics(inclusive?: { nw: { net: number } }): FireMetrics {
   const settings = getFireSettings();
-  const { net: netWorth } = getNetWorth();
+  // Pass lib/net-worth's figure to count manual + imported holdings too.
+  const netWorth = inclusive?.nw.net ?? getNetWorth().net;
   const liquidAssets = getLiquidAssets();
 
   // Average monthly income/expenses over the recent cashflow window.
@@ -230,11 +231,14 @@ export type FireProjectionPoint = {
  * reaches the FIRE number or `maxYears` elapses. Both carry today's point so the
  * solid and dashed lines join. Degrades to just history when there's no growth.
  */
-export function getFireProjectionSeries(maxYears = 40): FireProjectionPoint[] {
-  const { netWorth, fireNumber, monthlyContribution, settings } = getFireMetrics();
+export function getFireProjectionSeries(
+  maxYears = 40,
+  inclusive?: { nw: { net: number }; series: { date: string; netWorth: number }[] },
+): FireProjectionPoint[] {
+  const { netWorth, fireNumber, monthlyContribution, settings } = getFireMetrics(inclusive);
 
   // Historical monthly net worth (last snapshot per month) as the `actual` line.
-  const history = getNetWorthSeries();
+  const history = inclusive?.series ?? getNetWorthSeries();
   const byMonth = new Map<string, number>();
   for (const p of history) byMonth.set(p.date.slice(0, 7), p.netWorth);
   const points: FireProjectionPoint[] = [];

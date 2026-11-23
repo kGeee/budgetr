@@ -8,6 +8,7 @@ import { GoalContributeButton } from "@/components/budget/savings-goals";
 import { Hero, Mark, SectionHead, Stat, StatStrip } from "@/components/ui/statement";
 import { todayIso } from "@/lib/data-freshness";
 import { getFireMetrics } from "@/lib/fire";
+import { loadInclusiveNetWorth } from "@/lib/net-worth";
 import { getCashflowForecast, getForecastSeries, getRemainingRecurring } from "@/lib/forecast";
 import { forecastVerdict } from "@/lib/forecast-verdict";
 import { cadenceLabel, daysUntil, dueIn } from "@/lib/plan-verdict";
@@ -25,7 +26,7 @@ const LATER_LIMIT = 6;
  * and land on ruled rows, with the two long-horizon summaries (goals, FIRE) in
  * the side column. The full recurring list lives one tab over.
  */
-export function ForecastTab() {
+export async function ForecastTab() {
   const forecast = getCashflowForecast();
   const series = getForecastSeries(forecast.month);
   const { bills, income } = getRemainingRecurring(forecast.month);
@@ -95,7 +96,8 @@ export function ForecastTab() {
   const incomeTotal = income.reduce((s, b) => s + Math.abs(b.averageAmount ?? 0), 0);
 
   const goals = getSavingsGoals().filter((g) => !g.archived);
-  const fire = getFireMetrics();
+  // Net worth includes manual and imported holdings (lib/net-worth).
+  const fire = getFireMetrics(await loadInclusiveNetWorth().catch(() => undefined));
 
   const verdict = forecastVerdict({
     currentCash,

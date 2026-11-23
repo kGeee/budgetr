@@ -21,8 +21,12 @@ import {
   getWidgetData,
 } from "@/lib/queries";
 import type { WidgetConfig } from "@/lib/queries";
+import { loadInclusiveNetWorth } from "@/lib/net-worth";
 
 export const dynamic = "force-dynamic";
+// Net worth prices manual holdings from Yahoo histories; let those hit the Data
+// Cache rather than being forced no-store by `force-dynamic` (as Investments does).
+export const fetchCache = "default-cache";
 
 function parseConfig(raw: string | null): WidgetConfig {
   if (!raw) return {};
@@ -55,10 +59,15 @@ export default async function Overview() {
 
   // Resolve each widget's data server-side so the client grid stays a pure,
   // serializable renderer.
+  // Net worth includes manual and imported holdings, which need prices — load
+  // them once only if a net-worth widget is on the board. A price-feed failure
+  // falls back to the account-only figure rather than failing the page.
+  const needsNetWorth = widgets.some((w) => w.type === "net-worth" || w.type === "net-worth-summary");
+  const inclusive = needsNetWorth ? await loadInclusiveNetWorth().catch(() => undefined) : undefined;
   const resolved: ResolvedWidget[] = presentOrder(widgets).map((w) => ({
     id: w.id,
     config: parseConfig(w.config),
-    data: getWidgetData(w.type, parseConfig(w.config)),
+    data: getWidgetData(w.type, parseConfig(w.config), inclusive),
   }));
 
   // Categories back the review inbox drawer + daily-spend heatmap drill-down.
