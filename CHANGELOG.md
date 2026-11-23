@@ -7,6 +7,19 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.16.2] — 2026-11-24
+
+### Fixed
+
+- **The net-worth chart stops sawtoothing.** Balances are recorded per bank
+  connection as each one syncs, and the chart summed whatever was recorded for
+  each day — so on any day one connection didn't sync, that account's whole
+  balance fell out of the total and the line dropped $10K+ before jumping back.
+  Each account now carries its last known balance across days it didn't
+  report (and stops counting after its final one, so a closed account doesn't
+  linger). The same fix applies to the report, FIRE history, and the phone's
+  net-worth and investment sparklines.
+
 ## [0.16.1] — 2026-11-19
 
 ### Fixed
