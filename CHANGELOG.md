@@ -7,6 +7,20 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.16.3] — 2026-11-24
+
+### Fixed
+
+- **Net worth counts everything you own.** It used to be linked account
+  balances plus — on the dashboard only — fixed-value manual assets. Manual
+  holdings with a ticker (BTC-USD, a wallet's SOL-USD) and positions rebuilt
+  from imported trades were left out because valuing them needs a price, so the
+  Investments page could show more than your whole net worth, and the phone
+  left out even the fixed assets. Every net-worth figure — the dashboard
+  headline and chart, the phone, and the FIRE numbers on Plan — now prices
+  those holdings the way Investments does, and the chart's history moves with
+  each day's close rather than holding today's price flat.
+
 ## [0.16.2] — 2026-11-24
 
 ### Fixed
