@@ -28,6 +28,7 @@ import {
 } from "@/db/schema";
 import { applySplits, type StockSplit } from "@/lib/import/splits";
 import { settledOnly } from "@/lib/pending";
+import { forwardFilledTotals, type SnapshotRow } from "@/lib/snapshot-series";
 import type { SavingsContribution, Dashboard, DashboardWidget } from "@/db/schema";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { cleanTransactionName } from "@/lib/utils";
@@ -222,14 +223,12 @@ export function getNetWorth(): NetWorth {
 }
 
 export function getNetWorthSeries(): { date: string; netWorth: number }[] {
-  return db
-    .all<{ date: string; netWorth: number }>(
-      sql`SELECT date, SUM(balance) AS netWorth
-          FROM balance_snapshots
-          GROUP BY date
-          ORDER BY date ASC`,
-    )
-    .map((r) => ({ date: r.date, netWorth: Number(r.netWorth) }));
+  // Forward-fill per account: a day only has rows for items that synced that
+  // day, so a plain SUM per date dips on every day one item didn't sync.
+  const rows = db.all<SnapshotRow>(
+    sql`SELECT account_id AS accountId, date, balance FROM balance_snapshots`,
+  );
+  return forwardFilledTotals(rows).map((p) => ({ date: p.date, netWorth: p.total }));
 }
 
 export function getMonthlyCashflow(months = 6): {

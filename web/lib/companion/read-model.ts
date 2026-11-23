@@ -39,6 +39,7 @@ import { classifyOptionLegs, parseOccSymbol, type OptionLegInput, type ParsedOpt
 import { payoffCurve } from "@/lib/payoff";
 import { getAppliedOpIds, readJson, writeJson } from "./store";
 import { getTickerHistories } from "@/lib/portfolio-history";
+import { forwardFilledTotals, type SnapshotRow } from "@/lib/snapshot-series";
 
 /** Latest close per symbol (upper-cased), dollars. */
 export type PriceMap = Record<string, number>;
@@ -455,13 +456,12 @@ function buildInvestmentsModel(
     }
   }
 
-  const spark = db
-    .all<{ date: string; v: number }>(
-      sql`SELECT date, SUM(balance) AS v FROM balance_snapshots
-          WHERE type = 'investment'
-          GROUP BY date ORDER BY date ASC`,
-    )
-    .map((r) => ({ d: dayToUnix(r.date), cents: cents(Number(r.v)) }));
+  const spark = forwardFilledTotals(
+    db.all<SnapshotRow>(
+      sql`SELECT account_id AS accountId, date, balance FROM balance_snapshots
+          WHERE type = 'investment'`,
+    ),
+  ).map((p) => ({ d: dayToUnix(p.date), cents: cents(p.total) }));
 
   return {
     valueCents,
