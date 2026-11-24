@@ -114,12 +114,15 @@ function registerPlaidGuide({ getWindow, getServerUrl }) {
     wc.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
     wc.session.setPermissionCheckHandler(() => false);
 
-    wc.on("will-navigate", (e, raw) => {
-      if (!allowInPane(raw)) e.preventDefault();
-    });
-    wc.on("will-redirect", (e, raw) => {
-      if (!allowInPane(raw)) e.preventDefault();
-    });
+    // Only top-level navigations are routed. Iframes on Plaid's pages (captcha,
+    // analytics, embedded widgets) may load or redirect to other hosts; they
+    // can't take the user anywhere, so they're left alone rather than being
+    // cancelled and sent to the user's browser.
+    const route = (details) => {
+      if (details.isMainFrame && !allowInPane(details.url)) details.preventDefault();
+    };
+    wc.on("will-navigate", route);
+    wc.on("will-redirect", route);
 
     // New windows follow the same rule: Plaid pages open in the pane, Google
     // sign-in is explained, anything else goes to the user's own browser.
