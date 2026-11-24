@@ -82,12 +82,11 @@ function registerPlaidGuide({ getWindow, getServerUrl }) {
   const blocked = (raw, reason) => send("plaid-guide:blocked", { url: raw, reason });
 
   /**
-   * Apply a `routeUrl` / `routeNavigation` decision. Returns true to let the
-   * navigation proceed in the pane.
+   * Apply a `routeUrl` / `routeNavigation` decision ("ignore" is handled by the
+   * caller). Returns true to let the navigation proceed in the pane.
    */
   const applyRoute = (action, raw) => {
     switch (action) {
-      case "ignore":
       case "pane":
         return true;
       case "google":

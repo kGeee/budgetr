@@ -58,8 +58,12 @@ describe("routeNavigation (will-navigate / will-redirect main-frame gate)", () =
     expect(routeNavigation({ url: "https://example.com/widget", isMainFrame: false })).toBe("ignore");
     expect(routeNavigation({ url: "https://accounts.google.com/gsi/iframe", isMainFrame: false })).toBe("ignore");
     expect(routeNavigation({ url: "about:blank", isMainFrame: false })).toBe("ignore");
-    expect(routeNavigation(null)).toBe("ignore");
-    expect(routeNavigation({ url: "https://example.com" })).toBe("ignore");
+  });
+
+  it("fails closed when the main-frame flag is missing", () => {
+    expect(routeNavigation({ url: "https://example.com" })).toBe("external");
+    expect(routeNavigation({ url: "https://dashboard.plaid.com/signin" })).toBe("pane");
+    expect(routeNavigation(null)).toBe("drop");
   });
 
   it("routes main-frame navigations and redirects with routeUrl", () => {

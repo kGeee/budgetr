@@ -47,11 +47,14 @@ function routeUrl(raw) {
 
 /**
  * Route `will-navigate` / `will-redirect` event details. Both events also fire
- * for subframes; non-main-frame navigations and redirects return "ignore" so
- * embedded iframes (captcha, analytics, widgets) don't trip the guard.
+ * for subframes; only navigations explicitly marked as subframe ones
+ * (`isMainFrame === false`) return "ignore", so embedded iframes (captcha,
+ * analytics, widgets) don't trip the guard. Anything without the flag is
+ * routed like a main-frame navigation, so the guard fails closed.
  */
 function routeNavigation(details) {
-  if (!details || details.isMainFrame !== true) return "ignore";
+  if (!details) return "drop";
+  if (details.isMainFrame === false) return "ignore";
   return routeUrl(details.url);
 }
 
