@@ -32,6 +32,7 @@
     "node": ">=20.9"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.13.0",
     "@budgetr/core": "file:../packages/core",
     "@budgetr/sync-crypto": "file:../packages/sync-crypto",
     "@vercel/analytics": "^2.0.1",

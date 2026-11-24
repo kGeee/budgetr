@@ -13,6 +13,9 @@ import { RulesManager } from "@/components/transactions/rules-manager";
 import { PendingSwitch } from "@/components/pending-toggle";
 import { TradingDeskSwitch } from "./trading-desk-switch";
 import { AutoSyncRow } from "./auto-sync-row";
+import { AssistantSettings } from "./assistant-settings";
+import { getAssistantStatus } from "@/lib/assistant/settings";
+import { demoEnabled } from "@/lib/site";
 import {
   AUTO_SYNC_OPTIONS,
   autoSyncLabel,
@@ -53,6 +56,7 @@ const SECTIONS: SettingsSection[] = [
   { id: "api-keys", label: "Connections & API keys" },
   { id: "auto-sync", label: "Automatic sync" },
   { id: "companion", label: "Phone companion" },
+  { id: "assistant", label: "AI assistant" },
   { id: "license", label: "License" },
   { id: "reports", label: "Scheduled report" },
   {
@@ -84,6 +88,8 @@ export default async function SettingsPage() {
   const autoSyncHours = getAutoSyncHours();
   const autoSyncLastRun = getAutoSyncLastRunAt();
   const syncStatus = getSyncStatus();
+  // The AI assistant doesn't exist on the public web demo.
+  const assistant = demoEnabled() ? null : getAssistantStatus();
   const categories = getCategories();
   const archivedCategories = getArchivedCategories();
   const rules = getTagRules();
@@ -207,6 +213,32 @@ export default async function SettingsPage() {
             <SectionHead title="Phone companion" />
             <CompanionCard initial={syncStatus} />
           </section>
+
+          {/* AI assistant — optional, off by default, the user's own Anthropic key */}
+          {assistant && (
+            <section id="assistant" className={SECTION} aria-label="AI assistant">
+              <SectionHead
+                title="AI assistant"
+                action={
+                  assistant.enabled ? (
+                    assistant.hasKey ? (
+                      <span className="text-[13px] text-[var(--jade)]">On</span>
+                    ) : (
+                      <span className="text-[13px] text-[var(--brass)]">On · needs a key</span>
+                    )
+                  ) : (
+                    <span className="text-[13px] text-[var(--muted)]">Off</span>
+                  )
+                }
+              />
+              <AssistantSettings
+                enabled={assistant.enabled}
+                hasKey={assistant.hasKey}
+                keyHint={assistant.keyHint}
+                model={assistant.model}
+              />
+            </section>
+          )}
 
           {/* License / trial */}
           <section id="license" className={SECTION} aria-label="License">
