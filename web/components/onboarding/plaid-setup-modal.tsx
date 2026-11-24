@@ -27,6 +27,8 @@ import { ApiKeysForm } from "@/components/api-keys-form";
 import { PlaidLink } from "@/components/onboarding/plaid-link";
 import { Stepper, Step, Walk, A } from "@/components/onboarding/onboarding-steps";
 import { exitDemoMode } from "@/lib/actions-onboarding";
+import { GuidedSetupCallout, PlaidGuidedSetup } from "@/components/onboarding/plaid-guided-setup";
+import { usePlaidGuideBridge } from "@/lib/desktop-bridge";
 
 export type PlaidSetupInitial = {
   hasPlaidKeys: boolean;
@@ -51,6 +53,9 @@ export function PlaidSetupModal({
   const [step, setStep] = useState(initial.hasPlaidKeys ? 3 : 0);
   const [clearing, startClear] = useTransition();
   const [syncing, startSync] = useTransition();
+  // Desktop app only: Plaid's dashboard in a pane inside budgetr, with a checklist.
+  const guideBridge = usePlaidGuideBridge();
+  const [guided, setGuided] = useState(false);
 
   // Step 0 → clear demo data (if any) before entering the real-setup flow. A
   // teardown failure shouldn't trap the user on this step, so advance regardless
@@ -75,6 +80,27 @@ export function PlaidSetupModal({
       router.refresh();
       onClose();
     });
+
+  // The guided setup replaces the dialog while it's open (rather than stacking
+  // on it), so Escape / focus trapping belong to one surface at a time.
+  if (guided && guideBridge) {
+    return (
+      <PlaidGuidedSetup
+        bridge={guideBridge}
+        keys={{
+          hasPlaidKeys: initial.hasPlaidKeys,
+          env: initial.env,
+          hasFinnhub: initial.hasFinnhub,
+          clientIdHint: initial.clientIdHint,
+        }}
+        onClose={() => setGuided(false)}
+        onSaved={() => {
+          setGuided(false);
+          setStep(4);
+        }}
+      />
+    );
+  }
 
   return (
     // overflow-visible: the walkthrough grows as steps open, and the scrim is
@@ -143,6 +169,14 @@ export function PlaidSetupModal({
               next={() => setStep(2)}
               body={
                 <>
+                  {guideBridge && (
+                    <div className="mb-6">
+                      <GuidedSetupCallout onStart={() => setGuided(true)} />
+                      <p className="mt-5 text-xs uppercase tracking-wide text-[var(--muted)]">
+                        Or do it yourself
+                      </p>
+                    </div>
+                  )}
                   <ol className="space-y-4">
                     <Walk n={1}>
                       Go to <A href="https://dashboard.plaid.com/signup">dashboard.plaid.com/signup</A>{" "}
