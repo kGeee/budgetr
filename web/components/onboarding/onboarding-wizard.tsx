@@ -19,6 +19,8 @@ import { Button } from "@/components/ui/button";
 import { ApiKeysForm } from "@/components/api-keys-form";
 import { PlaidLink } from "@/components/onboarding/plaid-link";
 import { Stepper, Step, Walk, A } from "@/components/onboarding/onboarding-steps";
+import { GuidedSetupCallout, PlaidGuidedSetup } from "@/components/onboarding/plaid-guided-setup";
+import { usePlaidGuideBridge } from "@/lib/desktop-bridge";
 
 type Initial = {
   hasPlaidKeys: boolean;
@@ -35,6 +37,9 @@ export function OnboardingWizard({ initial }: { initial: Initial }) {
   // Resume where it makes sense: connected → done; keys set → connect; else start.
   const [step, setStep] = useState(initial.connected ? 4 : initial.hasPlaidKeys ? 3 : 0);
   const [syncing, startSync] = useTransition();
+  // Desktop app only: Plaid's dashboard in a pane inside budgetr, with a checklist.
+  const guideBridge = usePlaidGuideBridge();
+  const [guided, setGuided] = useState(false);
 
   const finish = () =>
     startSync(async () => {
@@ -45,6 +50,27 @@ export function OnboardingWizard({ initial }: { initial: Initial }) {
       }
       router.push("/overview");
     });
+
+  const keys = {
+    hasPlaidKeys: initial.hasPlaidKeys,
+    env: initial.env,
+    hasFinnhub: initial.hasFinnhub,
+    clientIdHint: initial.clientIdHint,
+  };
+
+  if (guided && guideBridge) {
+    return (
+      <PlaidGuidedSetup
+        bridge={guideBridge}
+        keys={keys}
+        onClose={() => setGuided(false)}
+        onSaved={() => {
+          setGuided(false);
+          setStep(3);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
@@ -89,23 +115,33 @@ export function OnboardingWizard({ initial }: { initial: Initial }) {
             back={() => setStep(0)}
             next={() => setStep(2)}
             body={
-              <ol className="space-y-4">
-                <Walk n={1}>
-                  Create a free account at{" "}
-                  <A href="https://dashboard.plaid.com/signup">dashboard.plaid.com</A>.
-                </Walk>
-                <Walk n={2}>
-                  Open{" "}
-                  <A href="https://dashboard.plaid.com/developers/keys">Developers → Keys</A> and copy
-                  your <b>client ID</b> and a <b>secret</b>.
-                </Walk>
-                <Walk n={3}>
-                  Pick an environment. <b>Sandbox</b> is free and uses fake data — perfect to try
-                  budgetr now (log in with <code className="mono">user_good</code> /{" "}
-                  <code className="mono">pass_good</code>). <b>Production</b> connects your real banks;
-                  Plaid grants production access on request (pay-as-you-go with a free allowance).
-                </Walk>
-              </ol>
+              <>
+                {guideBridge && (
+                  <div className="mb-6">
+                    <GuidedSetupCallout onStart={() => setGuided(true)} />
+                    <p className="mt-5 text-xs uppercase tracking-wide text-[var(--muted)]">
+                      Or do it yourself
+                    </p>
+                  </div>
+                )}
+                <ol className="space-y-4">
+                  <Walk n={1}>
+                    Create a free account at{" "}
+                    <A href="https://dashboard.plaid.com/signup">dashboard.plaid.com</A>.
+                  </Walk>
+                  <Walk n={2}>
+                    Open{" "}
+                    <A href="https://dashboard.plaid.com/developers/keys">Developers → Keys</A> and copy
+                    your <b>client ID</b> and a <b>secret</b>.
+                  </Walk>
+                  <Walk n={3}>
+                    Pick an environment. <b>Sandbox</b> is free and uses fake data — perfect to try
+                    budgetr now (log in with <code className="mono">user_good</code> /{" "}
+                    <code className="mono">pass_good</code>). <b>Production</b> connects your real banks;
+                    Plaid grants production access on request (pay-as-you-go with a free allowance).
+                  </Walk>
+                </ol>
+              </>
             }
           />
         )}

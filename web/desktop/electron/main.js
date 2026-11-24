@@ -15,6 +15,7 @@ const net = require("node:net");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
+const { registerPlaidGuide } = require("./plaid-guide");
 
 const HOST = "127.0.0.1";
 // Allow pointing the shell at an already-running server (e.g. your own
@@ -297,6 +298,11 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      // Electron's default since v20; kept explicit in case that ever changes.
+      sandbox: true,
+      // Exposes window.budgetrDesktop — the narrow bridge the guided Plaid
+      // setup uses to show Plaid's dashboard in a pane inside the app.
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
@@ -536,6 +542,7 @@ async function boot() {
   const dbPath = databasePath();
 
   buildMenu();
+  registerPlaidGuide({ getWindow: () => mainWindow, getServerUrl: () => serverUrl });
 
   if (app.isPackaged) {
     try {
