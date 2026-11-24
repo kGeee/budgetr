@@ -298,7 +298,6 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
       // Exposes window.budgetrDesktop — the narrow bridge the guided Plaid
       // setup uses to show Plaid's dashboard in a pane inside the app.
       preload: path.join(__dirname, "preload.js"),

@@ -30,7 +30,9 @@ export type PlaidGuideBridge = {
   openInBrowser(url?: string): Promise<unknown>;
   close(): Promise<unknown>;
   onState(cb: (s: GuidePaneState) => void): () => void;
-  onBlocked(cb: (b: { url: string; reason: "google" }) => void): () => void;
+  /** A page in the pane tried to leave Plaid: Google sign-in (stopped), or any
+   * other site (opened in the user's own browser instead). */
+  onBlocked(cb: (b: { url: string; reason: "google" | "external" }) => void): () => void;
   onError(cb: (e: { url: string; code: number }) => void): () => void;
 };
 

@@ -14,46 +14,19 @@
 //  - budgetr never reads the page. The only thing that crosses back to the app
 //    is the page ADDRESS (plus title / loading / history state), which the
 //    checklist uses to tick steps. Keys are copied and pasted by the user.
-//  - It only ever opens on Plaid's dashboard. Google sign-in is refused inside
-//    embedded browsers, so it's handed to the user's own browser with an
-//    explanation instead of being left to fail. Other non-Plaid pages that
-//    Plaid opens in a new window go to the user's own browser too.
+//  - Only Plaid pages (plaid.com and its subdomains, over https) load in the
+//    pane, and the app itself can only point it at dashboard.plaid.com. Any
+//    other page a link, redirect or popup leads to opens in the user's own
+//    browser instead (and the guide says so). Google sign-in is refused inside
+//    embedded browsers, so it is stopped with an explanation rather than left
+//    to fail.
 
 const { WebContentsView, ipcMain, shell } = require("electron");
+const { DASHBOARD_HOST, parse, isPlaidHost, isDashboardUrl, routeUrl, sanitizeBounds } = require("./url-guards");
 
-const DASHBOARD_HOST = "dashboard.plaid.com";
 // In-memory partition: not "persist:", so a Plaid sign-in in the pane is gone
 // when budgetr quits.
 const PARTITION = "plaid-guide";
-
-function parse(raw) {
-  try {
-    return new URL(raw);
-  } catch {
-    return null;
-  }
-}
-
-function isPlaidHost(host) {
-  const h = String(host || "").toLowerCase().replace(/\.$/, "");
-  return h === "plaid.com" || h.endsWith(".plaid.com");
-}
-
-function isGoogleSignIn(url) {
-  const h = (url.hostname || "").toLowerCase();
-  return h === "accounts.google.com" || h.endsWith(".accounts.google.com");
-}
-
-/** Only Plaid's dashboard, over https, may be opened by the app. */
-function isDashboardUrl(raw) {
-  const u = parse(raw);
-  return Boolean(u && u.protocol === "https:" && u.hostname.toLowerCase() === DASHBOARD_HOST);
-}
-
-function sanitizeBounds(b) {
-  const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
-  return { x: n(b && b.x), y: n(b && b.y), width: n(b && b.width), height: n(b && b.height) };
-}
 
 /**
  * Wire the IPC handlers. `getWindow` returns the main BrowserWindow (or null);
@@ -101,25 +74,23 @@ function registerPlaidGuide({ getWindow, getServerUrl }) {
   const blocked = (raw, reason) => send("plaid-guide:blocked", { url: raw, reason });
 
   /**
-   * Decide what happens to a top-level navigation the page starts. Returns true
-   * to let it load in the pane.
+   * Decide what happens to a top-level navigation the page starts (link,
+   * redirect or popup). Returns true to let it load in the pane.
    */
   const allowInPane = (raw) => {
-    const u = parse(raw);
-    if (!u) return false;
-    if (u.protocol === "about:" || u.protocol === "data:") return false;
-    if (isGoogleSignIn(u)) {
-      blocked(raw, "google");
-      return false;
+    switch (routeUrl(raw)) {
+      case "pane":
+        return true;
+      case "google":
+        blocked(raw, "google");
+        return false;
+      case "external":
+        shell.openExternal(raw).catch(() => {});
+        if (!raw.startsWith("mailto:")) blocked(raw, "external");
+        return false;
+      default:
+        return false;
     }
-    if (u.protocol !== "https:") {
-      if (u.protocol === "mailto:") shell.openExternal(raw).catch(() => {});
-      return false;
-    }
-    // Plaid's own pages stay in the pane, and so do the pages a sign-up flow
-    // might pass through (e.g. a company's single sign-on). The location bar
-    // always shows where the pane is.
-    return true;
   };
 
   const create = () => {
@@ -150,18 +121,10 @@ function registerPlaidGuide({ getWindow, getServerUrl }) {
       if (!allowInPane(raw)) e.preventDefault();
     });
 
-    // New windows: Plaid pages open in the pane; Google sign-in is explained;
-    // anything else (docs, help) opens in the user's own browser.
+    // New windows follow the same rule: Plaid pages open in the pane, Google
+    // sign-in is explained, anything else goes to the user's own browser.
     wc.setWindowOpenHandler(({ url: raw }) => {
-      const u = parse(raw);
-      if (!u) return { action: "deny" };
-      if (isGoogleSignIn(u)) {
-        blocked(raw, "google");
-      } else if (u.protocol === "https:" && isPlaidHost(u.hostname)) {
-        wc.loadURL(raw).catch(() => {});
-      } else if (u.protocol === "https:" || u.protocol === "http:" || u.protocol === "mailto:") {
-        shell.openExternal(raw).catch(() => {});
-      }
+      if (allowInPane(raw)) wc.loadURL(raw).catch(() => {});
       return { action: "deny" };
     });
 
@@ -263,4 +226,4 @@ function registerPlaidGuide({ getWindow, getServerUrl }) {
   });
 }
 
-module.exports = { registerPlaidGuide, isDashboardUrl, isPlaidHost, sanitizeBounds };
+module.exports = { registerPlaidGuide };

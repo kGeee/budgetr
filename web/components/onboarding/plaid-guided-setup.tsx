@@ -74,6 +74,7 @@ export function PlaidGuidedSetup({
   const [open, setOpen] = useState<GuideStepId | null>(null);
   const [pane, setPane] = useState<GuidePaneState | null>(null);
   const [googleBlocked, setGoogleBlocked] = useState(false);
+  const [sentOut, setSentOut] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const slot = useRef<HTMLDivElement>(null);
 
@@ -104,14 +105,26 @@ export function PlaidGuidedSetup({
     return r ? { x: r.left, y: r.top, width: r.width, height: r.height } : { x: 0, y: 0, width: 0, height: 0 };
   }, []);
 
+  // Last bounds sent, so a re-render only crosses to the main process when the
+  // slot actually moved or resized.
+  const sent = useRef("");
+  const sync = useCallback(() => {
+    const b = bounds();
+    const key = `${b.x},${b.y},${b.width},${b.height}`;
+    if (key === sent.current) return;
+    sent.current = key;
+    bridge.setBounds(b);
+  }, [bridge, bounds]);
+
   useLayoutEffect(() => {
     const node = slot.current;
     if (!node) return;
+    const first = bounds();
+    sent.current = `${first.x},${first.y},${first.width},${first.height}`;
     bridge
-      .open(PLAID_SIGNUP_URL, bounds())
+      .open(PLAID_SIGNUP_URL, first)
       .then((r) => !r.ok && setLoadError(true))
       .catch(() => setLoadError(true));
-    const sync = () => bridge.setBounds(bounds());
     const ro = new ResizeObserver(sync);
     ro.observe(node);
     window.addEventListener("resize", sync);
@@ -120,12 +133,13 @@ export function PlaidGuidedSetup({
       window.removeEventListener("resize", sync);
       bridge.close().catch(() => {});
     };
-  }, [bridge, bounds]);
+  }, [bridge, bounds, sync]);
 
-  // Banners above the slot change its height; keep the pane in step.
+  // ResizeObserver only reports size changes; after every render, also catch a
+  // slot that moved without resizing (e.g. a banner appearing above it).
   useLayoutEffect(() => {
-    bridge.setBounds(bounds());
-  }, [bridge, bounds, googleBlocked, loadError]);
+    sync();
+  });
 
   useEffect(() => {
     const offState = bridge.onState((s) => {
@@ -137,6 +151,7 @@ export function PlaidGuidedSetup({
     });
     const offBlocked = bridge.onBlocked((b) => {
       if (b.reason === "google") setGoogleBlocked(true);
+      else setSentOut(true);
     });
     const offError = bridge.onError(() => setLoadError(true));
     return () => {
@@ -308,6 +323,18 @@ export function PlaidGuidedSetup({
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setGoogleBlocked(false)}>
                   Use email here
+                </Button>
+              </span>
+            </Banner>
+          )}
+
+          {sentOut && (
+            <Banner>
+              That link leads outside Plaid, so it opened in your browser. Your progress here is
+              unchanged.
+              <span className="mt-2 flex gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setSentOut(false)}>
+                  Got it
                 </Button>
               </span>
             </Banner>
