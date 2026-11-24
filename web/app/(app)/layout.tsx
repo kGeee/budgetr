@@ -25,6 +25,9 @@ import {
   getDisplayCurrencyRates,
 } from "@/lib/queries";
 import { isTradingDeskEnabled } from "@/lib/trading-desk";
+import { AssistantBubble } from "@/components/assistant/assistant-bubble";
+import { getAssistantStatus } from "@/lib/assistant/settings";
+import { resolveAssistantModel } from "@/lib/assistant/models";
 import { OBF_COOKIE, hiddenFromCookie, setHidden } from "@/lib/scale";
 import {
   CURRENCY_COOKIE,
@@ -81,6 +84,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const reviewCount = countUnreviewed();
 
   const tradingDesk = isTradingDeskEnabled();
+
+  // The optional AI assistant's bubble — only once the user has switched it on
+  // in Settings, and never on the read-only web demo.
+  const assistant = webDemo ? null : getAssistantStatus();
 
   // The sidebar's foot line: whether the data behind every figure is current.
   // Same classification the Home banner uses, said in one line on every page.
@@ -142,6 +149,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </main>
         </div>
       </div>
+      {assistant?.enabled && (
+        <AssistantBubble
+          hasKey={assistant.hasKey}
+          noticeAcknowledged={assistant.noticeAcknowledged}
+          modelLabel={resolveAssistantModel(assistant.model).label}
+        />
+      )}
     </>
   );
 }
