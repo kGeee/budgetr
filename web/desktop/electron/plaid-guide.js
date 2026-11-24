@@ -22,7 +22,15 @@
 //    to fail.
 
 const { WebContentsView, ipcMain, shell } = require("electron");
-const { DASHBOARD_HOST, parse, isPlaidHost, isDashboardUrl, routeUrl, sanitizeBounds } = require("./url-guards");
+const {
+  DASHBOARD_HOST,
+  parse,
+  isPlaidHost,
+  isDashboardUrl,
+  routeUrl,
+  routeNavigation,
+  sanitizeBounds,
+} = require("./url-guards");
 
 // In-memory partition: not "persist:", so a Plaid sign-in in the pane is gone
 // when budgetr quits.
@@ -74,11 +82,12 @@ function registerPlaidGuide({ getWindow, getServerUrl }) {
   const blocked = (raw, reason) => send("plaid-guide:blocked", { url: raw, reason });
 
   /**
-   * Decide what happens to a top-level navigation the page starts (link,
-   * redirect or popup). Returns true to let it load in the pane.
+   * Apply a `routeUrl` / `routeNavigation` decision. Returns true to let the
+   * navigation proceed in the pane.
    */
-  const allowInPane = (raw) => {
-    switch (routeUrl(raw)) {
+  const applyRoute = (action, raw) => {
+    switch (action) {
+      case "ignore":
       case "pane":
         return true;
       case "google":
@@ -86,12 +95,14 @@ function registerPlaidGuide({ getWindow, getServerUrl }) {
         return false;
       case "external":
         shell.openExternal(raw).catch(() => {});
-        if (!raw.startsWith("mailto:")) blocked(raw, "external");
+        if (!String(raw).startsWith("mailto:")) blocked(raw, "external");
         return false;
       default:
         return false;
     }
   };
+
+  const allowInPane = (raw) => applyRoute(routeUrl(raw), raw);
 
   const create = () => {
     view = new WebContentsView({
@@ -119,7 +130,9 @@ function registerPlaidGuide({ getWindow, getServerUrl }) {
     // can't take the user anywhere, so they're left alone rather than being
     // cancelled and sent to the user's browser.
     const route = (details) => {
-      if (details.isMainFrame && !allowInPane(details.url)) details.preventDefault();
+      const action = routeNavigation(details);
+      if (action === "ignore") return;
+      if (!applyRoute(action, details.url)) details.preventDefault();
     };
     wc.on("will-navigate", route);
     wc.on("will-redirect", route);

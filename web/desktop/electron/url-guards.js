@@ -45,6 +45,16 @@ function routeUrl(raw) {
   return "drop";
 }
 
+/**
+ * Route `will-navigate` / `will-redirect` event details. Both events also fire
+ * for subframes; non-main-frame navigations and redirects return "ignore" so
+ * embedded iframes (captcha, analytics, widgets) don't trip the guard.
+ */
+function routeNavigation(details) {
+  if (!details || details.isMainFrame !== true) return "ignore";
+  return routeUrl(details.url);
+}
+
 function sanitizeBounds(b) {
   const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
   return { x: n(b && b.x), y: n(b && b.y), width: n(b && b.width), height: n(b && b.height) };
@@ -57,5 +67,6 @@ module.exports = {
   isGoogleSignInHost,
   isDashboardUrl,
   routeUrl,
+  routeNavigation,
   sanitizeBounds,
 };

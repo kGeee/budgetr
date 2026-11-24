@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import guards from "../desktop/electron/url-guards.js";
 
-const { isDashboardUrl, isPlaidHost, routeUrl, sanitizeBounds } = guards;
+const { isDashboardUrl, isPlaidHost, routeUrl, routeNavigation, sanitizeBounds } = guards;
 
 describe("isDashboardUrl (what the app may point the pane at)", () => {
   it("allows only https dashboard.plaid.com", () => {
@@ -50,6 +50,23 @@ describe("routeUrl (page-initiated navigation and popups)", () => {
     for (const raw of ["javascript:alert(1)", "file:///etc/passwd", "data:text/html,x", "about:blank", "nope"]) {
       expect(routeUrl(raw)).toBe("drop");
     }
+  });
+});
+
+describe("routeNavigation (will-navigate / will-redirect main-frame gate)", () => {
+  it("ignores subframe navigations and redirects so iframes don't trip the guard", () => {
+    expect(routeNavigation({ url: "https://example.com/widget", isMainFrame: false })).toBe("ignore");
+    expect(routeNavigation({ url: "https://accounts.google.com/gsi/iframe", isMainFrame: false })).toBe("ignore");
+    expect(routeNavigation({ url: "about:blank", isMainFrame: false })).toBe("ignore");
+    expect(routeNavigation(null)).toBe("ignore");
+    expect(routeNavigation({ url: "https://example.com" })).toBe("ignore");
+  });
+
+  it("routes main-frame navigations and redirects with routeUrl", () => {
+    expect(routeNavigation({ url: "https://dashboard.plaid.com/signin", isMainFrame: true })).toBe("pane");
+    expect(routeNavigation({ url: "https://accounts.google.com/o/oauth2/v2/auth", isMainFrame: true })).toBe("google");
+    expect(routeNavigation({ url: "https://example.com/docs", isMainFrame: true })).toBe("external");
+    expect(routeNavigation({ url: "javascript:alert(1)", isMainFrame: true })).toBe("drop");
   });
 });
 
